@@ -179,4 +179,4 @@ TopBar(64px) — 6 tab: 對話 / 大腦 / 畫布 / 檔案 / 專案 / 設定
 | `lib/services/project_door_store.dart` | 專案資料存取 |
 | `lib/widgets/brain_model_download_card.dart` | 模型下載卡片（已存在） |
 | `lib/controllers/chat_controller.dart` | 對話控制器 |
-| `UI_SPRINT_BACKLOG.md` | 歷史 UI sprint 待辦 |
+| `docs/internal/UI_SPRINT_BACKLOG.md` | 歷史 UI sprint 待辦 |

@@ -83,6 +83,11 @@ Most docs are currently in Traditional Chinese — English translations are on t
 
 Issues and idea exchanges are welcome. The code is still moving fast — for large PRs, please open an issue first to align on direction.
 
+- 💬 [Issue templates](.github/ISSUE_TEMPLATE/) — bug reports & feature ideas
+- 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) — design system rules before you PR
+- 🔒 [SECURITY.md](SECURITY.md) — how to report security issues
+- 📋 [CHANGELOG.md](CHANGELOG.md) — versioning philosophy & milestones
+
 ## License
 
 Apache-2.0 (see [LICENSE](LICENSE))

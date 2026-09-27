@@ -83,6 +83,11 @@ docs/          # 設計規範、宣言、架構地圖
 
 歡迎 issue 討論、理念交流。目前程式碼仍在快速變動，大型 PR 建議先開 issue 對齊方向。
 
+- 💬 [Issue templates](.github/ISSUE_TEMPLATE/) — bug 回報與功能發想
+- 🤝 [CONTRIBUTING.md](CONTRIBUTING.md) — PR 前的設計系統鐵則
+- 🔒 [SECURITY.md](SECURITY.md) — 安全問題回報管道
+- 📋 [CHANGELOG.md](CHANGELOG.md) — 版本哲學與里程碑
+
 ## License
 
 Apache-2.0（見 [LICENSE](LICENSE)）

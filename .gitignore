@@ -57,3 +57,6 @@ app.*.map.json
 assets/fonts/_retired/
 # [小葵 2026-09-23] LiteRT dylib 從 build 產物複製（測試環境 fallback 路徑）——不進 git
 native/litert_lm/prebuilt/
+
+# Coverage/profile artifacts
+*.profraw
