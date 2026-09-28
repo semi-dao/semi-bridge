@@ -71,9 +71,9 @@ docs/          # 設計規範、宣言、架構地圖
 
 ## 宣言與設計文件
 
-![Covision Bridge — 畫布工作流：角色設定圖組](docs/screenshots/canvas-workflow.webp)
+![Covision Bridge — 羅盤系統圖譜](docs/screenshots/compass-graph.webp)
 
-<sub>畫布上的真實工作流：角色描述 → 風格參考 → 角色拼接 → 多視角生成 → 設定圖組。每個節點都是 AI 的一步，人全程共視。</sub>
+<sub>羅盤圖譜：App 的每個器官是一個節點、線＝依賴連動——這一節的每份文件，講的都是圖上某一個器官。</sub>
 
 - [共視宣言（Covision Manifesto）](docs/COVISION_MANIFESTO.md) — 產品定位錨點
 - [資料主權宣言（Data Sovereignty Manifesto）](docs/DATA_SOVEREIGNTY_MANIFESTO.md)
