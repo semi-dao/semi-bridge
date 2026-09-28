@@ -81,6 +81,7 @@ docs/          # 設計規範、宣言、架構地圖
 - [🌳 生命樹（Life Tree）](docs/LIFE_TREE.md) — 失敗即數位資產：歷史樹+反思樹雙幹、羅盤精靈儀表、做夢節律——走對走錯都記錄，自我進化有資料結構
 - [🧠 向量大腦（Vector Brain）](docs/VECTOR_BRAIN.md) — App 的記憶器官：四種記憶形態、混合搜尋、本地嵌入管線
 - [🔗 八大系統串聯縱覽（System Wiring）](docs/SYSTEM_WIRING.md) — 對話-畫布-向量DB-圖譜-嵌入-羅盤-金鑰匙-本地模型：一句話如何流過整顆大腦
+- [📦 大搬家（Hermes Migration）](docs/HERMES_MIGRATION.md) — 把 Agent 接回家：人格、記憶、排程、對話史無損搬遷——搬的是副本，原檔不動
 - [開源宣言](docs/opensource/MANIFESTO_DRAFT.md) — 為何公開、相信什麼、不公開什麼
 - [🔧 Modding Guide](docs/opensource/MODDING_GUIDE.md) — 把這台車改成你的樣子（四層改裝）
 - [v0.4.0 開光 LightUp](docs/V040_AGENT_AS_USER_DESIGN_INPUTS.md) — Agent-as-User：7 個語意工具讓 Agent 成為真正的使用者
