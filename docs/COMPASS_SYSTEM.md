@@ -4,6 +4,10 @@
 
 <sub>羅盤的圖譜視圖：App 的每個器官（畫布引擎、Agent Loop、大腦圖譜、金鑰匙…）是一個節點，色彩＝系統分區，線＝依賴與連動。人與 Agent 看的是同一張圖。</sub>
 
+![羅盤系統 · 節點詳情卡](../screenshots/compass-node-detail.webp)
+
+<sub>點開任一器官節點：這個欄位是什麼、怎麼用、掛著哪些規則卡——人寫「為什麼」，機器保證「是什麼」，同一份真相。</sub>
+
 > v1.0 · 2026-09-26 · 橋樑（Bridge）— The Covision App for Humans and AI
 >
 > **羅盤是這個專案最有別於所有同類產品的系統**：它同時面向 Agent 與人類，

@@ -29,6 +29,10 @@
 
 ### 1. 你的金鑰，不是我們的入口（Golden Key）
 
+![金鑰匙系統 · 主腦 API 設定](../screenshots/golden-key.webp)
+
+<sub>主腦 API 設定實機：Provider 選好、金鑰一鎖，全 App 四處通行——已設定的能力自動亮起，其他 provider 保持鎖定。</sub>
+
 雲端 AI 的呼叫，一律用**使用者自己的 API 金鑰、直連 provider**。
 橋樑不代管金鑰、不中繼內容、不經手你的對話。
 

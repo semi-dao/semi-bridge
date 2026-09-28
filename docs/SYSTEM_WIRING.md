@@ -54,6 +54,10 @@
 | 7 | **金鑰匙系統（Golden Key / Sovereignty）** | 主權咽喉：你的 key、白名單之外寸步不出、除痕≠刪除 | `lib/services/sovereignty/` |
 | 8 | **本地模型（Local Model）** | 本地算力心臟：llama-server 常駐，斷網大腦照活 | `local_model_runtime_service` @ 127.0.0.1:18789 |
 
+![本地 LLM 引擎 · 模型管理](../screenshots/local-llm-engine.webp)
+
+<sub>本地模型引擎實機：硬體規格自動偵測、候選模型標「很適合」、下載→驗證→啟用一條龍。記憶的指紋不出機器。</sub>
+
 ---
 
 ## 3. 一句話的旅程（walkthrough）
