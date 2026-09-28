@@ -1,5 +1,9 @@
 # Agent Loop 模型路由與回饋 — 使用者 設計意圖 (2026-08-07)
 
+![Agent Loop 與 Skills 設定面板](../screenshots/agent-loop-panel.webp)
+
+<sub>系統頁實機：Agent Loop 開關、最大輪數（15／硬上限 30）、9 個可用工具、螢幕感知——上方資料路徑總覽同頁可見，每一筆對外請求的紅黃綠燈號攤開來看。</sub>
+
 ## 設計目標
 
 Bridge App 的 Agent Loop 要做到：
