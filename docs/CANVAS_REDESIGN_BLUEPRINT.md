@@ -1,6 +1,6 @@
 # V2 畫布改版工程藍圖 v1.0（2026-08-15）
 
-![畫布工作流實例：角色設定圖組](../screenshots/canvas-workflow.webp)
+![畫布工作流實例：角色設定圖組](screenshots/canvas-workflow.webp)
 
 <sub>真實工作流截圖：角色描述 → 風格參考 → 角色拼接 → Vision 分析 → 多視角生成 → 設定圖組輸出。9 節點、13 連線，Agent 對測試結果的自我檢查也在右側對話裡。</sub>
 

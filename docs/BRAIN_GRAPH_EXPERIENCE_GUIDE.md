@@ -1,10 +1,10 @@
 # 大腦圖譜七模式 — 感受指南（使用者 體驗版）
 
-![大腦圖譜 · 3D 星系](../screenshots/brain-galaxy.webp)
+![大腦圖譜 · 3D 星系](screenshots/brain-galaxy.webp)
 
 <sub>房間＝星團顏色，線＝因果/連動/結構。左鍵拖曳旋轉、滾輪縮放、雙擊星點開檔。</sub>
 
-![星系節點詳情](../screenshots/heart-galaxy-detail.webp)
+![星系節點詳情](screenshots/heart-galaxy-detail.webp)
 
 <sub>點擊任一星點，右側展開完整節點資訊——這張照片是誰、何時出生、屬於哪個星系，都能直接開啟。</sub>
 

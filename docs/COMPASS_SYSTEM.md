@@ -1,10 +1,10 @@
 # 羅盤系統（Compass System）— 人機共視的決策中樞
 
-![羅盤系統 · 圖譜視圖](../screenshots/compass-graph.webp)
+![羅盤系統 · 圖譜視圖](screenshots/compass-graph.webp)
 
 <sub>羅盤的圖譜視圖：App 的每個器官（畫布引擎、Agent Loop、大腦圖譜、金鑰匙…）是一個節點，色彩＝系統分區，線＝依賴與連動。人與 Agent 看的是同一張圖。</sub>
 
-![羅盤系統 · 節點詳情卡](../screenshots/compass-node-detail.webp)
+![羅盤系統 · 節點詳情卡](screenshots/compass-node-detail.webp)
 
 <sub>點開任一器官節點：這個欄位是什麼、怎麼用、掛著哪些規則卡——人寫「為什麼」，機器保證「是什麼」，同一份真相。</sub>
 

@@ -1,6 +1,6 @@
 # 大搬家（Hermes Migration）— 把你的 Agent 接回家
 
-![大搬家 · 掃描行李入口](../screenshots/hermes-migration.webp)
+![大搬家 · 掃描行李入口](screenshots/hermes-migration.webp)
 
 <sub>系統頁 → 大搬家入口實機：搬的是副本——Hermes 原檔一律不動，隨時回得去。</sub>
 
