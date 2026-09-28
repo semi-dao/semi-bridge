@@ -15,6 +15,10 @@
 
 ![Covision Bridge — 大腦圖譜](docs/screenshots/brain-galaxy.webp)
 
+<sub>點擊任一星點，右側展開完整節點資訊——檔案、照片、記憶都能直接開啟。</sub>
+
+![Covision Bridge — 星系節點詳情](docs/screenshots/heart-galaxy-detail.webp)
+
 **⚠️ 早期開發中（Work in Progress）** — 功能未齊、隨時 refactor。歡迎圍觀程式碼與理念、參與討論；暫不建議日常使用，也未提供安裝包。
 
 ## 這是什麼
@@ -66,6 +70,10 @@ docs/          # 設計規範、宣言、架構地圖
 ```
 
 ## 宣言與設計文件
+
+![Covision Bridge — 畫布工作流：角色設定圖組](docs/screenshots/canvas-workflow.webp)
+
+<sub>畫布上的真實工作流：角色描述 → 風格參考 → 角色拼接 → 多視角生成 → 設定圖組。每個節點都是 AI 的一步，人全程共視。</sub>
 
 - [共視宣言（Covision Manifesto）](docs/COVISION_MANIFESTO.md) — 產品定位錨點
 - [資料主權宣言（Data Sovereignty Manifesto）](docs/DATA_SOVEREIGNTY_MANIFESTO.md)

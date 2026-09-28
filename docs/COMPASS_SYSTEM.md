@@ -1,5 +1,9 @@
 # 羅盤系統（Compass System）— 人機共視的決策中樞
 
+![羅盤系統 · 圖譜視圖](../screenshots/compass-graph.webp)
+
+<sub>羅盤的圖譜視圖：App 的每個器官（畫布引擎、Agent Loop、大腦圖譜、金鑰匙…）是一個節點，色彩＝系統分區，線＝依賴與連動。人與 Agent 看的是同一張圖。</sub>
+
 > v1.0 · 2026-09-26 · 橋樑（Bridge）— The Covision App for Humans and AI
 >
 > **羅盤是這個專案最有別於所有同類產品的系統**：它同時面向 Agent 與人類，
