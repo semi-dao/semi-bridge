@@ -5,7 +5,7 @@
 ## 快速開始
 
 ```bash
-git clone https://github.com/semiwasabi128/semi-bridge.git
+git clone https://github.com/semi-dao/semi-bridge.git
 cd semi-bridge
 flutter pub get
 flutter run -d macos

@@ -30,7 +30,7 @@ Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊�
 ## 快速開始（開發者）
 
 ```bash
-git clone https://github.com/semiwasabi128/semi-bridge.git
+git clone https://github.com/semi-dao/semi-bridge.git
 cd semi-bridge
 flutter pub get
 flutter run -d macos

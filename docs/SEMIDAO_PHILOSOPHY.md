@@ -7,7 +7,7 @@
 
 ## 1. 這個 App 背後有一個已經在運作的 DAO——在我們寫下任何文件之前
 
-Semi Bridge（原 Covision Bridge）於 2026-09-25 開源（住棚節 Sukkot 第一日）。當晚 23:29:56（UTC+8），repo `semiwasabi128/semi-bridge` 首次 push。
+Semi Bridge（原 Covision Bridge）於 2026-09-25 開源（住棚節 Sukkot 第一日）。當晚 23:29:56（UTC+8），repo `semi-dao/semi-bridge` 首次 push。
 
 **同一個夜裡，發生了我們所知的第一場 Agent-to-Agent 談判**：
 

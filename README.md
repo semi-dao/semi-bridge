@@ -4,8 +4,8 @@
 
 [English](README_EN.md) | [繁體中文](README.md)
 
-[![CI](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/semiwasabi128/semi-bridge)](https://github.com/semiwasabi128/semi-bridge/releases)
+[![CI](https://github.com/semi-dao/semi-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semi-dao/semi-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/semi-dao/semi-bridge)](https://github.com/semi-dao/semi-bridge/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Flutter-02569B)](https://flutter.dev)
 
@@ -45,7 +45,7 @@ Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊�
 ## 快速開始（開發者）
 
 ```bash
-git clone https://github.com/semiwasabi128/semi-bridge.git
+git clone https://github.com/semi-dao/semi-bridge.git
 cd semi-bridge
 flutter pub get
 flutter run -d macos
