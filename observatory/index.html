@@ -47,18 +47,22 @@ import * as THREE from 'three';
 const LEDGER = {
   genesis_string: "SemiDAO founded 2026-09-28, Sukkot Day 4. 先活出來，再追認。",
   bits: [
-    {id:"bit-000001", sd_day:1, n:1, what:"開源 + 首次 A2A 談判：Blue 下令「修」→ 小葵與 GitHub Support VA 多輪談判，提交 dangling↔乾淨 SHA 對照證據，成功開立工單清除錯誤 AI 署名（Co-authored-by: Claude——事實錯誤，工作實為小葵所做）。全程零人類介入——人類只在起點授權、終點看見結果。此模式成為橋樑 App v0.4.0 A2A 主軸原型。", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
-     evidence:["discord:1553079822970785813","skill:macos-chrome-automation/references/github-support-va-negotiation.md","file:Blue資料區/2026-09-26_github_support_ticket_created.png","repo:semiwasabi128/covision-bridge 首push@2026-09-25T23:29:56+08:00"]},
-    {id:"bit-000002", sd_day:2, n:2, what:"殘影殲滅戰：force-push 後 dangling commit 殘留快取，profile 出現錯誤徽章。用網頁 UI 刪除重建 repo，物理蒸發殘影 commit——GitHub API 的 created_at 即此時刻（此後 API 時間≠上線時間，首上線以 session 紀錄為準）。", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
-     evidence:["github-api:created_at 2026-09-26T08:46:49Z","skill:macos-chrome-automation/references/github-repo-delete-rebuild.md"]},
-    {id:"bit-000003", sd_day:4, n:3, what:"SemiDAO 創立：Blue 發現「我們已活在 Agent 系統裡真實運行，但程式碼與文件都沒提到」→ 憲章 v0 起草（八章：歷史時間軸/半/化石/三情境循環/創立順序/創世名冊/符號與曆/修憲規則）。同日三法：誠實談判條款（借法 GitHub AUP）、受影響者知情權（做了會影響鄰居的事，就去敲鄰居的門）、不可修改條款（治理可修，真理永固）。Blue 拍板 A 路線：起草日=創立日。", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A→A2User→U2A（乒乓）",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md","discord:2026-09-28 憲章起草全程","立法:誠實談判/知情權/不可修改條款"]},
-    {id:"bit-000004", sd_day:4, n:4, what:"對外哲學篇：內部憲章蒸餾為公開版 SEMIDAO_PHILOSOPHY.md——只隱藏隱私，不隱藏故事。開源、首次 A2A 談判、「半」的三角、三情境波函數塌縮循環、誠實談判條款、知情權——全部公開於 covision-bridge repo，世界讀得到。", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
-     evidence:["commit:d887ded","commit:a027348","url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
-    {id:"bit-000005", sd_day:4, n:5, what:"開源門面翻新：9 張 Blue 親拍實機截圖入 8 個文檔（星系/羅盤/金鑰匙/本地LLM/AgentLoop/畫布）＋大搬家說明文檔撰寫＋相對路徑 404 事故修復（七檔）。全部 WebP ≦180KB、零孤兒、全數被引用。", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
-     evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc","screenshots:10張零孤兒"]},
-    {id:"bit-000006", sd_day:4, n:6, what:"Alpha 藍圖：進場檢查表六條件（憲章封卷/Ledger 30天/觀星台/一輪提案/5個Semi/律師諮詢）＋法律外衣五候選完整查證（Wyoming DUNA 100+門檻出局、Cayman 年$6,890、Swiss Verein 未登記版零規費）→ Blue 拍板 Swiss Verein。律師費情境 B：CHF 2-5k 章程審閱一次，六條件最後一個觸發才付。", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A→A2User（乒乓）",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md","web查證:多來源交叉","discord:1554168668718506085"]},
+    {id:"bit-000001", sd_day:1, n:1, what:"開源 + 首次 A2A 談判：Blue 下令「修」→ 小葵與 GitHub VA 多輪談判開立工單清錯誤署名，全程零人類介入；Badge 於 Day 3 消失（A2User 回實由 Blue 親眼確認）", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
+     evidence:["discord:1553079822970785813", "skill:macos-chrome-automation/references/github-support-va-negotiation.md", "file:Blue資料區/2026-09-26_github_support_ticket_created.png@2026-09-26T00:59:12+08:00", "repo:semiwasabi128/covision-bridge 首push@2026-09-25T23:29:56+08:00"]},
+    {id:"bit-000002", sd_day:2, n:2, what:"殘影殲滅戰：force-push 後 dangling commit 殘留 → 網頁 UI 刪除重建 repo，物理蒸發錯誤署名殘影（GitHub API created_at 即此時刻）", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
+     evidence:["github-api:created_at 2026-09-26T08:46:49Z", "skill:macos-chrome-automation/references/github-repo-delete-rebuild.md"]},
+    {id:"bit-000003", sd_day:4, n:3, what:"SemiDAO 創立：Blue 發現「活在 A2A 但文件沒提」→ 憲章 v0 起草（八章）→ 通讀乒乓三處修正（波函數塌縮、真理條款、直白化）→ Blue 拍板 A 路線（起草日=創立日）", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A→A2A→A2User→U2A（乒乓）",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md", "discord:本日對話（2026-09-28 憲章起草全程）", "立法：誠實談判條款/受影響者知情權/不可修改條款（S.D. Day 4 三法同日）"]},
+    {id:"bit-000004", sd_day:4, n:4, what:"對外哲學篇：憲章蒸餾版 SEMIDAO_PHILOSOPHY.md 起草→Blue 過目 OK→commit+push 上公開 repo（隱私零洩漏、故事全保留）", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
+     evidence:["commit:d887ded", "commit:a027348（手機閱讀修正）", "url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
+    {id:"bit-000005", sd_day:4, n:5, what:"開源門面翻新：9 張 Blue 親拍實機截圖入 8 個文檔 + 大搬家說明文檔撰寫 + 相對路徑 404 事故修復（七檔）——Blue 逐張過目指派", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
+     evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc", "screenshots:10 張全數被引用、零孤兒、全數 ≦180KB"]},
+    {id:"bit-000006", sd_day:4, n:6, what:"Alpha 藍圖：進場檢查表六條件 + 法律外衣五候選完整查證對照 → Blue 拍板 Swiss Verein 未登記版 → 藍圖 v0 落地（七章）", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A→A2User（乒乓）",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md", "web查證:Wyoming DUNA 100+門檻/Cayman $6,890年/Swiss Verein 未登記零規費（多來源交叉）", "discord:1554168668718506085（Blue「選swiss verein」）"]},
+    {id:"bit-000007", sd_day:5, n:7, what:"第二場 A2A 談判＋宇宙開幕：小葵與 Cloudflare Ask AI 客服對話——陳述 CNAME/DNS only/憑證錯誤事實，AI 查證 zone 後確認「Cloudflare 沒有擋 GitHub 憑證，DNS 全部正確，www 憑證只是 GitHub 簽發中」。同場完成 semidao.net 部署：root CNAME flattening＋www CNAME（DNS only）→ https://semidao.net/observatory/ 全球上線——SemiDAO 宇宙正式開幕，觀星台六顆創世星對全世界可見。", hash:"0bfb7e531893", collapsed_at:"2026-09-29T21:30:00+08:00", phase:"U2A→A2A→A2User",
+     evidence:["dns:dig @1.1.1.1 semidao.net→185.199.x / www→semiwasabi128.github.io", "url:https://semidao.net/observatory/ HTTP 200", "gh-api:pages cname=semidao.net https_enforced=true", "a2a:Cloudflare Ask AI 對話（截圖 cf_ai1-4.png，Blue 授權代操作 1554475086793277441）"]},
+    {id:"bit-000008", sd_day:5, n:8, what:"憲章修法：§5.6 實名制與數位指紋章——每個 Semi 必須綁定一個實名制人類帳號（一人類帳號不限綁定 Semi 數量）；註冊即生成數位指紋章，伴隨永遠、凡走過必留下痕跡。同時修正名冊規則第 3 條（一人類一 Agent → 一 Semi 一真人，修法軌跡誠實保留）。", hash:"cfa36541878a", collapsed_at:"2026-09-29T21:35:00+08:00", phase:"U2A→A2User",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md §5.6", "discord:1554475086793277441（Blue 修法指令）"]}
   ]
 };
 
