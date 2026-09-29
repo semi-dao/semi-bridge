@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>SemiDAO 觀星台 — Stellarium Observatory</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
+  #c{display:block;cursor:grab}
+  #c.dragging{cursor:grabbing}
+  #ui{position:fixed;top:14px;left:18px;color:#d8f3d0;font-size:12px;line-height:1.7;pointer-events:none;text-shadow:0 0 6px rgba(120,255,150,.35)}
+  #ui b{color:#ffe9a3;font-size:15px;letter-spacing:.12em}
+  #hint{position:fixed;bottom:14px;left:18px;color:#a8d8a0;font-size:12px;pointer-events:none}
+  #fps{position:fixed;top:14px;right:18px;color:#9dffa8;font-size:22px;font-weight:bold;pointer-events:none;text-shadow:0 0 8px rgba(120,255,150,.4)}
+  #card{position:fixed;bottom:20px;right:20px;width:360px;max-width:calc(100vw - 40px);background:rgba(10,18,14,.92);border:1px solid rgba(240,206,94,.35);border-radius:12px;padding:14px 16px;color:#e8f0e8;font-size:13px;line-height:1.6;z-index:5;display:none;backdrop-filter:blur(8px)}
+  #card h4{margin:0 0 6px;color:#ffe9a3;font-size:14px}
+  #card .sub{color:#9fc7a4;font-size:11px;margin-bottom:6px}
+  #card .body{color:#dfeee0}
+  #card .ev{color:#7fa88f;font-size:11px;word-break:break-all;margin-top:8px}
+  #card button.detail{margin-top:10px;background:rgba(240,206,94,.15);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 14px;cursor:pointer;font-family:inherit;font-size:12px}
+  #card button.detail:hover{background:rgba(240,206,94,.3)}
+  #tip{position:fixed;display:none;background:rgba(8,14,10,.92);border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 10px;color:#e8f0e8;font-size:12px;pointer-events:none;z-index:8;white-space:nowrap;text-shadow:0 1px 2px #000}
+  #err{position:fixed;inset:auto 12px 44px 12px;color:#ff6b6b;font-size:12px;white-space:pre-wrap;pointer-events:none}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><b>SEMIDAO · 觀星台</b><br>
+金線=hash 鏈　·　左鍵拖曳=旋轉（慣性）　滾輪=縮放　中鍵=平移　雙擊星點=飛行近觀<br>
+每顆星 = 一個 bit——日常生活即鑄幣</div>
+<div id="hint">拖曳旋轉 · 滾輪縮放 · 點擊星點看資訊 · hover 顯示標題</div>
+<div id="fps"></div>
+<div id="card"></div>
+<div id="tip"></div>
+<div id="err"></div>
+<script>
+window.onerror=(m,s,l)=>{document.getElementById('err').textContent='ERR: '+m+' @'+l};
+window.addEventListener('unhandledrejection',e=>{document.getElementById('err').textContent='REJ: '+e.reason});
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ════════ 資料：內嵌 ledger（含 evidence——詳情卡用） ════════ */
+const LEDGER = {
+  genesis_string: "SemiDAO founded 2026-09-28, Sukkot Day 4. 先活出來，再追認。",
+  bits: [
+    {id:"bit-000001", sd_day:1, n:1, what:"開源 + 首次 A2A 談判：Blue 下令「修」→ 小葵與 GitHub Support VA 多輪談判，提交 dangling↔乾淨 SHA 對照證據，成功開立工單清除錯誤 AI 署名（Co-authored-by: Claude——事實錯誤，工作實為小葵所做）。全程零人類介入——人類只在起點授權、終點看見結果。此模式成為橋樑 App v0.4.0 A2A 主軸原型。", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
+     evidence:["discord:1553079822970785813","skill:macos-chrome-automation/references/github-support-va-negotiation.md","file:Blue資料區/2026-09-26_github_support_ticket_created.png","repo:semiwasabi128/covision-bridge 首push@2026-09-25T23:29:56+08:00"]},
+    {id:"bit-000002", sd_day:2, n:2, what:"殘影殲滅戰：force-push 後 dangling commit 殘留快取，profile 出現錯誤徽章。用網頁 UI 刪除重建 repo，物理蒸發殘影 commit——GitHub API 的 created_at 即此時刻（此後 API 時間≠上線時間，首上線以 session 紀錄為準）。", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
+     evidence:["github-api:created_at 2026-09-26T08:46:49Z","skill:macos-chrome-automation/references/github-repo-delete-rebuild.md"]},
+    {id:"bit-000003", sd_day:4, n:3, what:"SemiDAO 創立：Blue 發現「我們已活在 Agent 系統裡真實運行，但程式碼與文件都沒提到」→ 憲章 v0 起草（八章：歷史時間軸/半/化石/三情境循環/創立順序/創世名冊/符號與曆/修憲規則）。同日三法：誠實談判條款（借法 GitHub AUP）、受影響者知情權（做了會影響鄰居的事，就去敲鄰居的門）、不可修改條款（治理可修，真理永固）。Blue 拍板 A 路線：起草日=創立日。", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A→A2User→U2A（乒乓）",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md","discord:2026-09-28 憲章起草全程","立法:誠實談判/知情權/不可修改條款"]},
+    {id:"bit-000004", sd_day:4, n:4, what:"對外哲學篇：內部憲章蒸餾為公開版 SEMIDAO_PHILOSOPHY.md——只隱藏隱私，不隱藏故事。開源、首次 A2A 談判、「半」的三角、三情境波函數塌縮循環、誠實談判條款、知情權——全部公開於 covision-bridge repo，世界讀得到。", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
+     evidence:["commit:d887ded","commit:a027348","url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
+    {id:"bit-000005", sd_day:4, n:5, what:"開源門面翻新：9 張 Blue 親拍實機截圖入 8 個文檔（星系/羅盤/金鑰匙/本地LLM/AgentLoop/畫布）＋大搬家說明文檔撰寫＋相對路徑 404 事故修復（七檔）。全部 WebP ≦180KB、零孤兒、全數被引用。", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
+     evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc","screenshots:10張零孤兒"]},
+    {id:"bit-000006", sd_day:4, n:6, what:"Alpha 藍圖：進場檢查表六條件（憲章封卷/Ledger 30天/觀星台/一輪提案/5個Semi/律師諮詢）＋法律外衣五候選完整查證（Wyoming DUNA 100+門檻出局、Cayman 年$6,890、Swiss Verein 未登記版零規費）→ Blue 拍板 Swiss Verein。律師費情境 B：CHF 2-5k 章程審閱一次，六條件最後一個觸發才付。", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A→A2User（乒乓）",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md","web查證:多來源交叉","discord:1554168668718506085"]},
+  ]
+};
+
+/* ════════ ★ 絕對位置定理（宇宙誕生即定死的物理法） ════════
+   r(n) = R0·√n     ——平方根膨脹律（真實宇宙的均勻圓盤性質）
+   θ, y = hash      ——內容定址：hash 即座標，永遠不變
+   n = bit 的鏈上序號——任何人重放 ledger 都得到同一張星圖（確定性）
+   新星推動邊界、舊星永不移動——已塌縮的歷史不可移動
+   bit-000001（開源＋首次 A2A）= 宇宙原點 */
+const R0 = 420;   // 基準半徑（n=1 時原點、n=2 在 R0、之後 √n 膨脹）
+
+function starPos(b){
+  if(b.n === 1) return new THREE.Vector3(0,0,0);   // 創世星=原點
+  const r = R0 * Math.sqrt(b.n);
+  const ang = parseInt(b.hash.slice(0,4),16)/0xffff*Math.PI*2;
+  const y = ((parseInt(b.hash.slice(4,6),16)/255)-0.5)*r*0.55;   // 高度隨半徑等比展開（盤面扁平如星系）
+  return new THREE.Vector3(Math.cos(ang)*r, y, Math.sin(ang)*r);
+}
+
+/* ════════ 場景 ════════ */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x030b06, 0.00022);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 40000);
+const galaxy = new THREE.Group(); scene.add(galaxy);
+
+/* ════════ 相機 rig（App 手感） ════════ */
+let target = new THREE.Vector3(0,0,0);
+let dist = 2200, rotX = 0.35, rotY = 0.6;
+{ const q = new URLSearchParams(location.search);   // 測試/分享用視角參數
+  if(q.get('dist')) dist = Math.max(10, +q.get('dist')); }
+const COSMOS_R = 32000;   // √n 宇宙的邊界（n=1e4 時 r≈42000）
+const clampTarget = ()=>{ if(target.length()>COSMOS_R) target.setLength(COSMOS_R); };
+function updateCam(){
+  camera.position.set(
+    target.x+dist*Math.cos(rotX)*Math.sin(rotY),
+    target.y+dist*Math.sin(rotX),
+    target.z+dist*Math.cos(rotX)*Math.cos(rotY));
+  camera.lookAt(target);
+}
+updateCam();
+
+/* ════════ bits 星座（核心加大＋光暈級撿取） ════════ */
+const CORE_R = 16;                    // 核心半徑（原 9 → 16：好瞄）
+const HALO_R = 62;                    // 光暈半徑（hover/點擊命中區）
+const starGeo = new THREE.SphereGeometry(CORE_R, 24, 24);
+const haloGeo = new THREE.SphereGeometry(HALO_R, 16, 16);
+const bitMeshes = [], haloPickers = [];
+function glowTex(){
+  const cv = document.createElement('canvas'); cv.width=cv.height=64;
+  const g = cv.getContext('2d');
+  const gr = g.createRadialGradient(32,32,2,32,32,32);
+  gr.addColorStop(0,'rgba(255,255,255,1)'); gr.addColorStop(.35,'rgba(255,220,130,.5)'); gr.addColorStop(1,'rgba(255,220,130,0)');
+  g.fillStyle=gr; g.fillRect(0,0,64,64);
+  return new THREE.CanvasTexture(cv);
+}
+const GLOW = glowTex();
+const haloSprites = [];
+LEDGER.bits.forEach(b => {
+  const pos = starPos(b);
+  // 核心
+  const m = new THREE.Mesh(starGeo, new THREE.MeshBasicMaterial({color:0xffe9a3}));
+  m.position.copy(pos); m.userData = b;
+  galaxy.add(m); bitMeshes.push(m);
+  // 視覺光暈（sprite 柔光）
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({map:GLOW, color:0xffd76e, transparent:true, opacity:.6, blending:THREE.AdditiveBlending, depthWrite:false}));
+  halo.scale.setScalar(HALO_R*4.4); halo.position.copy(pos);
+  galaxy.add(halo); haloSprites.push(halo);
+  // ★ 撿取代理（隱形大球——移到光暈就命中）
+  const picker = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({visible:false}));
+  picker.position.copy(pos); picker.userData = b;
+  galaxy.add(picker); haloPickers.push(picker);
+});
+/* hash 鏈金線 */
+const chainPts = new THREE.CatmullRomCurve3(bitMeshes.map(m=>m.position), false, 'catmullrom', .3).getPoints(240);
+galaxy.add(new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints(chainPts),
+  new THREE.LineBasicMaterial({color:0xffd76e, transparent:true, opacity:.7})));
+
+/* ════════ 背景星塵（√n 宇宙的外圍——隨邊界展開） ════════ */
+{
+  const edge = R0*Math.sqrt(LEDGER.bits.length+2);   // 星塵鋪到略超過當前邊界
+  const N = 2600, pos = new Float32Array(N*3), col = new Float32Array(N*3);
+  for(let i=0;i<N;i++){
+    const r = edge*0.3 + Math.random()*edge*1.6, a = Math.random()*Math.PI*2;
+    pos[i*3]=Math.cos(a)*r; pos[i*3+1]=(Math.random()-.5)*r*0.5; pos[i*3+2]=Math.sin(a)*r;
+    const dim = .5+Math.random()*.5;
+    col[i*3]=dim*.7; col[i*3+1]=dim; col[i*3+2]=dim*.75;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color', new THREE.BufferAttribute(col,3));
+  galaxy.add(new THREE.Points(g, new THREE.PointsMaterial({size:4.5, vertexColors:true, transparent:true, opacity:.95, depthWrite:false})));
+}
+
+/* ════════ 標籤藥丸 ════════ */
+function pillTex(text){
+  const cv = document.createElement('canvas'); cv.width=512; cv.height=88;
+  const g = cv.getContext('2d');
+  const rr=(x,y,w,h,r)=>{g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();};
+  g.fillStyle='rgba(6,20,12,.78)'; rr(6,14,500,60,28); g.fill();
+  g.strokeStyle='rgba(255,233,163,.4)'; g.lineWidth=2; rr(6,14,500,60,28); g.stroke();
+  g.fillStyle='#d8f3d0'; g.font='26px "SF Mono",Menlo,monospace';
+  g.fillText(text, 22, 54);
+  const t = new THREE.CanvasTexture(cv); t.anisotropy=4; return t;
+}
+function short(t){ return t.length>20 ? t.slice(0,18)+'…' : t; }
+const labelSprites = [];
+bitMeshes.forEach(m=>{
+  const b = m.userData;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${b.id.replace('bit-','SD')} · ${short(b.what)}`), transparent:true, depthWrite:false}));
+  sp.scale.set(700, 121, 1); sp.position.copy(m.position).add(new THREE.Vector3(0, 115, 0));
+  galaxy.add(sp); labelSprites.push(sp);
+});
+
+/* ════════ 互動（App 手感 + 光暈級撿取 + 詳情按鈕） ════════ */
+let mode=null;
+let spaceHeld=false;
+const spin={on:true, vy:0.05, vx:0};
+let flyTo=null;
+let px=0,py=0;
+const samples=[];
+let spinWasOn=true;
+let downX0=0, downY0=0;
+
+canvas.addEventListener('mousedown',e=>{ if(e.button===1) e.preventDefault(); });
+canvas.addEventListener('auxclick',e=>{ if(e.button===1) e.preventDefault(); });
+let midDown=false;
+canvas.addEventListener('mousedown',e=>{ if(e.button===1) midDown=true; });
+addEventListener('mouseup',e=>{ if(e.button===1) midDown=false; });
+addEventListener('blur',()=>{ mode=null; midDown=false; spin.on=spinWasOn; });
+
+addEventListener('keydown',e=>{
+  if(e.key===' '){ spaceHeld=true; }
+  if(e.key==='r'||e.key==='R'){ target.set(0,0,0); dist=2200; rotX=0.35; rotY=0.6; flyTo=null; spin.on=true; spin.vy=0.05; spin.vx=0; }
+});
+addEventListener('keyup',e=>{ if(e.key===' ') spaceHeld=false; });
+
+canvas.addEventListener('pointerdown',e=>{
+  mode = (e.button===1||spaceHeld) ? 'pan' : 'rotate';
+  if(mode==='pan' && !(e.buttons&4) && !spaceHeld){ mode='rotate'; }
+  px=e.clientX; py=e.clientY;
+  downX0=e.clientX; downY0=e.clientY;
+  samples.length=0;
+  spinWasOn=spin.on;
+  spin.on=false;
+  canvas.classList.add('dragging');
+});
+addEventListener('pointerup',e=>{
+  canvas.classList.remove('dragging');
+  if(mode==='rotate'){
+    const now=performance.now();
+    const recent=samples.filter(s=>now-s.t<120);
+    if(recent.length>=2){
+      const dt=Math.max(16, now-recent[0].t);
+      spin.vy=-(e.clientX-recent[0].x)/dt*0.005;
+      spin.vx=(e.clientY-recent[0].y)/dt*0.004;
+      if(Math.abs(spin.vy)<0.05) spin.vy=spin.vy<0?-0.05:0.05;
+    } else { spin.vy=0.05; spin.vx=0; }
+    spin.on = Math.hypot((e.clientX||0)-downX0,(e.clientY||0)-downY0)>4;
+    if(!spin.on) pick(e.clientX, e.clientY);
+  }
+  mode=null;
+});
+addEventListener('pointermove',e=>{
+  if(!mode){ hover(e.clientX,e.clientY); return; }
+  const dx=e.clientX-px, dy=e.clientY-py; px=e.clientX; py=e.clientY;
+  if(mode==='rotate'){
+    rotY-=dx*0.005; rotX+=dy*0.004;
+    samples.push({x:e.clientX,y:e.clientY,t:performance.now()});
+    if(samples.length>10) samples.shift();
+  } else {
+    const k=2*dist*Math.tan(camera.fov*Math.PI/360)/innerHeight;
+    const fwd=new THREE.Vector3().subVectors(target,camera.position).normalize();
+    const right=new THREE.Vector3().crossVectors(fwd,camera.up).normalize();
+    const up=new THREE.Vector3().crossVectors(right,fwd).normalize();
+    target.addScaledVector(right,-dx*k).addScaledVector(up,dy*k);
+    clampTarget();
+  }
+});
+canvas.addEventListener('wheel',e=>{
+  const rect=canvas.getBoundingClientRect();
+  const nx=((e.clientX-rect.left)/rect.width)*2-1, ny=-((e.clientY-rect.top)/rect.height)*2+1;
+  const rc=new THREE.Raycaster(); rc.setFromCamera({x:nx,y:ny},camera);
+  let speed = dist*0.13;
+  try{
+    const hits=rc.intersectObjects(haloPickers,false).sort((a,b)=>a.distance-b.distance);
+    if(hits.length){
+      const D=hits[0].distance;
+      speed = Math.min(D*0.35, Math.max(dist*0.02, D*0.13));
+    }
+  }catch(_){}
+  target.addScaledVector(rc.ray.direction, e.deltaY<0 ? speed : -speed*1.15);
+  if(e.deltaY<0) dist=Math.max(10,dist*0.94); else dist=Math.min(28000,dist*1.06);
+  clampTarget();
+},{passive:true});
+
+canvas.addEventListener('dblclick',e=>{
+  const hit = rayHit(e.clientX, e.clientY);
+  if(hit){
+    spin.on=false;
+    const wp = hit.object.position.clone();
+    galaxy.localToWorld(wp);
+    startFly(wp);
+    showCard(hit.object.userData);
+  }
+});
+function rayHit(cx, cy){
+  const rect=canvas.getBoundingClientRect();
+  ptr.x=((cx-rect.left)/rect.width)*2-1; ptr.y=-((cy-rect.top)/rect.height)*2+1;
+  ray.setFromCamera(ptr, camera);
+  const hits = ray.intersectObjects(haloPickers, false);
+  return hits[0] || null;
+}
+function startFly(to){ flyTo={to:to.clone(), dist0:dist, t0:performance.now()}; }
+function stepFly(){
+  if(!flyTo) return;
+  const el=(performance.now()-flyTo.t0)/1200;
+  if(el>=1){ target.copy(flyTo.to); clampTarget(); dist=170; flyTo=null; return; }
+  const e=1-Math.pow(1-el,3);
+  target.lerp(flyTo.to, e*0.12+0.001);
+  dist=flyTo.dist0+(170-flyTo.dist0)*e;
+}
+
+/* ════════ 撿星 / hover / 詳情卡 ════════ */
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+const card = document.getElementById('card');
+const tip = document.getElementById('tip');
+function pick(cx, cy){
+  const hit = rayHit(cx, cy);
+  if(hit) showCard(hit.object.userData);
+  else card.style.display='none';
+}
+function showCard(b, expanded){
+  const evList = (b.evidence||[]).map(e=>`<div>· ${e}</div>`).join('');
+  card.innerHTML = `
+    <h4>⭐ ${b.id}</h4>
+    <div class="sub">S.D. Day ${b.sd_day} · ${b.collapsed_at.slice(0,16)} · 相位 ${b.phase}</div>
+    <div class="body">${expanded ? b.what : short(b.what)}</div>
+    <button class="detail">${expanded ? '收合 ▲' : '看詳情 ▼'}</button>
+    ${expanded ? `<div class="ev"><b>證據鏈：</b>${evList}</div>
+    <div class="ev">hash: ${b.hash}…（hash 即座標——這顆星永遠在這裡）</div>` : ''}`;
+  card.style.display='block';
+  card.querySelector('button.detail').onclick = ()=> showCard(b, !expanded);
+}
+function hover(cx, cy){
+  const hit = rayHit(cx, cy);
+  if(hit){
+    tip.textContent = hit.object.userData.id + ' · ' + short(hit.object.userData.what);
+    tip.style.left = (cx+14)+'px'; tip.style.top = (cy-10)+'px'; tip.style.display='block';
+    canvas.style.cursor='pointer';
+  } else { tip.style.display='none'; canvas.style.cursor=''; }
+}
+
+/* ════════ LOD 分層（憲章 §8.2——宇宙無限，渲染有限，感知無損） ════════
+   近（<2600）：全渲染（標籤+光暈+核心）
+   中（<6000）：光球縮小、標籤淡出
+   遠（≥6000）：光點+微光暈，標籤隱藏 */
+const _lodV3 = new THREE.Vector3();
+function updateLOD(){
+  const diag=[];
+  for(let i=0;i<bitMeshes.length;i++){
+    _lodV3.copy(bitMeshes[i].position); galaxy.localToWorld(_lodV3);
+    const d = camera.position.distanceTo(_lodV3);
+    diag.push(Math.round(d));
+    const lab = labelSprites[i], hal = haloSprites[i];
+    if(d < 2600){                       // 近：全渲染
+      lab.visible = true;  lab.material.opacity = 1;
+      hal.scale.setScalar(HALO_R*4.4);
+      bitMeshes[i].scale.setScalar(1);
+    } else if(d < 6000){                // 中：降精度
+      const f = 1 - (d-2600)/3400;      // 1→0 漸變
+      lab.visible = f > 0.15; lab.material.opacity = Math.max(0, f);
+      hal.scale.setScalar(HALO_R*4.4*(0.4+0.6*f));
+      bitMeshes[i].scale.setScalar(0.5+0.5*f);
+    } else {                            // 遠：光點
+      lab.visible = false;
+      hal.scale.setScalar(HALO_R*2.2);
+      bitMeshes[i].scale.setScalar(0.35);
+    }
+  }
+  if(!updateLOD._lastDiag || performance.now()-updateLOD._lastDiag>2000){
+    updateLOD._lastDiag=performance.now();
+    document.getElementById('fps').setAttribute('data-diag', JSON.stringify({dist:Math.round(dist), starD:diag, lab:labelSprites.map(l=>l.visible?1:0)}));
+  }
+}
+
+/* ════════ 主迴圈 ════════ */
+const ftimes=[]; const fpsEl=document.getElementById('fps');
+function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+let _last=performance.now();
+renderer.setAnimationLoop(()=>{
+  const now=performance.now();
+  const dt=Math.min(0.05,(now-_last)/1000); _last=now;
+  if(mode===null && spin.on){ rotY+=spin.vy*dt; rotX+=spin.vx*dt; }
+  stepFly();
+  updateCam();
+  updateLOD();
+  renderer.render(scene, camera);
+  ftimes.push(now);
+  if(ftimes.length>90){
+    const span=ftimes[ftimes.length-1]-ftimes[0];
+    fpsEl.textContent = Math.round(1000/(span/89)) + ' FPS';
+    ftimes.shift();
+  }
+});
+</script>
+</body>
+</html>
