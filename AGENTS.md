@@ -1,4 +1,4 @@
-# Covision Bridge — Agent Working Guide
+# Semi Bridge — Agent Working Guide
 
 歡迎 AI 夥伴（Claude Code / Codex / Hermes / 任何 agent）加入這個 repo。這份文件是你的工作守則。
 

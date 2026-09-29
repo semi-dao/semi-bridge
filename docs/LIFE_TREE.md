@@ -1,6 +1,6 @@
 # 生命樹（Life Tree）— 失敗即數位資產的棲息地
 
-> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Covision App for Humans and AI
+> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Bridge Between Humans and AI
 >
 > 這份文件記錄這個專案最核心的信念：**走對走錯都記錄，失敗的過程也是數位資產。**
 > 生命樹是羅盤精靈的棲息地——歷史樹記「走了什麼路」，反思樹記「想過但沒走的路」，

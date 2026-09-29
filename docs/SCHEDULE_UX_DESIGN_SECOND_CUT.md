@@ -118,7 +118,7 @@ W1–W2 給小橋（技術練手），W3–W5 也在他能力射程內（asset_p
 
 ## 六、開源敘事（對外）
 
-「The Covision App」的第三個宣言級賣點：**可看見的自動化**。README 一句話：*Your agents work while you sleep — and show you the receipts.*（你的 agent 在你睡覺時工作，還會給你看收據。）排程列表就是收據本。
+「The Bridge App」的第三個宣言級賣點：**可看見的自動化**。README 一句話：*Your agents work while you sleep — and show you the receipts.*（你的 agent 在你睡覺時工作，還會給你看收據。）排程列表就是收據本。
 
 ---
 

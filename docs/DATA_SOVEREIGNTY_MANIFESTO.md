@@ -1,6 +1,6 @@
 # 資料主權宣言（Data Sovereignty Manifesto）
 
-> v1.0 · 2026-09-15 · 橋樑（Bridge）— The Covision App for Humans and AI
+> v1.0 · 2026-09-15 · 橋樑（Bridge）— The Bridge Between Humans and AI
 
 ---
 

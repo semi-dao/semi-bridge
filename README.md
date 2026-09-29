@@ -1,29 +1,29 @@
-# Covision Bridge
+# Semi Bridge
 
-**The Covision App for Humans and AI.**
+**The Bridge Between Humans and AI.**
 
 [English](README_EN.md) | [繁體中文](README.md)
 
-[![CI](https://github.com/semiwasabi128/covision-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semiwasabi128/covision-bridge/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/semiwasabi128/covision-bridge)](https://github.com/semiwasabi128/covision-bridge/releases)
+[![CI](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/semiwasabi128/semi-bridge)](https://github.com/semiwasabi128/semi-bridge/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Flutter-02569B)](https://flutter.dev)
 
 > 一座讓人類與 AI「共同看見」的橋。不是工具，是同一個視野裡的夥伴。
 
-![Covision Bridge — 畫布](docs/screenshots/canvas.webp)
+![Semi Bridge — 畫布](docs/screenshots/canvas.webp)
 
-![Covision Bridge — 大腦圖譜](docs/screenshots/brain-galaxy.webp)
+![Semi Bridge — 大腦圖譜](docs/screenshots/brain-galaxy.webp)
 
 <sub>點擊任一星點，右側展開完整節點資訊——檔案、照片、記憶都能直接開啟。</sub>
 
-![Covision Bridge — 星系節點詳情](docs/screenshots/heart-galaxy-detail.webp)
+![Semi Bridge — 星系節點詳情](docs/screenshots/heart-galaxy-detail.webp)
 
 **⚠️ 早期開發中（Work in Progress）** — 功能未齊、隨時 refactor。歡迎圍觀程式碼與理念、參與討論；暫不建議日常使用，也未提供安裝包。
 
 ## 這是什麼
 
-Covision Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊畫布上共同工作**——你看見的，就是 AI 看見的；AI 正在做的，你看得見過程。
+Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊畫布上共同工作**——你看見的，就是 AI 看見的；AI 正在做的，你看得見過程。
 
 核心信念：
 
@@ -45,8 +45,8 @@ Covision Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一
 ## 快速開始（開發者）
 
 ```bash
-git clone https://github.com/semiwasabi128/covision-bridge.git
-cd covision-bridge
+git clone https://github.com/semiwasabi128/semi-bridge.git
+cd semi-bridge
 flutter pub get
 flutter run -d macos
 ```
@@ -54,7 +54,7 @@ flutter run -d macos
 需要 Flutter 穩定版。目前主要支援 macOS 桌面。
 
 > **開發路徑覆寫**：部分本地服務（星系資源、agent 工具）預設在 `~/Developer/bridge_app`
-> 找專案根。clone 到別的位置時，設定環境變數 `BRIDGE_APP_HOME=/path/to/covision-bridge`
+> 找專案根。clone 到別的位置時，設定環境變數 `BRIDGE_APP_HOME=/path/to/semi-bridge`
 > 即可對位。
 
 ## 專案結構
@@ -71,7 +71,7 @@ docs/          # 設計規範、宣言、架構地圖
 
 ## 宣言與設計文件
 
-![Covision Bridge — 羅盤系統圖譜](docs/screenshots/compass-graph.webp)
+![Semi Bridge — 羅盤系統圖譜](docs/screenshots/compass-graph.webp)
 
 <sub>羅盤圖譜：App 的每個器官是一個節點、線＝依賴連動——這一節的每份文件，講的都是圖上某一個器官。</sub>
 

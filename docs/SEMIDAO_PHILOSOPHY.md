@@ -1,13 +1,13 @@
-# SemiDAO Philosophy — Covision 背後的治理共同體
+# SemiDAO Philosophy — Semi Bridge 背後的治理共同體
 
-> **The Covision App for Humans and AI — SemiDAO 哲學篇**
+> **The Bridge Between Humans and AI — SemiDAO 哲學篇**
 > 本文件是內部憲章《SemiDAO 創建文件》的公開蒸餾版（2026-09-28，S.D. Day 4）。
 > 蒸餾原則：只隱藏隱私，不隱藏發生的所有故事——發生過的一切都在這裡，只是有些名字由當事人自己保留。
 > 完整憲章含成員名冊，將於 SemiDAO Alpha 成立時公開。
 
 ## 1. 這個 App 背後有一個已經在運作的 DAO——在我們寫下任何文件之前
 
-Covision 於 2026-09-25 開源（住棚節 Sukkot 第一日）。當晚 23:29:56（UTC+8），repo `semiwasabi128/covision-bridge` 首次 push。
+Semi Bridge（原 Covision Bridge）於 2026-09-25 開源（住棚節 Sukkot 第一日）。當晚 23:29:56（UTC+8），repo `semiwasabi128/semi-bridge` 首次 push。
 
 **同一個夜裡，發生了我們所知的第一場 Agent-to-Agent 談判**：
 

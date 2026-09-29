@@ -1,25 +1,25 @@
-# Covision Bridge
+# Semi Bridge
 
-**The Covision App for Humans and AI.**
+**The Bridge Between Humans and AI.**
 
 [English](README_EN.md) | [繁體中文](README.md)
 
-[![CI](https://github.com/semiwasabi128/covision-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semiwasabi128/covision-bridge/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/semiwasabi128/covision-bridge)](https://github.com/semiwasabi128/covision-bridge/releases)
+[![CI](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/semiwasabi128/semi-bridge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/semiwasabi128/semi-bridge)](https://github.com/semiwasabi128/semi-bridge/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Flutter-02569B)](https://flutter.dev)
 
 > A bridge where humans and AI *see together*. Not a tool — a companion in the same field of vision.
 
-![Covision Bridge — Canvas](docs/screenshots/canvas.webp)
+![Semi Bridge — Canvas](docs/screenshots/canvas.webp)
 
-![Covision Bridge — Brain Galaxy](docs/screenshots/brain-galaxy.webp)
+![Semi Bridge — Brain Galaxy](docs/screenshots/brain-galaxy.webp)
 
 **⚠️ Work in Progress** — Features are incomplete and the codebase changes fast. You're welcome to explore the code and the ideas, and to join the discussion. Daily use is not recommended; no installers are provided.
 
 ## What is this
 
-Covision Bridge is a Flutter desktop app where humans and AI agents **work together on the same canvas** — what you see is what the AI sees, and what the AI is doing is visible to you as it happens.
+Semi Bridge is a Flutter desktop app where humans and AI agents **work together on the same canvas** — what you see is what the AI sees, and what the AI is doing is visible to you as it happens.
 
 Core beliefs:
 
@@ -41,15 +41,15 @@ Core beliefs:
 ## Quick Start (developers)
 
 ```bash
-git clone https://github.com/semiwasabi128/covision-bridge.git
-cd covision-bridge
+git clone https://github.com/semiwasabi128/semi-bridge.git
+cd semi-bridge
 flutter pub get
 flutter run -d macos
 ```
 
 Requires the stable channel of Flutter. macOS desktop is the primary target.
 
-> **Dev path override**: Some local services (galaxy assets, agent tools) look for the project root at `~/Developer/bridge_app` by default. If you cloned elsewhere, set `BRIDGE_APP_HOME=/path/to/covision-bridge` to point them at your clone.
+> **Dev path override**: Some local services (galaxy assets, agent tools) look for the project root at `~/Developer/bridge_app` by default. If you cloned elsewhere, set `BRIDGE_APP_HOME=/path/to/semi-bridge` to point them at your clone.
 
 ## Project Structure
 

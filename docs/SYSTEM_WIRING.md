@@ -1,6 +1,6 @@
 # 八大系統串聯縱覽（System Wiring）— 一個念頭如何流過整顆大腦
 
-> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Covision App for Humans and AI
+> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Bridge Between Humans and AI
 >
 > 單看每個系統都是器官；這份文件畫的是**神經系統**——
 > 一句話從嘴巴進來，怎麼被記住、被看見、被把關、被算力餵養，

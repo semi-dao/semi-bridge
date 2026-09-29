@@ -1,12 +1,12 @@
-# Contributing to Covision Bridge
+# Contributing to Semi Bridge
 
 謝謝你想貢獻！橋樑計畫歡迎人類與 AI 夥伴一起建造。
 
 ## 快速開始
 
 ```bash
-git clone https://github.com/semiwasabi128/covision-bridge.git
-cd covision-bridge
+git clone https://github.com/semiwasabi128/semi-bridge.git
+cd semi-bridge
 flutter pub get
 flutter run -d macos
 ```

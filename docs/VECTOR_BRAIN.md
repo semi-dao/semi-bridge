@@ -1,6 +1,6 @@
 # 向量大腦（Vector Brain）— App 的記憶器官
 
-> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Covision App for Humans and AI
+> v1.0 · 2026-09-26 · 橋樑（Bridge）— The Bridge Between Humans and AI
 >
 > 橋樑不是一個「聊天 App 加了搜尋」。對話流過去就流過去了；
 > **向量大腦把流過去的一切變成可檢索的身體記憶**——對話、檔案、圖片、
