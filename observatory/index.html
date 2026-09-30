@@ -386,11 +386,16 @@ function hover(cx, cy){
 const _lodV3 = new THREE.Vector3();
 function updateLOD(){
   const diag=[];
+  // [Blue 2026-10-01 標籤距離縮放令] 字隨視角縮放（同大腦圖譜 lockBox 40-140px 邏輯）：
+  // 遠=固定 world 尺寸（透視自然小）；拉近=按距離縮小（近看不蓋畫面）；最近=淡出讓位給詳情卡
   for(let i=0;i<bitMeshes.length;i++){
     _lodV3.copy(bitMeshes[i].position); galaxy.localToWorld(_lodV3);
     const d = camera.position.distanceTo(_lodV3);
     diag.push(Math.round(d));
     const lab = labelSprites[i], hal = haloSprites[i];
+    // 標籤縮放：base 700 → 近距按 dist 比例縮（近 400 內=0.25 倍，2000=滿）
+    const labK = Math.min(1, Math.max(0.22, (d-300)/1700));
+    lab.scale.set(700*labK, 121*labK, 1);
     if(d < 2600){                       // 近：全渲染
       lab.visible = true;  lab.material.opacity = 1;
       hal.scale.setScalar(HALO_R*4.4);
