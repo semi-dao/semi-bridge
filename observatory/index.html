@@ -119,6 +119,17 @@ const HALO_R = 62;                    // 光暈半徑（hover/點擊命中區）
 const starGeo = new THREE.SphereGeometry(CORE_R, 24, 24);
 const haloGeo = new THREE.SphereGeometry(HALO_R, 16, 16);
 const bitMeshes = [], haloPickers = [];
+function diamondTex(){   // 菱形💠點貼圖——背景星塵從方塊換菱形（Blue 2026-10-01）
+  const cv = document.createElement('canvas'); cv.width=cv.height=64;
+  const g = cv.getContext('2d');
+  g.translate(32,32);
+  // 清晰菱形（四點）＋微光暈
+  g.beginPath();
+  g.moveTo(0,-30); g.lineTo(21,0); g.lineTo(0,30); g.lineTo(-21,0); g.closePath();
+  g.fillStyle='rgba(255,255,255,.97)'; g.fill();          // 實心菱形（硬輪廓）
+  return new THREE.CanvasTexture(cv);
+}
+const DIAMOND = diamondTex();
 function glowTex(){
   const cv = document.createElement('canvas'); cv.width=cv.height=64;
   const g = cv.getContext('2d');
@@ -163,7 +174,7 @@ galaxy.add(new THREE.Line(
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos,3));
   g.setAttribute('color', new THREE.BufferAttribute(col,3));
-  galaxy.add(new THREE.Points(g, new THREE.PointsMaterial({size:4.5, vertexColors:true, transparent:true, opacity:.95, depthWrite:false})));
+  galaxy.add(new THREE.Points(g, new THREE.PointsMaterial({size:11, map:DIAMOND, vertexColors:true, transparent:true, opacity:.95, depthWrite:false, alphaTest:.35})));
 }
 
 /* ════════ 標籤藥丸 ════════ */
