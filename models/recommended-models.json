@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 1,
+  "updatedAt": "2026-09-29",
+  "description": "Covision Bridge 建議本地視覺模型清單。App 每週拉取此檔推播新模型（模型實驗室）；社群可 PR 新模型（需附盲測數據）。評測方法見 docs/benchmarks/VISION_MODEL_BENCHMARK_2026-09.md",
+  "models": [
+    {
+      "id": "gemma-4-12b-q4",
+      "name": "Gemma 4 12B (Q4_K_M)",
+      "sizeGb": 7.1,
+      "minRamGb": 12,
+      "recommendedRamGb": 16,
+      "contextLength": 4096,
+      "modality": ["vision", "text"],
+      "huggingFaceRepo": "unsloth/gemma-4-12b-it-GGUF",
+      "recommendation": "quality",
+      "reason": "品質首選：20 張農場照片盲測 19/20 = 95% 命中（vs E4B 85%）。適合照片索引、辨識任務。",
+      "benchmark": {
+        "date": "2026-09-28",
+        "accuracy": 0.95,
+        "avgSecPerImage": 104,
+        "ramGb": 5.8
+      }
+    },
+    {
+      "id": "gemma-4-e4b-q4",
+      "name": "Gemma 4 E4B (Q4_K_M)",
+      "sizeGb": 5.3,
+      "minRamGb": 8,
+      "recommendedRamGb": 16,
+      "contextLength": 32768,
+      "modality": ["vision", "text"],
+      "huggingFaceRepo": "ggml-org/gemma-4-E4B-it-GGUF",
+      "recommendation": "speed",
+      "reason": "速度首選：~45s/張（12B 的 2 倍快），16GB 機可開大 context。照片量大的批次處理適用。",
+      "benchmark": {
+        "date": "2026-09-14",
+        "accuracy": 0.85,
+        "avgSecPerImage": 47,
+        "ramGb": 5.0
+      }
+    }
+  ],
+  "switchingGuide": {
+    "howTo": "App 內：系統 → 模型下載 → 模型卡片「設為現役」按鈕。紫框鎖定現役模型。",
+    "safety": "下載前磁碟空間檢查 → 啟動前 RAM 預算檢查（12B 機型 ctx 自動降至 4096 防 OOM）→ 失敗自動回滾現役模型"
+  }
+}
