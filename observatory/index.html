@@ -186,10 +186,11 @@ function pillTex(text){
   const cv = document.createElement('canvas'); cv.width=512; cv.height=88;
   const g = cv.getContext('2d');
   const rr=(x,y,w,h,r)=>{g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();};
-  g.fillStyle='rgba(6,20,12,.78)'; rr(6,14,500,60,28); g.fill();
-  g.strokeStyle='rgba(255,233,163,.4)'; g.lineWidth=2; rr(6,14,500,60,28); g.stroke();
-  g.fillStyle='#d8f3d0'; g.font='26px "SF Mono",Menlo,monospace';
-  g.fillText(text, 22, 54);
+  // [Blue 2026-10-01 字體令] 標籤同大腦圖譜風格：PingFang TC + 金框 #F0CE5E + 圓角
+  g.fillStyle='rgba(8,18,10,.82)'; rr(6,14,500,60,26); g.fill();
+  g.strokeStyle='#F0CE5E'; g.lineWidth=2; rr(6,14,500,60,26); g.stroke();
+  g.fillStyle='#e8f0e8'; g.font='600 30px "PingFang TC","Noto Sans TC",sans-serif';
+  g.textBaseline='middle'; g.fillText(text, 24, 45);
   const t = new THREE.CanvasTexture(cv); t.anisotropy=4; return t;
 }
 function short(t){ return t.length>20 ? t.slice(0,18)+'…' : t; }
