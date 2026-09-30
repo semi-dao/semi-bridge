@@ -38,6 +38,17 @@ Core beliefs:
 - 📊 **Tier design system**: 33 semantic tiers — swap a theme pack and the entire app reskins in one click
 - 🔧 **Modding-first**: Themes, galaxies, and workflows are moddable without recompiling; new buttons and nodes have a full creation process — see the [Modding Guide](docs/opensource/MODDING_GUIDE.md)
 
+### Background Systems (the invisible guardians)
+
+All born from a real two-day incident investigation ("the computer is too sluggish to type") — full stories in **[FEATURES.md](docs/FEATURES.md)**:
+
+- 🔄 **System Activity Center** — every background task visible; busy = seen, idle = invisible
+- ⏸ **Gentle Pause** — pause any background work to yield your machine; resume with zero rework
+- 🧠 **Brain Auto-Revival** — local LLM engine restarts itself when it dies (engine-level, works with any GGUF)
+- 🌲 **Tree Fingerprint Cache** — restarts no longer rescan everything: 80 min → seconds
+- 🔒 **Embed State Machine** — DB-enforced irreversible states; task-stomping incidents extinct
+- 🧪 **Model Lab** — blind-test local vision models with your own photos, adopt in one click — see [MODEL_LAB](docs/MODEL_LAB.md) and the [benchmark report](docs/benchmarks/VISION_MODEL_BENCHMARK_2026-09.md)
+
 ## Quick Start (developers)
 
 ```bash
