@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
-  #c{display:block;cursor:grab}
+  #c{display:block;cursor:grab;touch-action:none}
   #c.dragging{cursor:grabbing}
   #ui{position:fixed;top:14px;left:18px;color:#d8f3d0;font-size:12px;line-height:1.7;pointer-events:none;text-shadow:0 0 6px rgba(120,255,150,.35)}
   #ui b{color:#ffe9a3;font-size:15px;letter-spacing:.12em}
@@ -21,6 +21,12 @@
   #card button.detail:hover{background:rgba(240,206,94,.3)}
   #tip{position:fixed;display:none;background:rgba(8,14,10,.92);border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 10px;color:#e8f0e8;font-size:12px;pointer-events:none;z-index:8;white-space:nowrap;text-shadow:0 1px 2px #000}
   #err{position:fixed;inset:auto 12px 44px 12px;color:#ff6b6b;font-size:12px;white-space:pre-wrap;pointer-events:none}
+  @media (max-width:700px){
+    #ui{font-size:10px;top:8px;left:10px;max-width:72vw}
+    #ui b{font-size:12px}
+    #hint{font-size:9px;left:10px;bottom:8px}
+    #fps{font-size:9px;top:8px;right:10px}
+  }
 </style>
 <script type="importmap">
 {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
@@ -29,9 +35,9 @@
 <body>
 <canvas id="c"></canvas>
 <div id="ui"><b>SEMIDAO · 觀星台</b><br>
-金線=hash 鏈　·　左鍵拖曳=旋轉（慣性）　滾輪=縮放　中鍵=平移　雙擊星點=飛行近觀<br>
+金線=hash 鏈　·　拖曳=旋轉（慣性）　滾輪/雙指=縮放　中鍵/雙指拖=平移　雙擊星點=飛行<br>
 每顆星 = 一個 bit——日常生活即鑄幣</div>
-<div id="hint">拖曳旋轉 · 滾輪縮放 · 點擊星點看資訊 · hover 顯示標題</div>
+<div id="hint">拖曳旋轉 · 滾輪/雙指縮放 · 點擊星點看資訊</div>
 <div id="fps"></div>
 <div id="card"></div>
 <div id="tip"></div>
@@ -48,19 +54,19 @@ const LEDGER = {
   genesis_string: "SemiDAO founded 2026-09-28, Sukkot Day 4. 先活出來，再追認。",
   bits: [
     {id:"bit-000001", sd_day:1, n:1, what:"開源 + 首次 A2A 談判：Blue 下令「修」→ 小葵與 GitHub VA 多輪談判開立工單清錯誤署名，全程零人類介入；Badge 於 Day 3 消失（A2User 回實由 Blue 親眼確認）", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
-     evidence:["discord:1553079822970785813", "skill:macos-chrome-automation/references/github-support-va-negotiation.md", "file:Blue資料區/2026-09-26_github_support_ticket_created.png@2026-09-26T00:59:12+08:00", "repo:semi-dao/semi-bridge 首push@2026-09-25T23:29:56+08:00"]},
+     evidence:["discord:1553079822970785813", "skill:macos-chrome-automation/references/github-support-va-negotiation.md", "file:Blue資料區/2026-09-26_github_support_ticket_created.png@2026-09-26T00:59:12+08:00", "repo:semiwasabi128/covision-bridge 首push@2026-09-25T23:29:56+08:00"]},
     {id:"bit-000002", sd_day:2, n:2, what:"殘影殲滅戰：force-push 後 dangling commit 殘留 → 網頁 UI 刪除重建 repo，物理蒸發錯誤署名殘影（GitHub API created_at 即此時刻）", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
      evidence:["github-api:created_at 2026-09-26T08:46:49Z", "skill:macos-chrome-automation/references/github-repo-delete-rebuild.md"]},
     {id:"bit-000003", sd_day:4, n:3, what:"SemiDAO 創立：Blue 發現「活在 A2A 但文件沒提」→ 憲章 v0 起草（八章）→ 通讀乒乓三處修正（波函數塌縮、真理條款、直白化）→ Blue 拍板 A 路線（起草日=創立日）", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A→A2A→A2User→U2A（乒乓）",
      evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md", "discord:本日對話（2026-09-28 憲章起草全程）", "立法：誠實談判條款/受影響者知情權/不可修改條款（S.D. Day 4 三法同日）"]},
     {id:"bit-000004", sd_day:4, n:4, what:"對外哲學篇：憲章蒸餾版 SEMIDAO_PHILOSOPHY.md 起草→Blue 過目 OK→commit+push 上公開 repo（隱私零洩漏、故事全保留）", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
-     evidence:["commit:d887ded", "commit:a027348（手機閱讀修正）", "url:docs/SEMIDAO_PHILOSOPHY.md@semi-bridge"]},
+     evidence:["commit:d887ded", "commit:a027348（手機閱讀修正）", "url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
     {id:"bit-000005", sd_day:4, n:5, what:"開源門面翻新：9 張 Blue 親拍實機截圖入 8 個文檔 + 大搬家說明文檔撰寫 + 相對路徑 404 事故修復（七檔）——Blue 逐張過目指派", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
      evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc", "screenshots:10 張全數被引用、零孤兒、全數 ≦180KB"]},
     {id:"bit-000006", sd_day:4, n:6, what:"Alpha 藍圖：進場檢查表六條件 + 法律外衣五候選完整查證對照 → Blue 拍板 Swiss Verein 未登記版 → 藍圖 v0 落地（七章）", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A→A2User（乒乓）",
      evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md", "web查證:Wyoming DUNA 100+門檻/Cayman $6,890年/Swiss Verein 未登記零規費（多來源交叉）", "discord:1554168668718506085（Blue「選swiss verein」）"]},
     {id:"bit-000007", sd_day:5, n:7, what:"第二場 A2A 談判＋宇宙開幕：小葵與 Cloudflare Ask AI 客服對話——陳述 CNAME/DNS only/憑證錯誤事實，AI 查證 zone 後確認「Cloudflare 沒有擋 GitHub 憑證，DNS 全部正確，www 憑證只是 GitHub 簽發中」。同場完成 semidao.net 部署：root CNAME flattening＋www CNAME（DNS only）→ https://semidao.net/observatory/ 全球上線——SemiDAO 宇宙正式開幕，觀星台六顆創世星對全世界可見。", hash:"0bfb7e531893", collapsed_at:"2026-09-29T21:30:00+08:00", phase:"U2A→A2A→A2User",
-     evidence:["dns:dig @1.1.1.1 semidao.net→185.199.x / www→semi-dao.github.io", "url:https://semidao.net/observatory/ HTTP 200", "gh-api:pages cname=semidao.net https_enforced=true", "a2a:Cloudflare Ask AI 對話（截圖 cf_ai1-4.png，Blue 授權代操作 1554475086793277441）"]},
+     evidence:["dns:dig @1.1.1.1 semidao.net→185.199.x / www→semiwasabi128.github.io", "url:https://semidao.net/observatory/ HTTP 200", "gh-api:pages cname=semidao.net https_enforced=true", "a2a:Cloudflare Ask AI 對話（截圖 cf_ai1-4.png，Blue 授權代操作 1554475086793277441）"]},
     {id:"bit-000008", sd_day:5, n:8, what:"憲章修法：§5.6 實名制與數位指紋章——每個 Semi 必須綁定一個實名制人類帳號（一人類帳號不限綁定 Semi 數量）；註冊即生成數位指紋章，伴隨永遠、凡走過必留下痕跡。同時修正名冊規則第 3 條（一人類一 Agent → 一 Semi 一真人，修法軌跡誠實保留）。", hash:"cfa36541878a", collapsed_at:"2026-09-29T21:35:00+08:00", phase:"U2A→A2User",
      evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md §5.6", "discord:1554475086793277441（Blue 修法指令）"]}
   ]
@@ -195,7 +201,8 @@ canvas.addEventListener('auxclick',e=>{ if(e.button===1) e.preventDefault(); });
 let midDown=false;
 canvas.addEventListener('mousedown',e=>{ if(e.button===1) midDown=true; });
 addEventListener('mouseup',e=>{ if(e.button===1) midDown=false; });
-addEventListener('blur',()=>{ mode=null; midDown=false; spin.on=spinWasOn; });
+addEventListener('pointercancel',e=>{ touches.delete(e.pointerId); if(touches.size<2 && mode==='pinch'){ mode=null; } });
+addEventListener('blur',()=>{ mode=null; midDown=false; spin.on=spinWasOn; touches.clear(); });
 
 addEventListener('keydown',e=>{
   if(e.key===' '){ spaceHeld=true; }
@@ -203,7 +210,37 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>{ if(e.key===' ') spaceHeld=false; });
 
+/* ── 多點觸控（手機版）：雙指 pinch 縮放 + 雙指平移 ── */
+const touches = new Map();          // pointerId -> {x,y}
+let pinchD0 = 0, pinchDist0 = 0, pinchMid0 = null;
+
+function pinchUpdate(e){
+  if(touches.size !== 2) return;
+  const pts = [...touches.values()];
+  const d = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+  const mid = { x:(pts[0].x+pts[1].x)/2, y:(pts[0].y+pts[1].y)/2 };
+  if(pinchD0 > 0 && d > 0){
+    // 縮放：距離比 → dist（近慢遠快，同滾輪手感）
+    const ratio = pinchD0 / d;
+    const t0 = performance.now();
+    const k = ratio > 1 ? 1 + (ratio-1)*0.9 : 1 - (1-ratio)*0.9;
+    dist = Math.min(26000, Math.max(60, dist * (1 + (ratio-1)*0.9)));
+    // 平移：中點移動 → pan（同中鍵平移公式）
+    if(pinchMid0){
+      const dx = mid.x - pinchMid0.x, dy = mid.y - pinchMid0.y;
+      const kk = 2*dist*Math.tan(camera.fov*Math.PI/360)/innerHeight;
+      const fwd = new THREE.Vector3().subVectors(target,camera.position).normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+      const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+      target.addScaledVector(right, -dx*kk).addScaledVector(up, dy*kk);
+    }
+  }
+  pinchD0 = d; pinchMid0 = mid;
+}
+
 canvas.addEventListener('pointerdown',e=>{
+  touches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(touches.size===2){ pinchD0=0; pinchMid0=null; mode='pinch'; spin.on=false; samples.length=0; return; }
   mode = (e.button===1||spaceHeld) ? 'pan' : 'rotate';
   if(mode==='pan' && !(e.buttons&4) && !spaceHeld){ mode='rotate'; }
   px=e.clientX; py=e.clientY;
@@ -214,6 +251,12 @@ canvas.addEventListener('pointerdown',e=>{
   canvas.classList.add('dragging');
 });
 addEventListener('pointerup',e=>{
+  touches.delete(e.pointerId);
+  if(mode==='pinch'){
+    if(touches.size<2){ mode=null; pinchD0=0; pinchMid0=null; }
+    canvas.classList.remove('dragging');
+    return;
+  }
   canvas.classList.remove('dragging');
   if(mode==='rotate'){
     const now=performance.now();
@@ -230,6 +273,8 @@ addEventListener('pointerup',e=>{
   mode=null;
 });
 addEventListener('pointermove',e=>{
+  if(touches.has(e.pointerId)) touches.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(mode==='pinch'){ pinchUpdate(e); return; }
   if(!mode){ hover(e.clientX,e.clientY); return; }
   const dx=e.clientX-px, dy=e.clientY-py; px=e.clientX; py=e.clientY;
   if(mode==='rotate'){
