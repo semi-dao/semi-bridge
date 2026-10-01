@@ -141,9 +141,22 @@ updateCam();
 
 /* ══════ 互動 ══════ */
 let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
-canvas.addEventListener('pointerdown',e=>{dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');canvas.setPointerCapture(e.pointerId);});
-addEventListener('pointerup',()=>{dragging=false;canvas.classList.remove('dragging');});
+const ptrs=new Map(); let pinch0=0, dist0=0;
+canvas.addEventListener('pointerdown',e=>{
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');}
+  else if(ptrs.size===2){dragging=false;const [a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);dist0=dist;}
+  canvas.setPointerCapture(e.pointerId);
+});
+addEventListener('pointerup',e=>{ptrs.delete(e.pointerId);if(ptrs.size===0){dragging=false;canvas.classList.remove('dragging');}});
+addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(ptrs.size===0){dragging=false;canvas.classList.remove('dragging');}});
 canvas.addEventListener('pointermove',e=>{
+  if(ptrs.has(e.pointerId)) ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){   // 雙指捏合＝縮放
+    const [a,b]=[...ptrs.values()];const p=Math.hypot(a.x-b.x,a.y-b.y);
+    if(pinch0>0) dist=Math.max(120,Math.min(3200,dist0*pinch0/p));
+    moved+=9; return;
+  }
   if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py;moved+=Math.abs(dx)+Math.abs(dy);
   if(Math.abs(dx)>Math.abs(dy)) frozen=false;   // 橫向拖曳＝恢復自轉
   rotY+=dx*0.005; rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.004)); vx=dx*0.004; vy=dy*0.003; px=e.clientX;py=e.clientY;
