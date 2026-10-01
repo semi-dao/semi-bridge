@@ -29,7 +29,7 @@
 <div id="ui"><b>SEMIDAO · Blue 星系視圖</b><br>
 <span class="sim">模擬資料（真實名冊：registry.semidao.net/v1/semis）</span><br>
 金星＝Blue 的 Bit 星　·　衛星＝agent Bit（軌道半徑=互動引力）　·　粒子流=互動頻率</div>
-<div id="hint">拖曳旋轉 · 滾輪縮放 · 雙擊衛星=飛行追蹤 · 點擊看資訊</div>
+<div id="hint">拖曳旋轉 · 滾輪縮放 · 雙擊衛星=飛行追蹤 · 點擊星星=凍結＋資訊 · 橫向拖曳=恢復自轉</div>
 <div id="fps"></div>
 <div id="card"></div>
 <div id="tip"></div>
@@ -52,8 +52,8 @@ const SATS = [
 ];
 const R_INNER = 120, K = 1600;
 const orbitR = g => R_INNER + K/Math.sqrt(g);
-/* Kepler 風格：越近轉越快 */
-const orbitW = g => 0.22 * Math.sqrt(20000/orbitR(g));
+/* Kepler 風格：越近轉越快（降速版——太陽系日常感） */
+const orbitW = g => 0.07 * Math.sqrt(20000/orbitR(g));
 
 /* ══════ 場景 ══════ */
 const canvas = document.getElementById('c');
@@ -97,11 +97,13 @@ ring.rotation.x = Math.PI/2.35; centerGrp.add(ring);
 const sats = SATS.map((s,idx)=>{
   const r = orbitR(s.g), w = orbitW(s.g);
   const phase0 = idx*(Math.PI*2/3) + (s.seed % 1571)/1000/2;  // 三衛星 120° 分離＋hash 微擾
-  const incl = (((s.seed>>8) % 3141)/1000 - 1.57) * 0.9;  // 確定性軌道傾角
+  const tilt = (((s.seed>>8) % 3141)/1000 - 1.57) * 0.45;      // 軌道面傾角（衛星公式與此精確一致）
   const grp = new THREE.Group(); galaxy.add(grp);
   const core = new THREE.Mesh(new THREE.SphereGeometry(13,24,24), new THREE.MeshBasicMaterial({color:s.color}));
   const glow = new THREE.Sprite(glowMat()); glow.material.color=new THREE.Color(s.color); glow.scale.setScalar(120);
   grp.add(core); core.add(glow);
+  const hitS = new THREE.Mesh(new THREE.SphereGeometry(44,8,8), new THREE.MeshBasicMaterial({visible:false}));
+  grp.add(hitS);   // 光暈級撿取代理——好點
   /* 軌道虛線（亮度↑——軌道是星系的骨幹，必須看得見） */
   const pts=[]; for(let i=0;i<=128;i++){const a=i/128*Math.PI*2; pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r));}
   const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
@@ -122,12 +124,14 @@ const sats = SATS.map((s,idx)=>{
     t: i/NP, sp: 0.10 + ((s.seed>>(i%16))%97)/97*0.16,     // 每粒子速度=hash 導出
     amp: 3+((s.seed>>(i%12))%80)/80*7, wob: (s.seed>>(i%10))%628/100
   }));
-  return {...s, r, w, phase0, incl, grp, core, glow, orbitLine, line, particles, pGeo, pPos, pMeta};
+  return {...s, r, w, phase0, tilt, grp, core, hitS, glow, orbitLine, line, particles, pGeo, pPos, pMeta};
 });
 
 /* ══════ 相機 rig（觀星台同款手感） ══════ */
 let target = new THREE.Vector3(0,0,0), dist = 900, rotX = 0.42, rotY = 0.6;
 let follow = null;   // 雙擊追蹤某衛星
+let frozen = false;  // 太陽系模式：點星凍結自轉，橫向拖曳恢復
+let simTime = 0, lastFrame = performance.now();
 function updateCam(){
   const t = follow ? follow.core.getWorldPosition(new THREE.Vector3()) : target;
   camera.position.set(t.x+dist*Math.cos(rotX)*Math.sin(rotY), t.y+dist*Math.sin(rotX), t.z+dist*Math.cos(rotX)*Math.cos(rotY));
@@ -141,6 +145,7 @@ canvas.addEventListener('pointerdown',e=>{dragging=true;moved=0;px=e.clientX;py=
 addEventListener('pointerup',()=>{dragging=false;canvas.classList.remove('dragging');});
 canvas.addEventListener('pointermove',e=>{
   if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py;moved+=Math.abs(dx)+Math.abs(dy);
+  if(Math.abs(dx)>Math.abs(dy)) frozen=false;   // 橫向拖曳＝恢復自轉
   rotY+=dx*0.005; rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.004)); vx=dx*0.004; vy=dy*0.003; px=e.clientX;py=e.clientY;
 });
 canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(120,Math.min(3200,dist*(1+Math.sign(e.deltaY)*0.09)));},{passive:false});
@@ -151,12 +156,12 @@ canvas.addEventListener('dblclick',e=>{
 });
 addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){follow=null;dist=900;rotX=0.42;rotY=0.6;}});
 
-/* 撿取（halo 級） */
+/* 撿取（halo 級——含 hitS 代理） */
 const ray = new THREE.Raycaster();
 function pick(cx,cy){
   const m=new THREE.Vector2(cx/innerWidth*2-1, -(cy/innerHeight)*2+1);
   ray.setFromCamera(m,camera);
-  for(const s of sats){ if(ray.intersectObject(s.core,false).length) return {sat:s, isCenter:false}; }
+  for(const s of sats){ if(ray.intersectObject(s.hitS,false).length) return {sat:s, isCenter:false}; }
   if(ray.intersectObject(centerCore,false).length) return {isCenter:true};
   return null;
 }
@@ -165,8 +170,8 @@ canvas.addEventListener('click',e=>{
   if(moved>6)return;
   const hit=pick(e.clientX,e.clientY);
   if(!hit){card.style.display='none';return;}
-  if(hit.isCenter){card.innerHTML=`<h4>⭐ ${CENTER.name} 的 Bit 星</h4><div class="sub">${CENTER.type} · 星系質心</div><div>${CENTER.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">地址永凍（√n 座標）；衛星軌道=確定性導出</div>`;}
-  else{const s=hit.sat;card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">agent Bit · 互動 ${s.g} bits</div><div>${s.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 的統計陰影）<br>軌道週期 ${(2*Math.PI/s.w).toFixed(1)}s · 相位=f(hash,t)</div>`;}
+  if(hit.isCenter){frozen=true;card.innerHTML=`<h4>⭐ ${CENTER.name} 的 Bit 星</h4><div class="sub">${CENTER.type} · 星系質心</div><div>${CENTER.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">地址永凍（√n 座標）；衛星軌道=確定性導出<br>❄ 已凍結自轉——橫向拖曳恢復</div>`;}
+  else{const s=hit.sat;frozen=true;card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">agent Bit · 互動 ${s.g} bits</div><div>${s.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 的統計陰影）<br>軌道週期 ${(2*Math.PI/s.w).toFixed(1)}s · 相位=f(hash,t)<br>❄ 已凍結自轉——橫向拖曳恢復</div>`;}
   card.style.display='block';
 });
 canvas.addEventListener('mousemove',e=>{
@@ -180,33 +185,38 @@ canvas.addEventListener('mousemove',e=>{
 const fpsEl=document.getElementById('fps'); let frames=0,fT=performance.now();
 function loop(t){
   requestAnimationFrame(loop);
-  const time=t/1000;
+  const dt=Math.min(0.05,(t-lastFrame)/1000); lastFrame=t;
+  if(!frozen) simTime+=dt;
+  const time=simTime;
   if(!dragging){rotY+=vx;rotX=Math.max(-1.4,Math.min(1.4,rotX+vy));vx*=0.95;vy*=0.95;}
-  rotY+=0.0006;   // 永續微自轉
+  if(!frozen) rotY+=0.0006*60*dt;   // 永續微自轉（凍結時停）
   const cp=new THREE.Vector3(0,0,0);
   for(const s of sats){
     const a = s.phase0 + time*s.w;
-    const x=Math.cos(a)*s.r, z=Math.sin(a)*s.r;
-    const y=Math.sin(a)*s.r*Math.sin(s.incl)*0.45;
+    /* 與軌道面旋轉精確一致（rotation.x=θ: y'=−z·sinθ）——衛星永遠貼在軌道虛線上 */
+    const x=Math.cos(a)*s.r, z=Math.sin(a)*s.r*Math.cos(s.tilt), y=-Math.sin(a)*s.r*Math.sin(s.tilt);
     s.grp.position.set(x,y,z);
-    s.orbitLine.rotation.x = Math.sin(s.incl)*0.45;
+    s.orbitLine.rotation.x = s.tilt;
+    /* 引力線端點內縮（起點在光暈外、終點接衛星邊緣）——不貫穿 Blue 星 */
+    const D=Math.hypot(x,y,z), dir=new THREE.Vector3(x/D,y/D,z/D);
+    const inner=210, outer=Math.max(inner+40,D-32);
     const lp=s.line.geometry.attributes.position;
-    lp.setXYZ(0,cp.x,cp.y,cp.z); lp.setXYZ(1,x,y,z); lp.needsUpdate=true;
+    lp.setXYZ(0,dir.x*inner,dir.y*inner,dir.z*inner); lp.setXYZ(1,dir.x*outer,dir.y*outer,dir.z*outer); lp.needsUpdate=true;
+    /* 粒子流：沿內縮後的線段流動＋獨立韻律擾動 */
     s.pMeta.forEach((p,i)=>{
       const tt=((p.t + time*p.sp)%1);
-      const bx=cp.x+(x-cp.x)*tt, by=cp.y+(y-cp.y)*tt, bz=cp.z+(z-cp.z)*tt;
+      const bx=dir.x*(inner+(outer-inner)*tt), by=dir.y*(inner+(outer-inner)*tt), bz=dir.z*(inner+(outer-inner)*tt);
       const wob=Math.sin(time*2+p.wob)*p.amp;
       s.pPos[i*3]=bx+Math.cos(time*1.7+p.wob*3)*wob*0.4;
       s.pPos[i*3+1]=by+wob;
       s.pPos[i*3+2]=bz+Math.sin(time*1.3+p.wob*2)*wob*0.4;
     });
     s.pGeo.attributes.position.needsUpdate=true;
-    s.particles.material.opacity = 0.55+0.35*Math.sin(time*(0.5+s.g/900)+s.seed%7);
+    s.particles.material.opacity = frozen ? 0.95 : 0.55+0.35*Math.sin(time*(0.5+s.g/900)+s.seed%7);
   }
-  ring.rotation.z = time*0.08;
-  centerGlow.scale.setScalar(240+Math.sin(time*1.1)*14);
+  if(!frozen){ ring.rotation.z = time*0.08; centerGlow.scale.setScalar(240+Math.sin(time*1.1)*14); }
   updateCam(); renderer.render(scene,camera);
-  frames++; if(t-fT>1000){fpsEl.textContent=frames+' fps';frames=0;fT=t;}
+  frames++; if(t-fT>1000){fpsEl.textContent=(frozen?'❄ ':'')+frames+' fps';frames=0;fT=t;}
 }
 addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
 renderer.setSize(innerWidth,innerHeight);
