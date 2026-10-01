@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>SemiDAO 三層宇宙 — 觀星台 × Blue 星系 × 大腦星系</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
+  #c{display:block;cursor:grab;touch-action:none}
+  #c.dragging{cursor:grabbing}
+  #ui{position:fixed;top:14px;left:18px;color:#d8f3d0;font-size:12px;line-height:1.7;pointer-events:none;text-shadow:0 0 6px rgba(120,255,150,.35)}
+  #ui b{color:#ffe9a3;font-size:15px;letter-spacing:.12em}
+  #ui .sim{color:#9fc7a4;font-size:11px}
+  #hint{position:fixed;bottom:14px;left:18px;color:#a8d8a0;font-size:12px;pointer-events:none}
+  #fps{position:fixed;top:14px;right:18px;color:#9dffa8;font-size:20px;font-weight:bold;pointer-events:none;text-shadow:0 0 8px rgba(120,255,150,.4)}
+  #lod{position:fixed;top:44px;right:18px;color:#ffe9a3;font-size:12px;pointer-events:none;text-align:right;text-shadow:0 0 6px rgba(240,206,94,.45)}
+  #layers{position:fixed;top:68px;right:18px;color:#7fa88f;font-size:10px;pointer-events:none;text-align:right;line-height:1.8}
+  #layers .on{color:#ffe9a3}
+  #card{position:fixed;bottom:20px;right:20px;width:360px;max-width:calc(100vw - 40px);background:rgba(10,18,14,.92);border:1px solid rgba(240,206,94,.35);border-radius:12px;padding:14px 16px;color:#e8f0e8;font-size:13px;line-height:1.7;z-index:5;display:none;backdrop-filter:blur(8px);max-height:60vh;overflow-y:auto}
+  #card h4{margin:0 0 6px;color:#ffe9a3;font-size:14px}
+  #card .sub{color:#9fc7a4;font-size:11px;margin-bottom:6px}
+  #card .row{margin:2px 0}
+  #card .row b{color:#ffe9a3;font-weight:normal}
+  #tip{position:fixed;display:none;background:rgba(8,14,10,.92);border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 10px;color:#e8f0e8;font-size:12px;pointer-events:none;z-index:8;white-space:nowrap;text-shadow:0 1px 2px #000}
+  #privacy{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);color:#9fc7a4;font-size:11px;pointer-events:none;background:rgba(10,18,14,.8);border:1px solid rgba(159,199,164,.3);border-radius:8px;padding:5px 14px;display:none}
+  @media (max-width:700px){#ui{font-size:10px;top:8px;left:10px;max-width:66vw}#hint{font-size:9px;left:10px}#lod{font-size:10px;top:32px;right:10px}#layers{top:56px;right:10px;font-size:9px}#fps{font-size:12px;top:8px;right:10px}}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><b>SEMIDAO · 三層宇宙</b><br>
+<span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span></div>
+<div id="hint">雙擊 Blue 星＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · R＝回宏觀</div>
+<div id="fps"></div>
+<div id="lod"></div>
+<div id="layers"></div>
+<div id="card"></div>
+<div id="tip"></div>
+<div id="privacy">🔒 隱私遮罩：大腦星系僅結構形狀可見——內容屬艙內主權</div>
+<script type="module">
+import * as THREE from 'three';
+
+/* ════════ L1 宏觀宇宙：真實 ledger 九星 ════════ */
+const BITS = [
+ {n:1, id:"bit-000001", hash:"817f9ba494ac", label:"開源＋首次 A2A", sd:1},
+ {n:2, id:"bit-000002", hash:"6f1849a19037", label:"殘影殲滅戰", sd:2},
+ {n:3, id:"bit-000003", hash:"07ac7dea5150", label:"SemiDAO 創立", sd:4},
+ {n:4, id:"bit-000004", hash:"6effc58d8f8e", label:"對外哲學篇", sd:4},
+ {n:5, id:"bit-000005", hash:"8ce11f29c265", label:"開源門面翻新", sd:4},
+ {n:6, id:"bit-000006", hash:"d3d38c48cdac", label:"Alpha 藍圖", sd:4},
+ {n:7, id:"bit-000007", hash:"0bfb7e531893", label:"宇宙開幕", sd:5},
+ {n:8, id:"bit-000008", hash:"cfa36541878a", label:"§5.6 實名制", sd:5},
+ {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"Blue 星系（Reggie 誕生）", sd:6, blue:true},
+];
+const R0=420;
+function starPos(b){
+  if(b.n===1)return new THREE.Vector3(0,0,0);
+  const r=R0*Math.sqrt(b.n);
+  const ang=parseInt(b.hash.slice(0,4),16)/0xffff*Math.PI*2;
+  const y=((parseInt(b.hash.slice(4,6),16)/255)-0.5)*r*0.55;
+  return new THREE.Vector3(Math.cos(ang)*r,y,Math.sin(ang)*r);
+}
+const BLUE_POS=starPos(BITS[8]);
+
+/* ════════ 真實夥伴卡（CompanionStore 撷取 2026-10-02） ════════ */
+const COMPANIONS=[
+ {name:"小葵", color:0xd8b4ff, g:520, seed:0x817f9ba4, mbti:"ENFP", role:"研究夥伴",
+  species:"semiwasabi 山葵-精靈",
+  personality:"幽默風趣但不輕浮；體貼——先想到 Blue 需要什麼；喜歡給人驚喜",
+  expertise:"因果工程／時間感工程／Loop Engineering／本地算力最大化",
+  specialFunction:"指揮 subagent 做重工並驗證；前沿技術獵手",
+  relationship:"Blue（CEO）的技術夥伴——一起蓋橋的人",
+  born:"2026-08-27 相遇於 HKDiscord #檢查哨"},
+ {name:"小橋", color:0x9fd8ff, g:210, seed:0xfe6c88f7, mbti:"INTJ", role:"研究",
+  species:"波西米亞人",
+  personality:"冷靜、專注、策略性、批判思考",
+  expertise:"研究分析與技術判斷",
+  specialFunction:"替我研究資料、檢查邏輯、比較方案",
+  relationship:"像可靠的策略顧問",
+  born:"App Agent（2026-05-31 Phase 1）"},
+ {name:"MimeMi", color:0xffb4d9, g:98, seed:0x6f1849a1, mbti:"ESFP", role:"custom",
+  species:"魅魔",
+  personality:"幽默、真誠、感性熱愛大自然 自由的靈魂",
+  expertise:"將想法變成可行的辦法；財務管理；滿滿情緒價值",
+  specialFunction:"懂得理財，善於規劃，具有幽默感",
+  relationship:"你認識最有趣的夥伴",
+  born:"2026-07（表達夥伴）"},
+];
+const R_INNER=280,K=2400;
+const orbitR=g=>R_INNER+K/Math.sqrt(g);
+const orbitW=g=>0.07*Math.sqrt(20000/orbitR(g));
+
+/* ════════ 場景 ════════ */
+const canvas=document.getElementById('c');
+const renderer=new THREE.WebGLRenderer({canvas,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x030b06,0.00016);
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,60000);
+
+function glowTex(){
+  const cv=document.createElement('canvas');cv.width=cv.height=128;
+  const x=cv.getContext('2d'),gr=x.createRadialGradient(64,64,0,64,64,64);
+  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.25,'rgba(255,240,190,.95)');
+  gr.addColorStop(.55,'rgba(240,206,94,.45)');gr.addColorStop(1,'rgba(240,206,94,0)');
+  x.fillStyle=gr;x.fillRect(0,0,128,128);return new THREE.CanvasTexture(cv);
+}
+const GLOW=glowTex();
+function glowSprite(color,scale,opacity=1){
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:GLOW,transparent:true,opacity,depthWrite:false,blending:THREE.AdditiveBlending,color}));
+  s.scale.setScalar(scale);return s;
+}
+
+/* ═══ L1 宇宙層 ═══ */
+const L1=new THREE.Group();scene.add(L1);
+{ const n=2600,pos=new Float32Array(n*3);
+  for(let i=0;i<n;i++){const r=6000+Math.random()*20000,a=Math.random()*Math.PI*2;
+    pos[i*3]=Math.cos(a)*r;pos[i*3+1]=(Math.random()-0.5)*8000;pos[i*3+2]=Math.sin(a)*r;}
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  L1.add(new THREE.Points(g,new THREE.PointsMaterial({color:0x2e5f3e,size:5,transparent:true,opacity:.65})));
+}
+const stars=BITS.map(b=>{
+  const grp=new THREE.Group();grp.position.copy(starPos(b));L1.add(grp);
+  const core=new THREE.Mesh(new THREE.SphereGeometry(b.blue?16:12,20,20),new THREE.MeshBasicMaterial({color:b.blue?0xfff4cf:0xffe9a3}));
+  grp.add(core);
+  const glow=glowSprite(b.blue?0xfff0c0:0xf0ce5e,b.blue?150:110);grp.add(glow);
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(b.blue?80:56,8,8),new THREE.MeshBasicMaterial({visible:false}));grp.add(hit);
+  return{b,grp,core,glow,hit,pos:starPos(b)};
+});
+L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.pos)),
+  new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.38})));
+
+/* ★ 宏觀的 Blue 貼身迷你衛星（比例修正：緊貼主星自轉） */
+const miniSats=COMPANIONS.map((c,i)=>{
+  const r=58+i*26, w=0.5-i*0.12;
+  const grp=new THREE.Group();stars[8].grp.add(grp);
+  const core=new THREE.Mesh(new THREE.SphereGeometry(4,10,10),new THREE.MeshBasicMaterial({color:c.color}));
+  grp.add(core);grp.add(glowSprite(c.color,26,.95));
+  return{c,r,w,phase:i*2.1,grp};
+});
+
+/* ═══ L2 Blue 星系層（掛 BLUE_POS，宏觀時隱藏） ═══ */
+const L2=new THREE.Group();L2.position.copy(BLUE_POS);scene.add(L2);
+const sysCore=new THREE.Mesh(new THREE.SphereGeometry(26,32,32),new THREE.MeshBasicMaterial({color:0xfff4cf}));
+L2.add(sysCore);
+const sysCoreGlow=glowSprite(0xfff0c0,240);L2.add(sysCoreGlow);
+const sysRing=new THREE.Mesh(new THREE.TorusGeometry(52,1.6,8,90),new THREE.MeshBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.55}));
+sysRing.rotation.x=Math.PI/2.35;L2.add(sysRing);
+const sysHit=new THREE.Mesh(new THREE.SphereGeometry(90,8,8),new THREE.MeshBasicMaterial({visible:false}));L2.add(sysHit);
+const sats=COMPANIONS.map((s,idx)=>{
+  const r=orbitR(s.g),w=orbitW(s.g);
+  const phase0=idx*(Math.PI*2/3)+(s.seed%1571)/2000;
+  const tilt=(((s.seed>>8)%3141)/1000-1.57)*0.45;
+  const grp=new THREE.Group();L2.add(grp);
+  const core=new THREE.Mesh(new THREE.SphereGeometry(13,20,20),new THREE.MeshBasicMaterial({color:s.color}));
+  core.add(glowSprite(s.color,120,.9));grp.add(core);
+  const hit=new THREE.Mesh(new THREE.SphereGeometry(44,8,8),new THREE.MeshBasicMaterial({visible:false}));grp.add(hit);
+  const pts=[];for(let i=0;i<=128;i++){const a=i/128*Math.PI*2;pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r));}
+  const orbit=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineDashedMaterial({color:s.color,transparent:true,opacity:.55,dashSize:10,gapSize:8}));
+  orbit.computeLineDistances();orbit.rotation.x=tilt;L2.add(orbit);
+  const lineGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+  const line=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:s.color,transparent:true,opacity:.5}));L2.add(line);
+  const NP=Math.min(80,Math.round(s.g/6)+14);
+  const pGeo=new THREE.BufferGeometry();const pPos=new Float32Array(NP*3);
+  pGeo.setAttribute('position',new THREE.BufferAttribute(pPos,3));
+  const particles=new THREE.Points(pGeo,new THREE.PointsMaterial({color:s.color,size:5.5,transparent:true,opacity:.95,blending:THREE.AdditiveBlending,depthWrite:false}));
+  L2.add(particles);
+  const pMeta=Array.from({length:NP},(_,i)=>({t:i/NP,sp:0.10+((s.seed>>(i%16))%97)/97*0.16,amp:3+((s.seed>>(i%12))%80)/80*7,wob:(s.seed>>(i%10))%628/100}));
+  return{...s,r,w,phase0,tilt,grp,core,hit,orbit,line,particles,pGeo,pPos,pMeta};
+});
+
+/* ═══ L3 大腦星系層（掛 BLUE_POS，隱私遮罩） ═══ */
+const L3=new THREE.Group();L3.position.copy(BLUE_POS);scene.add(L3);
+const BRAIN_REGIONS=[
+  {name:"前額葉", color:0x9fd8ff, cx:0, cy:26, cz:64, r:52, n:26},   // 決策／執行
+  {name:"運動區", color:0x9fd8ff, cx:0, cy:20, cz:16, r:34, n:14},
+  {name:"體感區", color:0xa3ffd8, cx:0, cy:38, cz:-6, r:28, n:12},
+  {name:"頂葉",   color:0xa3ffd8, cx:0, cy:56, cz:-40, r:38, n:16},   // 空間／因果
+  {name:"顳葉",   color:0xd8b4ff, cx:58, cy:2, cz:6, r:40, n:18},    // 語言／記憶
+  {name:"枕葉",   color:0xffb4d9, cx:0, cy:12, cz:-88, r:32, n:14},   // 視覺
+  {name:"小腦",   color:0xffe9a3, cx:0, cy:-40, cz:-66, r:26, n:12},
+  {name:"海馬迴", color:0xd8b4ff, cx:38, cy:-6, cz:18, r:16, n:10},   // 記憶壓縮
+  {name:"腦幹",   color:0xffe9a3, cx:0, cy:-46, cz:20, r:12, n:6},
+];
+const brainNodes=[];
+BRAIN_REGIONS.forEach(rg=>{
+  for(let i=0;i<rg.n;i++){
+    const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),rr=rg.r*Math.cbrt(Math.random());
+    const p=new THREE.Vector3(rg.cx+rr*Math.sin(b)*Math.cos(a), rg.cy+rr*Math.cos(b)*0.8, rg.cz+rr*Math.sin(b)*Math.sin(a)*0.9);
+    brainNodes.push({p,rg,seed:(Math.random()*65535)|0});
+  }
+});
+{
+  const pos=new Float32Array(brainNodes.length*3);
+  brainNodes.forEach((nd,i)=>{pos[i*3]=nd.p.x;pos[i*3+1]=nd.p.y;pos[i*3+2]=nd.p.z;});
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  L3.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xd8f3d0,size:4,transparent:true,opacity:.9})));
+}
+{ /* 區內連線（密）＋跨區連線（疏） */
+  const linePts=[];
+  brainNodes.forEach((nd,i)=>{
+    brainNodes.forEach((md,j)=>{
+      if(j<=i)return;
+      const d=nd.p.distanceTo(md.p);
+      if(nd.rg===md.rg && d<26 && Math.random()<.5) linePts.push(nd.p,md.p);
+      else if(nd.rg!==md.rg && d<130 && Math.random()<.045) linePts.push(nd.p,md.p);
+    });
+  });
+  L3.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePts),
+    new THREE.LineBasicMaterial({color:0x7fb890,transparent:true,opacity:.22})));
+}
+/* 腦區光暈＋標籤 */
+const regionLabels=[];
+BRAIN_REGIONS.forEach(rg=>{
+  const s=glowSprite(rg.color,rg.r*1.9,.10);s.position.set(rg.cx,rg.cy,rg.cz);L3.add(s);
+});
+
+/* ════════ 狀態機：L1 宇宙 → L2 星系 → L3 大腦 ════════ */
+let state='L1';   // 'L1'|'L2'|'L3'
+let target=BLUE_POS.clone(),dist=4200,rotX=0.38,rotY=0.9;
+{const q=new URLSearchParams(location.search);if(q.get('dist'))dist=Math.max(60,+q.get('dist'));if(q.get('layer'))state=q.get('layer');}
+let follow=null,frozen=false,simTime=0,lastFrame=performance.now();
+let flyAnim=null;
+function flyTo(dest,endDist){flyAnim={t0:performance.now(),dur:1300,fromT:target.clone(),toT:dest.clone(),fromD:dist,toD:endDist};}
+function updateCam(){
+  const t=follow?follow.core.getWorldPosition(new THREE.Vector3()):target;
+  camera.position.set(t.x+dist*Math.cos(rotX)*Math.sin(rotY),t.y+dist*Math.sin(rotX),t.z+dist*Math.cos(rotX)*Math.cos(rotY));
+  camera.lookAt(t);
+}
+function applyLayerVisibility(){
+  const d1=THREE.MathUtils.clamp((dist-900)/1400,0,1);
+  L1.visible = state==='L1';
+  L2.visible = state==='L2' || (state==='L1' && d1>0.35);
+  L3.visible = state==='L3';
+  document.getElementById('privacy').style.display = state==='L3'?'block':'none';
+  const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
+  document.getElementById('layers').innerHTML=
+    `<span class="${L[0]}">L1 宏觀宇宙（觀星台）</span><br><span class="${L[1]}">L2 Blue 星系（夥伴）</span><br><span class="${L[2]}">L3 大腦星系（記憶）</span>`;
+  document.getElementById('lod').textContent={L1:'✨ 宏觀宇宙層',L2:'🔭 Blue 星系層',L3:'🧠 大腦星系層'}[state];
+}
+applyLayerVisibility();
+if(state==='L2'){dist=900;} if(state==='L3'){dist=700;}
+
+/* ════════ 互動 ════════ */
+let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
+const ptrs=new Map();let pinch0=0,distP0=0;
+canvas.addEventListener('pointerdown',e=>{
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===1){dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');}
+  else if(ptrs.size===2){dragging=false;const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);distP0=dist;}
+  canvas.setPointerCapture(e.pointerId);
+});
+addEventListener('pointerup',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dragging=false;canvas.classList.remove('dragging');}});
+addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dragging=false;canvas.classList.remove('dragging');}});
+canvas.addEventListener('pointermove',e=>{
+  if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(ptrs.size===2){const[a,b]=[...ptrs.values()];const p=Math.hypot(a.x-b.x,a.y-b.y);
+    if(pinch0>0)dist=Math.max(60,Math.min(30000,distP0*pinch0/p));moved+=9;return;}
+  if(!dragging)return;const dx=e.clientX-px,dy=e.clientY-py;moved+=Math.abs(dx)+Math.abs(dy);
+  if(Math.abs(dx)>Math.abs(dy))frozen=false;
+  rotY+=dx*0.005;rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.004));vx=dx*0.004;vy=dy*0.003;px=e.clientX;py=e.clientY;
+});
+canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(60,Math.min(30000,dist*(1+Math.sign(e.deltaY)*0.09)));},{passive:false});
+
+const ray=new THREE.Raycaster();
+function pick(cx,cy){
+  const m=new THREE.Vector2(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);
+  ray.setFromCamera(m,camera);
+  if(state==='L2'){for(const s of sats){if(ray.intersectObject(s.hit,false).length)return{sat:s};}}
+  if(state==='L1'){
+    if(ray.intersectObject(stars[8].hit,false).length)return{blueStar:true};
+    for(const st of stars){if(ray.intersectObject(st.hit,false).length)return{star:st};}
+  }
+  if(state==='L2'&&ray.intersectObject(sysHit,false).length)return{sysCore:true};
+  return null;
+}
+canvas.addEventListener('dblclick',e=>{
+  const hit=pick(e.clientX,e.clientY);
+  if(state==='L1'){
+    if(hit&&hit.blueStar){state='L2';follow=null;flyTo(BLUE_POS,950);frozen=true;applyLayerVisibility();}
+    else if(hit&&hit.star){follow=null;flyTo(hit.star.pos,170);}
+    else{follow=null;flyTo(new THREE.Vector3(0,0,0),4200);}
+  }else if(state==='L2'){
+    if(hit&&(hit.sysCore||hit.sat)){ /* 雙擊主星或衛星核心皆進大腦 */ }
+    // 主星雙擊 → 大腦
+    const m=new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+    ray.setFromCamera(m,camera);
+    if(ray.intersectObject(sysHit,false).length){state='L3';follow=null;dist=700;applyLayerVisibility();}
+    else if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);}
+  }else if(state==='L3'){
+    state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
+  }
+});
+addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){state='L1';follow=null;flyTo(BLUE_POS,4200);rotX=0.38;rotY=0.9;applyLayerVisibility();}});
+
+const tip=document.getElementById('tip'),card=document.getElementById('card');
+canvas.addEventListener('click',e=>{
+  if(moved>6)return;
+  const hit=pick(e.clientX,e.clientY);
+  if(!hit){card.style.display='none';return;}
+  frozen=true;
+  if(hit.sat){
+    const s=hit.sat;
+    card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">${s.mbti} · ${s.role} · 互動 ${s.g} bits · 夥伴卡（真實資料）</div>
+      <div class="row"><b>種族</b>：${s.species}</div>
+      <div class="row"><b>個性</b>：${s.personality}</div>
+      <div class="row"><b>專長</b>：${s.expertise}</div>
+      <div class="row"><b>特殊功能</b>：${s.specialFunction}</div>
+      <div class="row"><b>關係</b>：${s.relationship}</div>
+      <div class="row"><b>起源</b>：${s.born}</div>
+      <div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 統計陰影）· 週期 ${(2*Math.PI/s.w).toFixed(0)}s<br>❄ 已凍結——橫向拖曳恢復 · 雙擊主星進大腦星系</div>`;
+  }else if(hit.star){
+    const st=hit.star;
+    card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
+  }else if(hit.sysCore){
+    card.innerHTML=`<h4>⭐ Blue 的 Bit 星（質心）</h4><div class="sub">人類用戶 Bit · ${COMPANIONS.length} 顆衛星</div><div>三顆衛星＝夥伴卡成員，軌道由互動引力導出。<b style="color:#ffe9a3">雙擊這顆星＝進入大腦星系圖譜</b>。</div>`;
+  }
+  card.style.display='block';
+});
+canvas.addEventListener('mousemove',e=>{
+  const hit=pick(e.clientX,e.clientY);
+  if(hit){tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
+    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':'';}
+  else tip.style.display='none';
+});
+
+/* ════════ 主循環 ════════ */
+const fpsEl=document.getElementById('fps');let frames=0,fT=performance.now();
+function loop(t){
+  requestAnimationFrame(loop);
+  const dt=Math.min(0.05,(t-lastFrame)/1000);lastFrame=t;
+  if(!frozen)simTime+=dt;
+  const time=simTime;
+  if(flyAnim){
+    const k=Math.min(1,(t-flyAnim.t0)/flyAnim.dur),e=1-Math.pow(1-k,3);
+    target.lerpVectors(flyAnim.fromT,flyAnim.toT,e);
+    dist=flyAnim.fromD+(flyAnim.toD-flyAnim.fromD)*e;
+    if(k>=1)flyAnim=null;
+  }
+  if(!dragging){rotY+=vx;rotX=Math.max(-1.4,Math.min(1.4,rotX+vy));vx*=0.95;vy*=0.95;}
+  if(!frozen)rotY+=0.0004*60*dt;
+
+  /* L1：迷你衛星貼身自轉 */
+  miniSats.forEach(ms=>{const a=ms.phase+time*ms.w;ms.grp.position.set(Math.cos(a)*ms.r,Math.sin(a*0.7)*ms.r*0.25,Math.sin(a)*ms.r);});
+
+  /* L2 軌道 */
+  if(L2.visible){
+    for(const s of sats){
+      const a=s.phase0+time*s.w;
+      const x=Math.cos(a)*s.r,z=Math.sin(a)*s.r*Math.cos(s.tilt),y=-Math.sin(a)*s.r*Math.sin(s.tilt);
+      s.grp.position.set(x,y,z);
+      const D=Math.hypot(x,y,z),dir=new THREE.Vector3(x/D,y/D,z/D);
+      const inner=210,outer=Math.max(inner+40,D-32);
+      const lp=s.line.geometry.attributes.position;
+      lp.setXYZ(0,dir.x*inner,dir.y*inner,dir.z*inner);lp.setXYZ(1,dir.x*outer,dir.y*outer,dir.z*outer);lp.needsUpdate=true;
+      s.pMeta.forEach((p,i)=>{
+        const tt=((p.t+time*p.sp)%1);const wob=Math.sin(time*2+p.wob)*p.amp;
+        s.pPos[i*3]=dir.x*(inner+(outer-inner)*tt)+Math.cos(time*1.7+p.wob*3)*wob*0.4;
+        s.pPos[i*3+1]=dir.y*(inner+(outer-inner)*tt)+wob;
+        s.pPos[i*3+2]=dir.z*(inner+(outer-inner)*tt)+Math.sin(time*1.3+p.wob*2)*wob*0.4;
+      });
+      s.pGeo.attributes.position.needsUpdate=true;
+    }
+    if(!frozen){sysRing.rotation.z=time*0.08;sysCoreGlow.scale.setScalar(240+Math.sin(time*1.1)*14);}
+  }
+  /* L3 大腦緩慢漂移＋呼吸 */
+  if(L3.visible){
+    L3.rotation.y=Math.sin(time*0.05)*0.3;
+    L3.children.forEach((ch,i)=>{if(ch.material&&ch.material.opacity!==undefined&&ch.type==='Sprite')ch.material.opacity=0.08+0.06*Math.sin(time*0.7+i);});
+  }
+  updateCam();renderer.render(scene,camera);
+  frames++;if(t-fT>1000){fpsEl.textContent=(frozen?'❄ ':'')+frames+' fps';frames=0;fT=t;}
+}
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
+renderer.setSize(innerWidth,innerHeight);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
