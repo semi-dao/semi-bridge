@@ -371,7 +371,7 @@ function applyLayerVisibility(){
   L2.visible = state==='L2';          // 修：宏觀層絕不渲染 L2 軌道（6 衛星事故根因）
   L3.visible = state==='L3' && !document.getElementById('brainFrame');
   const bf=document.getElementById('brainFrame');
-  if(bf){ bf.style.display = state==='L3'?'block':'none'; if(state==='L3'&&!bf.src) bf.src=bf.dataset.src; }
+  if(bf){ bf.style.display = state==='L3'?'block':'none'; if(state==='L3'&&!bf.src) bf.src=bf.dataset.src+'?v=20261002c'; }
   document.getElementById('privacy').style.display = 'none';
   document.getElementById('back').style.display = state==='L1'?'none':'block';
   const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
