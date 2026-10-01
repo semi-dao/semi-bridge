@@ -33,13 +33,15 @@
 <canvas id="c"></canvas>
 <div id="ui"><b>SEMIDAO · 三層宇宙</b><br>
 <span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span></div>
-<div id="hint">雙擊 Blue 星＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · R＝回宏觀</div>
+<div id="hint">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · 「← 上一層」按鈕＝返回 · R＝回宏觀</div>
 <div id="fps"></div>
 <div id="lod"></div>
 <div id="layers"></div>
 <div id="card"></div>
 <div id="tip"></div>
 <div id="privacy">🔒 隱私遮罩：大腦星系僅結構形狀可見——內容屬艙內主權</div>
+<button id="back">← 上一層</button>
+<style>#back{position:fixed;bottom:44px;left:18px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
 <script type="module">
 import * as THREE from 'three';
 
@@ -232,11 +234,11 @@ function updateCam(){
   camera.lookAt(t);
 }
 function applyLayerVisibility(){
-  const d1=THREE.MathUtils.clamp((dist-900)/1400,0,1);
   L1.visible = state==='L1';
-  L2.visible = state==='L2' || (state==='L1' && d1>0.35);
+  L2.visible = state==='L2';          // 修：宏觀層絕不渲染 L2 軌道（6 衛星事故根因）
   L3.visible = state==='L3';
   document.getElementById('privacy').style.display = state==='L3'?'block':'none';
+  document.getElementById('back').style.display = state==='L1'?'none':'block';
   const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
   document.getElementById('layers').innerHTML=
     `<span class="${L[0]}">L1 宏觀宇宙（觀星台）</span><br><span class="${L[1]}">L2 Blue 星系（夥伴）</span><br><span class="${L[2]}">L3 大腦星系（記憶）</span>`;
@@ -245,7 +247,37 @@ function applyLayerVisibility(){
 applyLayerVisibility();
 if(state==='L2'){dist=900;} if(state==='L3'){dist=700;}
 
-/* ════════ 互動 ════════ */
+/* ══════ 互動 ══════ */
+/* 手機雙擊偵測（iOS Safari 不發 dblclick）＋返回按鈕 */
+let lastTap=0, lastTapX=0, lastTapY=0;
+function tapHandler(cx,cy){
+  const now=performance.now();
+  if(now-lastTap<320 && Math.abs(cx-lastTapX)<40 && Math.abs(cy-lastTapY)<40){
+    lastTap=0; enterLayer(cx,cy);   // 雙擊 tap
+  } else { lastTap=now; lastTapX=cx; lastTapY=cy; }
+}
+function enterLayer(cx,cy){
+  const hit=pick(cx,cy);
+  if(state==='L1'){
+    if(hit&&hit.blueStar){state='L2';follow=null;flyTo(BLUE_POS,950);frozen=true;applyLayerVisibility();}
+    else if(hit&&hit.star){follow=null;flyTo(hit.star.pos,170);}
+    else{follow=null;flyTo(new THREE.Vector3(0,0,0),4200);}
+  }else if(state==='L2'){
+    if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);return;}
+    const m=new THREE.Vector2(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);
+    ray.setFromCamera(m,camera);
+    if(ray.intersectObject(sysHit,false).length||!hit){state='L3';follow=null;dist=700;applyLayerVisibility();}
+  }else if(state==='L3'){
+    state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
+  }
+}
+document.getElementById('back').addEventListener('click',()=>{
+  if(state==='L3'){state='L2';flyTo(BLUE_POS,950);}
+  else if(state==='L2'){state='L1';flyTo(BLUE_POS,4200);}
+  follow=null;applyLayerVisibility();
+});
+canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));
+
 let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
 const ptrs=new Map();let pinch0=0,distP0=0;
 canvas.addEventListener('pointerdown',e=>{
@@ -254,7 +286,13 @@ canvas.addEventListener('pointerdown',e=>{
   else if(ptrs.size===2){dragging=false;const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);distP0=dist;}
   canvas.setPointerCapture(e.pointerId);
 });
-addEventListener('pointerup',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dragging=false;canvas.classList.remove('dragging');}});
+addEventListener('pointerup',e=>{
+  ptrs.delete(e.pointerId);
+  if(!ptrs.size){
+    dragging=false;canvas.classList.remove('dragging');
+    if(moved<8 && e.pointerType!=='mouse') tapHandler(e.clientX,e.clientY);   // mobile tap：雙擊偵測
+  }
+});
 addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dragging=false;canvas.classList.remove('dragging');}});
 canvas.addEventListener('pointermove',e=>{
   if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
