@@ -39,7 +39,8 @@
 <div id="layers"></div>
 <div id="card"></div>
 <div id="tip"></div>
-<div id="privacy">🔒 隱私遮罩：大腦星系僅結構形狀可見——內容屬艙內主權</div>
+<div id="privacy">🔓 無遮蔽模式（Blue 本人檢視）——未來訪客視角將依隱私遮罩分級顯示</div>
+<script src="brain-data.js"></script>
 <button id="back">← 上一層</button>
 <style>#back{position:fixed;bottom:44px;left:18px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
 <script type="module">
@@ -175,50 +176,65 @@ const sats=COMPANIONS.map((s,idx)=>{
   return{...s,r,w,phase0,tilt,grp,core,hit,orbit,line,particles,pGeo,pPos,pMeta};
 });
 
-/* ═══ L3 大腦星系層（掛 BLUE_POS，隱私遮罩） ═══ */
+/* ═══ L3 大腦星系層（真實腦容器：483 記憶×101 連線） ═══ */
 const L3=new THREE.Group();L3.position.copy(BLUE_POS);scene.add(L3);
-const BRAIN_REGIONS=[
-  {name:"前額葉", color:0x9fd8ff, cx:0, cy:26, cz:64, r:52, n:26},   // 決策／執行
-  {name:"運動區", color:0x9fd8ff, cx:0, cy:20, cz:16, r:34, n:14},
-  {name:"體感區", color:0xa3ffd8, cx:0, cy:38, cz:-6, r:28, n:12},
-  {name:"頂葉",   color:0xa3ffd8, cx:0, cy:56, cz:-40, r:38, n:16},   // 空間／因果
-  {name:"顳葉",   color:0xd8b4ff, cx:58, cy:2, cz:6, r:40, n:18},    // 語言／記憶
-  {name:"枕葉",   color:0xffb4d9, cx:0, cy:12, cz:-88, r:32, n:14},   // 視覺
-  {name:"小腦",   color:0xffe9a3, cx:0, cy:-40, cz:-66, r:26, n:12},
-  {name:"海馬迴", color:0xd8b4ff, cx:38, cy:-6, cz:18, r:16, n:10},   // 記憶壓縮
-  {name:"腦幹",   color:0xffe9a3, cx:0, cy:-46, cz:20, r:12, n:6},
-];
-const brainNodes=[];
-BRAIN_REGIONS.forEach(rg=>{
-  for(let i=0;i<rg.n;i++){
-    const a=Math.random()*Math.PI*2,b=Math.acos(2*Math.random()-1),rr=rg.r*Math.cbrt(Math.random());
-    const p=new THREE.Vector3(rg.cx+rr*Math.sin(b)*Math.cos(a), rg.cy+rr*Math.cos(b)*0.8, rg.cz+rr*Math.sin(b)*Math.sin(a)*0.9);
-    brainNodes.push({p,rg,seed:(Math.random()*65535)|0});
-  }
+const ROOM_META={
+  bridges:  {name:"橋",   color:0xf0ce5e, cx:-140, cy:10,  cz:0,   r:70},
+  doors:    {name:"門",   color:0x9fd8ff, cx:0,    cy:8,   cz:150, r:62},
+  fraile:   {name:"碎片", color:0xd8b4ff, cx:130,  cy:30,  cz:-30, r:60},
+  heartMind:{name:"心靈", color:0xff9fb8, cx:-10,  cy:-20, cz:-150,r:48},
+  pendulums:{name:"鐘擺", color:0xa3ffd8, cx:150,  cy:-40, cz:80,  r:34},
+  sketch:   {name:"草稿", color:0x88c9a0, cx:-160, cy:-45, cz:110, r:22},
+  stream:   {name:"流",   color:0xd8f3d0, cx:0,    cy:45,  cz:0,   r:150},  // 最大的家
+};
+const brainIdx=new Map();
+BRAIN_DATA.nodes.forEach(nd=>{
+  const rm=ROOM_META[nd.room]||ROOM_META.stream;
+  const rr=rm.r*Math.pow(nd.sx,0.45);   // 內密外疏的球狀分布
+  const a=nd.sy*Math.PI*2, b=(nd.sz-0.5)*Math.PI;
+  nd.p=new THREE.Vector3(rm.cx+rr*Math.cos(b)*Math.cos(a), rm.cy+rr*Math.sin(b)*0.75, rm.cz+rr*Math.cos(b)*Math.sin(a));
+  brainIdx.set(nd.id,nd);
 });
+/* 記憶星（Points：483 顆一次 draw call）＋撿取代理 */
+const bPos=new Float32Array(BRAIN_DATA.nodes.length*3);
+const bCol=new Float32Array(BRAIN_DATA.nodes.length*3);
+const bSize=new Float32Array(BRAIN_DATA.nodes.length);
+BRAIN_DATA.nodes.forEach((nd,i)=>{
+  bPos.set([nd.p.x,nd.p.y,nd.p.z],i*3);
+  const c=new THREE.Color(ROOM_META[nd.room]?ROOM_META[nd.room].color:0xd8f3d0);
+  bCol.set([c.r,c.g,c.b],i*3);
+  bSize[i]=3.5+nd.imp*1.4;
+});
+const bGeo=new THREE.BufferGeometry();
+bGeo.setAttribute('position',new THREE.BufferAttribute(bPos,3));
+bGeo.setAttribute('color',new THREE.BufferAttribute(bCol,3));
+const bMat=new THREE.PointsMaterial({size:5,vertexColors:true,transparent:true,opacity:.95,map:GLOW,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
+const brainPoints=new THREE.Points(bGeo,bMat);L3.add(brainPoints);
+/* 撿取：重要性高的記憶＋有連線的記憶掛隱形代理（效能上限 60） */
+const brainHits=[];
+BRAIN_DATA.nodes.filter(nd=>nd.imp>=4||brainIdx.has(nd.id)).slice(0,60).forEach(nd=>{
+  const hm=new THREE.Mesh(new THREE.SphereGeometry(7,6,6),new THREE.MeshBasicMaterial({visible:false}));
+  hm.position.copy(nd.p);hm.userData=nd;L3.add(hm);brainHits.push(hm);
+});
+/* 真實神經連線（顏色=類型） */
+const TYPE_COLOR={doorTie:0x9fd8ff,similar:0x7fb890,causal:0xf0ce5e,wiki:0xd8b4ff};
 {
-  const pos=new Float32Array(brainNodes.length*3);
-  brainNodes.forEach((nd,i)=>{pos[i*3]=nd.p.x;pos[i*3+1]=nd.p.y;pos[i*3+2]=nd.p.z;});
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(pos,3));
-  L3.add(new THREE.Points(g,new THREE.PointsMaterial({color:0xd8f3d0,size:4,transparent:true,opacity:.9})));
-}
-{ /* 區內連線（密）＋跨區連線（疏） */
-  const linePts=[];
-  brainNodes.forEach((nd,i)=>{
-    brainNodes.forEach((md,j)=>{
-      if(j<=i)return;
-      const d=nd.p.distanceTo(md.p);
-      if(nd.rg===md.rg && d<26 && Math.random()<.5) linePts.push(nd.p,md.p);
-      else if(nd.rg!==md.rg && d<130 && Math.random()<.045) linePts.push(nd.p,md.p);
-    });
+  const pts=[];const cols=[];
+  BRAIN_DATA.links.forEach(lk=>{
+    const A=brainIdx.get(lk.a),B=brainIdx.get(lk.b);
+    if(!A||!B)return;
+    pts.push(A.p.x,A.p.y,A.p.z,B.p.x,B.p.y,B.p.z);
+    const c=new THREE.Color(TYPE_COLOR[lk.type]||0x7fb890);
+    cols.push(c.r,c.g,c.b,c.r,c.g,c.b);
   });
-  L3.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(linePts),
-    new THREE.LineBasicMaterial({color:0x7fb890,transparent:true,opacity:.22})));
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
+  L3.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.75})));
 }
-/* 腦區光暈＋標籤 */
-const regionLabels=[];
-BRAIN_REGIONS.forEach(rg=>{
-  const s=glowSprite(rg.color,rg.r*1.9,.10);s.position.set(rg.cx,rg.cy,rg.cz);L3.add(s);
+/* 房間光暈 */
+Object.entries(ROOM_META).forEach(([k,rm])=>{
+  const s=glowSprite(rm.color,rm.r*2.4,.08);s.position.set(rm.cx,rm.cy,rm.cz);L3.add(s);
 });
 
 /* ════════ 狀態機：L1 宇宙 → L2 星系 → L3 大腦 ════════ */
@@ -314,6 +330,7 @@ function pick(cx,cy){
     for(const st of stars){if(ray.intersectObject(st.hit,false).length)return{star:st};}
   }
   if(state==='L2'&&ray.intersectObject(sysHit,false).length)return{sysCore:true};
+  if(state==='L3'){for(const hm of brainHits){if(ray.intersectObject(hm,false).length)return{memory:hm.userData};}}
   return null;
 }
 canvas.addEventListener('dblclick',e=>{
@@ -356,13 +373,20 @@ canvas.addEventListener('click',e=>{
     card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
   }else if(hit.sysCore){
     card.innerHTML=`<h4>⭐ Blue 的 Bit 星（質心）</h4><div class="sub">人類用戶 Bit · ${COMPANIONS.length} 顆衛星</div><div>三顆衛星＝夥伴卡成員，軌道由互動引力導出。<b style="color:#ffe9a3">雙擊這顆星＝進入大腦星系圖譜</b>。</div>`;
+  }else if(hit.memory){
+    const nd=hit.memory;
+    const rm=ROOM_META[nd.room]||{name:nd.room};
+    const dt=nd.t?new Date(nd.t).toLocaleString('zh-TW'):'—';
+    card.innerHTML=`<h4>🧠 記憶星</h4><div class="sub">${rm.name}房 · ${nd.sub||''} · 重要性 ${nd.imp}/5 · ${dt}</div>
+      <div style="color:#dfeee0">${nd.preview}…</div>
+      <div style="color:#7fa88f;font-size:11px;margin-top:8px">id ${nd.id}<br>agent: ${nd.agent||'—'}<br>❄ 已凍結——橫向拖曳恢復</div>`;
   }
   card.style.display='block';
 });
 canvas.addEventListener('mousemove',e=>{
   const hit=pick(e.clientX,e.clientY);
   if(hit){tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
-    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':'';}
+    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':hit.memory?(hit.memory.preview.slice(0,18)+'…'):'';}
   else tip.style.display='none';
 });
 
