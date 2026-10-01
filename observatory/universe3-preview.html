@@ -31,17 +31,17 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ui"><b>SEMIDAO · 三層宇宙</b><br>
+<div id="ui" style="display:none"><b>SEMIDAO · 三層宇宙</b><br>
 <span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span></div>
-<div id="hint">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · 「← 上一層」按鈕＝返回 · R＝回宏觀</div>
-<div id="fps"></div>
-<div id="lod"></div>
-<div id="layers"></div>
+<div id="hint" style="display:none">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · 「← 上一層」按鈕＝返回 · R＝回宏觀</div>
+<div id="fps" style="display:none"></div>
+<div id="lod" style="display:none"></div>
+<div id="layers" style="display:none"></div>
 <div id="card"></div>
 <div id="tip"></div>
-<div id="privacy">🔓 無遮蔽模式（Blue 本人檢視）——未來訪客視角將依隱私遮罩分級顯示</div>
+<div id="privacy" style="display:none">🔓 無遮蔽模式（Blue 本人檢視）</div>
 <script src="brain-data.js"></script>
-<button id="back">← 上一層</button>
+<iframe id="brainFrame" src="brain-official.html" style="display:none;position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2"></iframe><button id="back">← 上一層</button>
 <style>#back{position:fixed;bottom:44px;left:18px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
 <script type="module">
 import * as THREE from 'three';
@@ -176,66 +176,183 @@ const sats=COMPANIONS.map((s,idx)=>{
   return{...s,r,w,phase0,tilt,grp,core,hit,orbit,line,particles,pGeo,pPos,pMeta};
 });
 
-/* ═══ L3 大腦星系層（真實腦容器：483 記憶×101 連線） ═══ */
+/* ═══ L3 大腦星系層（App galaxy.html 同款：官方 galaxy_data 159節點×7149檔案星×COSMOS_SEED=20260830） ═══ */
 const L3=new THREE.Group();L3.position.copy(BLUE_POS);scene.add(L3);
-const ROOM_META={
-  bridges:  {name:"橋",   color:0xf0ce5e, cx:-140, cy:10,  cz:0,   r:70},
-  doors:    {name:"門",   color:0x9fd8ff, cx:0,    cy:8,   cz:150, r:62},
-  fraile:   {name:"碎片", color:0xd8b4ff, cx:130,  cy:30,  cz:-30, r:60},
-  heartMind:{name:"心靈", color:0xff9fb8, cx:-10,  cy:-20, cz:-150,r:48},
-  pendulums:{name:"鐘擺", color:0xa3ffd8, cx:150,  cy:-40, cz:80,  r:34},
-  sketch:   {name:"草稿", color:0x88c9a0, cx:-160, cy:-45, cz:110, r:22},
-  stream:   {name:"流",   color:0xd8f3d0, cx:0,    cy:45,  cz:0,   r:150},  // 最大的家
-};
-const brainIdx=new Map();
-BRAIN_DATA.nodes.forEach(nd=>{
-  const rm=ROOM_META[nd.room]||ROOM_META.stream;
-  const rr=rm.r*Math.pow(nd.sx,0.45);   // 內密外疏的球狀分布
-  const a=nd.sy*Math.PI*2, b=(nd.sz-0.5)*Math.PI;
-  nd.p=new THREE.Vector3(rm.cx+rr*Math.cos(b)*Math.cos(a), rm.cy+rr*Math.sin(b)*0.75, rm.cz+rr*Math.cos(b)*Math.sin(a));
-  brainIdx.set(nd.id,nd);
-});
-/* 記憶星（Points：483 顆一次 draw call）＋撿取代理 */
-const bPos=new Float32Array(BRAIN_DATA.nodes.length*3);
-const bCol=new Float32Array(BRAIN_DATA.nodes.length*3);
-const bSize=new Float32Array(BRAIN_DATA.nodes.length);
-BRAIN_DATA.nodes.forEach((nd,i)=>{
-  bPos.set([nd.p.x,nd.p.y,nd.p.z],i*3);
-  const c=new THREE.Color(ROOM_META[nd.room]?ROOM_META[nd.room].color:0xd8f3d0);
-  bCol.set([c.r,c.g,c.b],i*3);
-  bSize[i]=3.5+nd.imp*1.4;
-});
-const bGeo=new THREE.BufferGeometry();
-bGeo.setAttribute('position',new THREE.BufferAttribute(bPos,3));
-bGeo.setAttribute('color',new THREE.BufferAttribute(bCol,3));
-const bMat=new THREE.PointsMaterial({size:5,vertexColors:true,transparent:true,opacity:.95,map:GLOW,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
-const brainPoints=new THREE.Points(bGeo,bMat);L3.add(brainPoints);
-/* 撿取：重要性高的記憶＋有連線的記憶掛隱形代理（效能上限 60） */
-const brainHits=[];
-BRAIN_DATA.nodes.filter(nd=>nd.imp>=4||brainIdx.has(nd.id)).slice(0,60).forEach(nd=>{
-  const hm=new THREE.Mesh(new THREE.SphereGeometry(7,6,6),new THREE.MeshBasicMaterial({visible:false}));
-  hm.position.copy(nd.p);hm.userData=nd;L3.add(hm);brainHits.push(hm);
-});
-/* 真實神經連線（顏色=類型） */
-const TYPE_COLOR={doorTie:0x9fd8ff,similar:0x7fb890,causal:0xf0ce5e,wiki:0xd8b4ff};
+const breathingLines=[];   // 呼吸線池（opacity 隨時間起伏）
+const ROOM_COLOR={doors:0x5fb8ff,stream:0x9d7bff,pendulums:0xff8a5f,heartMind:0xff6f9c,fraile:0x66e0c3};
+const COSMOS_SEED=20260830;
+function mulberry32(seed){let a=seed>>>0;return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+const cosmosRng=mulberry32(COSMOS_SEED);
+const roomCenter={};
 {
-  const pts=[];const cols=[];
-  BRAIN_DATA.links.forEach(lk=>{
-    const A=brainIdx.get(lk.a),B=brainIdx.get(lk.b);
-    if(!A||!B)return;
-    pts.push(A.p.x,A.p.y,A.p.z,B.p.x,B.p.y,B.p.z);
-    const c=new THREE.Color(TYPE_COLOR[lk.type]||0x7fb890);
-    cols.push(c.r,c.g,c.b,c.r,c.g,c.b);
+  const rooms=Object.keys(ROOM_COLOR);
+  const jitter=i=>(cosmosRng()-.5)*36*Math.PI/180;
+  const yArc=i=>Math.sin(i/rooms.length*Math.PI*2)*260;
+  const rVar=i=>820+cosmosRng()*120;
+  rooms.forEach((room,i)=>{
+    const th=i/rooms.length*Math.PI*2+jitter(i);
+    const r=rVar(i);
+    roomCenter[room]=[Math.cos(th)*r,yArc(i),Math.sin(th)*r];
+  });
+}
+/* 記憶→引用重心（姿態令：身體在房間、心向著它在乎的檔案世界） */
+const assets=BRAIN_DATA.files;
+const memPull={};
+BRAIN_DATA.mem_asset.forEach(([mi,fi])=>{
+  const n=BRAIN_DATA.nodes[mi];if(!n)return;
+  const a=assets[fi];if(!a)return;
+  const p=memPull[n.id]||(memPull[n.id]={cx:0,cy:0,cz:0,n:0});
+  p.cx+=a.x;p.cy+=a.y;p.cz+=a.z;p.n++;
+});
+/* 159 記憶星：InstancedMesh 球（importance→大小、links→原子核放大）＋圓霧泡泡 */
+const memNodes=[];
+{
+  const geo=new THREE.SphereGeometry(1,20,14);
+  const mat=new THREE.MeshBasicMaterial();
+  const inst=new THREE.InstancedMesh(geo,mat,BRAIN_DATA.nodes.length);
+  const dummy=new THREE.Object3D();
+  BRAIN_DATA.nodes.forEach((n,i)=>{
+    const c=roomCenter[n.room]||[0,0,0];
+    const th=cosmosRng()*Math.PI*2,ph=Math.acos(2*cosmosRng()-1),r=140+cosmosRng()*420;
+    let x=c[0]+r*Math.sin(ph)*Math.cos(th),y=c[1]+r*Math.cos(ph)*.7,z=c[2]+r*Math.sin(ph)*Math.sin(th);
+    const mp=memPull[n.id];
+    if(mp&&mp.n>0){x=x*0.75+(mp.cx/mp.n)*0.25;y=y*0.75+(mp.cy/mp.n)*0.25;z=z*0.75+(mp.cz/mp.n)*0.25;}
+    const links=(mp&&mp.n)||0;
+    const nucBoost=links>1?1+Math.log10(links)*0.75:1;
+    const size=(5+Math.min(n.imp||1,10)*2.2)*nucBoost;
+    dummy.position.set(x,y,z);dummy.scale.setScalar(size*0.35);dummy.updateMatrix();
+    inst.setMatrixAt(i,dummy.matrix);
+    const bright=Math.min(2.2,0.9+Math.log10(1+(links||0))/4);
+    inst.setColorAt(i,new THREE.Color(ROOM_COLOR[n.room]||0x9fb4a6).multiplyScalar(bright));
+    memNodes.push({...n,x,y,z,size,links});
+  });
+  L3.add(inst);
+}
+/* 記憶球圓霧光暈（App 同款 makeGlowTexture 圓形放射漸層）——links 越多霧越大 */
+function makeGlowTexture(){
+  const c=document.createElement('canvas');c.width=c.height=128;
+  const g=c.getContext('2d');
+  const rg=g.createRadialGradient(64,64,4,64,64,64);
+  rg.addColorStop(0,'rgba(255,255,255,1)');rg.addColorStop(.25,'rgba(216,182,255,.85)');rg.addColorStop(.6,'rgba(178,141,255,.28)');rg.addColorStop(1,'rgba(178,141,255,0)');
+  g.fillStyle=rg;g.fillRect(0,0,128,128);
+  return new THREE.CanvasTexture(c);
+}
+const ROUND_GLOW=makeGlowTexture();
+memNodes.forEach(n=>{
+  const s=new THREE.Sprite(new THREE.SpriteMaterial({map:ROUND_GLOW,transparent:true,opacity:Math.min(.62,.3+(n.links||0)*.03),depthTest:false,blending:THREE.NormalBlending,color:ROOM_COLOR[n.room]||0x9fb4a6}));
+  s.scale.setScalar(n.size*6);
+  s.position.set(n.x,n.y,n.z);
+  L3.add(s);
+});
+/* 7149 檔案星：Points＋DIAMOND_TEX＋per-point 色（L=亮度層） */
+function makeDiamondTexture(){
+  const c=document.createElement('canvas');c.width=c.height=128;
+  const g=c.getContext('2d');g.translate(64,64);g.rotate(Math.PI/4);
+  const skirt=g.createLinearGradient(-58,-58,58,58);
+  skirt.addColorStop(0,'rgba(255,255,255,0)');skirt.addColorStop(.5,'rgba(255,255,255,.5)');skirt.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=skirt;g.fillRect(-58,-58,116,116);
+  const sq=g.createLinearGradient(-42,-42,42,42);
+  sq.addColorStop(0,'rgba(255,255,255,.55)');sq.addColorStop(.5,'rgba(255,255,255,1)');sq.addColorStop(1,'rgba(255,255,255,.55)');
+  g.fillStyle=sq;g.fillRect(-42,-42,84,84);
+  g.strokeStyle='rgba(255,255,255,.9)';g.lineWidth=3;g.strokeRect(-42,-42,84,84);
+  return new THREE.CanvasTexture(c);
+}
+const DIAMOND_TEX=makeDiamondTexture();
+{
+  const sg=new THREE.BufferGeometry();
+  const pos=new Float32Array(assets.length*3);
+  const col=new Float32Array(assets.length*3);
+  const as=new Float32Array(assets.length);
+  const base=new THREE.Color(0x9fc7b4);
+  assets.forEach((a,i)=>{
+    pos[i*3]=a.x;pos[i*3+1]=a.y;pos[i*3+2]=a.z;
+    const kb=(a.s||0)/1024;
+    as[i]=0.9+Math.min(1.0,Math.log10(1+kb)/2.0);
+    const L=a.L||1;
+    const c=base.clone().multiplyScalar(0.55+Math.min(1.4,L*0.35));
+    col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+  });
+  sg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  sg.setAttribute('color',new THREE.BufferAttribute(col,3));
+  L3.add(new THREE.Points(sg,new THREE.PointsMaterial({size:12,vertexColors:true,transparent:true,opacity:1.0,sizeAttenuation:true,map:DIAMOND_TEX,alphaTest:0.03,depthWrite:false,blending:THREE.AdditiveBlending})));
+}
+/* 檔案骨幹連線（file_links 抽樣）——呼吸感淡青 */
+{
+  const pts=[];
+  BRAIN_DATA.file_links_sample.forEach(([a,b])=>{
+    const A=assets[a],B=assets[b];if(!A||!B)return;
+    pts.push(A.x,A.y,A.z,B.x,B.y,B.z);
   });
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
-  g.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
-  L3.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.75})));
+  L3.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0x5a8f78,transparent:true,opacity:.16})));
 }
-/* 房間光暈 */
-Object.entries(ROOM_META).forEach(([k,rm])=>{
-  const s=glowSprite(rm.color,rm.r*2.4,.08);s.position.set(rm.cx,rm.cy,rm.cz);L3.add(s);
+/* 記憶↔檔案引力線（mem_asset 抽樣）——金色細絲 */
+{
+  const pts=[];
+  BRAIN_DATA.mem_asset.forEach(([mi,fi])=>{
+    const n=memNodes[mi],a=assets[fi];if(!n||!a)return;
+    pts.push(n.x,n.y,n.z,a.x,a.y,a.z);
+  });
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+  L3.add(new THREE.LineSegments(g,new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.10})));
+}
+/* 神經邊（26 條）——亮＋弧度絲帶（同款 ribbon 概念：貝茲拱起） */
+{
+  const idx=new Map(BRAIN_DATA.nodes.map((n,i)=>[n.id,i]));
+  const curves=[];
+  BRAIN_DATA.edges.forEach(({a,b})=>{
+    const A=memNodes[idx.get(a)],B=memNodes[idx.get(b)];if(!A||!B)return;
+    curves.push({A,B});
+  });
+  curves.forEach(({A,B})=>{
+    const mid=new THREE.Vector3().addVectors(
+      new THREE.Vector3(A.x,A.y,A.z),new THREE.Vector3(B.x,B.y,B.z)).multiplyScalar(.5);
+    const dir=new THREE.Vector3(B.x-A.x,B.y-A.y,B.z-A.z);
+    const len=dir.length();
+    /* 弧度：中點沿垂直方向拱起（長度 18%）——重力井裡繃緊的絲 */
+    const perp=new THREE.Vector3(-dir.z,dir.x,0).normalize().multiplyScalar(len*.18)
+      .add(new THREE.Vector3(0,len*.10,0));
+    mid.add(perp);
+    const curve=new THREE.QuadraticBezierCurve3(new THREE.Vector3(A.x,A.y,A.z),mid,new THREE.Vector3(B.x,B.y,B.z));
+    const pts=curve.getPoints(32);
+    const geo=new THREE.BufferGeometry().setFromPoints(pts);
+    const mat=new THREE.LineBasicMaterial({color:0x9fd8ff,transparent:true,opacity:.75});
+    const line=new THREE.Line(geo,mat);
+    line.userData.breath={phase:Math.random()*6.28,speed:.5+Math.random()*.7};
+    L3.add(line);breathingLines.push(line);
+  });
+}
+/* 檔案骨幹＋記憶引力線也加入呼吸池 */
+L3.traverse(o=>{if(o.isLine&&o.userData&&o.userData.fileLine)o.userData.breath={phase:Math.random()*6.28,speed:.25};});
+/* 記憶撿取代理（重要性高者） */
+const brainHits=[];
+memNodes.filter(n=>(n.imp||0)>=4).slice(0,40).forEach(nd=>{
+  const hm=new THREE.Mesh(new THREE.SphereGeometry(14,6,6),new THREE.MeshBasicMaterial({visible:false}));
+  hm.position.set(nd.x,nd.y,nd.z);hm.userData=nd;L3.add(hm);brainHits.push(hm);
 });
+/* 粒子流：沿記憶↔檔案引力線流動的光塵（每條線 2~3 顆，深海章魚韻律） */
+const flowParticles=[];
+{
+  const allPts=[];
+  BRAIN_DATA.mem_asset.forEach(([mi,fi],k)=>{
+    const n=memNodes[mi],a=assets[fi];if(!n||!a)return;
+    if(k%3!==0)return;   // 抽 1/3 條線（~108 條）
+    const NP=2+(k%2);
+    for(let j=0;j<NP;j++){
+      allPts.push({ax:n.x,ay:n.y,az:n.z,bx:a.x,by:a.y,bz:a.z,
+        t:Math.random(),sp:.04+Math.random()*.10,amp:4+Math.random()*10,wob:Math.random()*6.28});
+    }
+  });
+  const pos=new Float32Array(allPts.length*3);
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  const mat=new THREE.PointsMaterial({color:0xbfd8ff,size:6,transparent:true,opacity:.85,map:ROUND_GLOW,blending:THREE.AdditiveBlending,depthWrite:false,sizeAttenuation:true});
+  const cloud=new THREE.Points(geo,mat);
+  L3.add(cloud);
+  flowParticles.push({cloud,pts:allPts,pos});
+}
 
 /* ════════ 狀態機：L1 宇宙 → L2 星系 → L3 大腦 ════════ */
 let state='L1';   // 'L1'|'L2'|'L3'
@@ -252,8 +369,10 @@ function updateCam(){
 function applyLayerVisibility(){
   L1.visible = state==='L1';
   L2.visible = state==='L2';          // 修：宏觀層絕不渲染 L2 軌道（6 衛星事故根因）
-  L3.visible = state==='L3';
-  document.getElementById('privacy').style.display = state==='L3'?'block':'none';
+  L3.visible = state==='L3' && !document.getElementById('brainFrame');
+  const bf=document.getElementById('brainFrame');
+  if(bf) bf.style.display = state==='L3'?'block':'none';
+  document.getElementById('privacy').style.display = 'none';
   document.getElementById('back').style.display = state==='L1'?'none':'block';
   const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
   document.getElementById('layers').innerHTML=
@@ -261,7 +380,7 @@ function applyLayerVisibility(){
   document.getElementById('lod').textContent={L1:'✨ 宏觀宇宙層',L2:'🔭 Blue 星系層',L3:'🧠 大腦星系層'}[state];
 }
 applyLayerVisibility();
-if(state==='L2'){dist=900;} if(state==='L3'){dist=700;}
+if(state==='L2'){dist=900;} if(state==='L3'){dist=4200;}
 
 /* ══════ 互動 ══════ */
 /* 手機雙擊偵測（iOS Safari 不發 dblclick）＋返回按鈕 */
@@ -282,7 +401,7 @@ function enterLayer(cx,cy){
     if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);return;}
     const m=new THREE.Vector2(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);
     ray.setFromCamera(m,camera);
-    if(ray.intersectObject(sysHit,false).length||!hit){state='L3';follow=null;dist=700;applyLayerVisibility();}
+    if(ray.intersectObject(sysHit,false).length||!hit){state='L3';follow=null;dist=4200;applyLayerVisibility();}
   }else if(state==='L3'){
     state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
   }
@@ -344,7 +463,7 @@ canvas.addEventListener('dblclick',e=>{
     // 主星雙擊 → 大腦
     const m=new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
     ray.setFromCamera(m,camera);
-    if(ray.intersectObject(sysHit,false).length){state='L3';follow=null;dist=700;applyLayerVisibility();}
+    if(ray.intersectObject(sysHit,false).length){state='L3';follow=null;dist=4200;applyLayerVisibility();}
     else if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);}
   }else if(state==='L3'){
     state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
@@ -375,11 +494,10 @@ canvas.addEventListener('click',e=>{
     card.innerHTML=`<h4>⭐ Blue 的 Bit 星（質心）</h4><div class="sub">人類用戶 Bit · ${COMPANIONS.length} 顆衛星</div><div>三顆衛星＝夥伴卡成員，軌道由互動引力導出。<b style="color:#ffe9a3">雙擊這顆星＝進入大腦星系圖譜</b>。</div>`;
   }else if(hit.memory){
     const nd=hit.memory;
-    const rm=ROOM_META[nd.room]||{name:nd.room};
     const dt=nd.t?new Date(nd.t).toLocaleString('zh-TW'):'—';
-    card.innerHTML=`<h4>🧠 記憶星</h4><div class="sub">${rm.name}房 · ${nd.sub||''} · 重要性 ${nd.imp}/5 · ${dt}</div>
+    card.innerHTML=`<h4>🧠 記憶星</h4><div class="sub">${nd.room||''} · ${nd.sub||''} · 重要性 ${nd.imp}/5 · 引用 ${nd.links||0} 檔案</div>
       <div style="color:#dfeee0">${nd.preview}…</div>
-      <div style="color:#7fa88f;font-size:11px;margin-top:8px">id ${nd.id}<br>agent: ${nd.agent||'—'}<br>❄ 已凍結——橫向拖曳恢復</div>`;
+      <div style="color:#7fa88f;font-size:11px;margin-top:8px">❄ 已凍結——橫向拖曳恢復</div>`;
   }
   card.style.display='block';
 });

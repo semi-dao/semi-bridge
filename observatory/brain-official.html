@@ -3861,5 +3861,30 @@ addEventListener('resize',()=>{
     return _cmd ? _cmd(c) : {ok:false};
   };
 })();
+
+/* [三層宇宙網頁版] 觸控轉譯層——手機也能玩：單指=旋轉（官方 pointer 已有）、雙指捏合=飛行 */
+(function(){
+  let pinch0=0;
+  addEventListener('touchstart',e=>{
+    if(e.touches.length===2){
+      const a=e.touches[0],b=e.touches[1];
+      pinch0=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    }
+  },{passive:true});
+  addEventListener('touchmove',e=>{
+    if(e.touches.length===2&&pinch0>0){
+      e.preventDefault();
+      const a=e.touches[0],b=e.touches[1];
+      const p=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+      const ratio=p/pinch0;
+      /* 捏合縮小=遠離（模擬後滾）、張開=靠近（前滾）——複用官方飛行手感 */
+      if(Math.abs(ratio-1)>0.02){
+        const fake=new WheelEvent('wheel',{deltaY:ratio>1?-120:120,clientX:(a.clientX+b.clientX)/2,clientY:(a.clientY+b.clientY)/2});
+        renderer.domElement.dispatchEvent(fake);
+        pinch0=p;
+      }
+    }
+  },{passive:false});
+})();
 </script>
 </body></html>
