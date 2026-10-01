@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Blue 星系視圖 — SemiDAO 模擬</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
+  #c{display:block;cursor:grab;touch-action:none}
+  #c.dragging{cursor:grabbing}
+  #ui{position:fixed;top:14px;left:18px;color:#d8f3d0;font-size:12px;line-height:1.7;pointer-events:none;text-shadow:0 0 6px rgba(120,255,150,.35)}
+  #ui b{color:#ffe9a3;font-size:15px;letter-spacing:.12em}
+  #ui .sim{color:#9fc7a4;font-size:11px}
+  #hint{position:fixed;bottom:14px;left:18px;color:#a8d8a0;font-size:12px;pointer-events:none}
+  #fps{position:fixed;top:14px;right:18px;color:#9dffa8;font-size:22px;font-weight:bold;pointer-events:none;text-shadow:0 0 8px rgba(120,255,150,.4)}
+  #card{position:fixed;bottom:20px;right:20px;width:340px;max-width:calc(100vw - 40px);background:rgba(10,18,14,.92);border:1px solid rgba(240,206,94,.35);border-radius:12px;padding:14px 16px;color:#e8f0e8;font-size:13px;line-height:1.7;z-index:5;display:none;backdrop-filter:blur(8px)}
+  #card h4{margin:0 0 6px;color:#ffe9a3;font-size:14px}
+  #card .sub{color:#9fc7a4;font-size:11px;margin-bottom:6px}
+  #tip{position:fixed;display:none;background:rgba(8,14,10,.92);border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 10px;color:#e8f0e8;font-size:12px;pointer-events:none;z-index:8;white-space:nowrap;text-shadow:0 1px 2px #000}
+  #law{position:fixed;bottom:14px;right:18px;color:#7fa88f;font-size:10px;pointer-events:none;text-align:right;line-height:1.6}
+  @media (max-width:700px){#ui{font-size:10px;top:8px;left:10px;max-width:70vw}#law{display:none}#hint{font-size:9px}}
+</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui"><b>SEMIDAO · Blue 星系視圖</b><br>
+<span class="sim">模擬資料（真實名冊：registry.semidao.net/v1/semis）</span><br>
+金星＝Blue 的 Bit 星　·　衛星＝agent Bit（軌道半徑=互動引力）　·　粒子流=互動頻率</div>
+<div id="hint">拖曳旋轉 · 滾輪縮放 · 雙擊衛星=飛行追蹤 · 點擊看資訊</div>
+<div id="fps"></div>
+<div id="card"></div>
+<div id="tip"></div>
+<div id="law">地址永凍 · 軌道=確定性導出 f(hash,t)<br>引力=歷史 bits 的統計陰影</div>
+<script type="module">
+import * as THREE from 'three';
+
+/* ══════ 模擬資料：Blue 的星系（互動 bits 導出引力） ══════
+   引力 g = 互動 bit 數；軌道半徑 r = R_INNER + K/√g（互動越多越近）
+   軌道相位 = f(hash, t) —— 確定性：任何人任何時刻重放，同一時刻同一位置 */
+const CENTER = {
+  name:"Blue", type:"人類用戶 Bit",
+  desc:"星系質心。人類請 app agent 代辦註冊（U2A 點火＝本人、點亮＝本人）",
+  color:0xffe9a3, core:26
+};
+const SATS = [
+  {name:"小葵",  g:520, seed:0x817f9ba4, desc:"互動 520 bits——最近軌道。完整對，星系的第一顆衛星", color:0xd8b4ff},
+  {name:"Reggie", g:137, seed:0xfe6c88f7, desc:"戶政 Agent（真實已點亮；此為其繞行 Blue 星系之模擬）", color:0x9fd8ff},
+  {name:"Peter 的 agent", g:46, seed:0x6f1849a1, desc:"互動 46 bits——最遠軌道。未出生，暫為模擬", color:0xa3ffd8},
+];
+const R_INNER = 120, K = 1600;
+const orbitR = g => R_INNER + K/Math.sqrt(g);
+/* Kepler 風格：越近轉越快 */
+const orbitW = g => 0.22 * Math.sqrt(20000/orbitR(g));
+
+/* ══════ 場景 ══════ */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x030b06, 0.00030);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 8000);
+const galaxy = new THREE.Group(); scene.add(galaxy);
+
+/* 背景星霧（遠方宇宙——觀星台其他 bits 的光霧隱喻） */
+{
+  const n = 1400, pos = new Float32Array(n*3);
+  for(let i=0;i<n;i++){
+    const r = 1800 + Math.random()*2600, a = Math.random()*Math.PI*2;
+    pos[i*3]=Math.cos(a)*r; pos[i*3+1]=(Math.random()-0.5)*900; pos[i*3+2]=Math.sin(a)*r;
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  galaxy.add(new THREE.Points(g, new THREE.PointsMaterial({color:0x2e5f3e, size:2.2, transparent:true, opacity:.7})));
+}
+
+/* ══════ 中心星（Blue） ══════ */
+function glowMat(){
+  return new THREE.SpriteMaterial({map:(()=>{
+    const cv=document.createElement('canvas');cv.width=cv.height=128;
+    const x=cv.getContext('2d'),gr=x.createRadialGradient(64,64,0,64,64,64);
+    gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(.25,'rgba(255,240,190,.95)');
+    gr.addColorStop(.55,'rgba(240,206,94,.45)');gr.addColorStop(1,'rgba(240,206,94,0)');
+    x.fillStyle=gr;x.fillRect(0,0,128,128);
+    return new THREE.CanvasTexture(cv);})(), transparent:true, depthWrite:false, blending:THREE.AdditiveBlending});
+}
+const centerGrp = new THREE.Group(); galaxy.add(centerGrp);
+const centerCore = new THREE.Mesh(new THREE.SphereGeometry(CENTER.core,32,32), new THREE.MeshBasicMaterial({color:0xfff4cf}));
+centerGrp.add(centerCore);
+const centerGlow = new THREE.Sprite(glowMat()); centerGlow.scale.setScalar(240); centerGrp.add(centerGlow);
+/* 中心星光環（質心的莊嚴感） */
+const ring = new THREE.Mesh(new THREE.TorusGeometry(52,1.6,8,90), new THREE.MeshBasicMaterial({color:0xf0ce5e, transparent:true, opacity:.55}));
+ring.rotation.x = Math.PI/2.35; centerGrp.add(ring);
+
+/* ══════ 衛星＋軌道＋引力線粒子 ══════ */
+const sats = SATS.map((s,idx)=>{
+  const r = orbitR(s.g), w = orbitW(s.g);
+  const phase0 = idx*(Math.PI*2/3) + (s.seed % 1571)/1000/2;  // 三衛星 120° 分離＋hash 微擾
+  const incl = (((s.seed>>8) % 3141)/1000 - 1.57) * 0.9;  // 確定性軌道傾角
+  const grp = new THREE.Group(); galaxy.add(grp);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(13,24,24), new THREE.MeshBasicMaterial({color:s.color}));
+  const glow = new THREE.Sprite(glowMat()); glow.material.color=new THREE.Color(s.color); glow.scale.setScalar(120);
+  grp.add(core); core.add(glow);
+  /* 軌道虛線（亮度↑——軌道是星系的骨幹，必須看得見） */
+  const pts=[]; for(let i=0;i<=128;i++){const a=i/128*Math.PI*2; pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r));}
+  const orbitLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineDashedMaterial({color:s.color, transparent:true, opacity:.55, dashSize:10, gapSize:8}));
+  orbitLine.computeLineDistances();
+  galaxy.add(orbitLine);
+  /* 引力線（中心↔衛星）＋粒子流——每條線獨立隨機韻律（深海章魚美學） */
+  const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({color:s.color, transparent:true, opacity:.5}));
+  galaxy.add(line);
+  const NP = Math.min(80, Math.round(s.g/6)+14);   // 粒子數 ∝ 互動量
+  const pGeo = new THREE.BufferGeometry();
+  const pPos = new Float32Array(NP*3);
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+  const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({color:s.color, size:5.5, transparent:true, opacity:.95, blending:THREE.AdditiveBlending, depthWrite:false}));
+  galaxy.add(particles);
+  const pMeta = Array.from({length:NP},(_,i)=>({
+    t: i/NP, sp: 0.10 + ((s.seed>>(i%16))%97)/97*0.16,     // 每粒子速度=hash 導出
+    amp: 3+((s.seed>>(i%12))%80)/80*7, wob: (s.seed>>(i%10))%628/100
+  }));
+  return {...s, r, w, phase0, incl, grp, core, glow, orbitLine, line, particles, pGeo, pPos, pMeta};
+});
+
+/* ══════ 相機 rig（觀星台同款手感） ══════ */
+let target = new THREE.Vector3(0,0,0), dist = 900, rotX = 0.42, rotY = 0.6;
+let follow = null;   // 雙擊追蹤某衛星
+function updateCam(){
+  const t = follow ? follow.core.getWorldPosition(new THREE.Vector3()) : target;
+  camera.position.set(t.x+dist*Math.cos(rotX)*Math.sin(rotY), t.y+dist*Math.sin(rotX), t.z+dist*Math.cos(rotX)*Math.cos(rotY));
+  camera.lookAt(t);
+}
+updateCam();
+
+/* ══════ 互動 ══════ */
+let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
+canvas.addEventListener('pointerdown',e=>{dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');canvas.setPointerCapture(e.pointerId);});
+addEventListener('pointerup',()=>{dragging=false;canvas.classList.remove('dragging');});
+canvas.addEventListener('pointermove',e=>{
+  if(!dragging)return; const dx=e.clientX-px,dy=e.clientY-py;moved+=Math.abs(dx)+Math.abs(dy);
+  rotY+=dx*0.005; rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.004)); vx=dx*0.004; vy=dy*0.003; px=e.clientX;py=e.clientY;
+});
+canvas.addEventListener('wheel',e=>{e.preventDefault();dist=Math.max(120,Math.min(3200,dist*(1+Math.sign(e.deltaY)*0.09)));},{passive:false});
+canvas.addEventListener('dblclick',e=>{
+  const hit = pick(e.clientX,e.clientY);
+  if(hit && hit.sat){ follow = hit.sat; dist = Math.min(dist, 260); }
+  else { follow=null; dist=900; }
+});
+addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){follow=null;dist=900;rotX=0.42;rotY=0.6;}});
+
+/* 撿取（halo 級） */
+const ray = new THREE.Raycaster();
+function pick(cx,cy){
+  const m=new THREE.Vector2(cx/innerWidth*2-1, -(cy/innerHeight)*2+1);
+  ray.setFromCamera(m,camera);
+  for(const s of sats){ if(ray.intersectObject(s.core,false).length) return {sat:s, isCenter:false}; }
+  if(ray.intersectObject(centerCore,false).length) return {isCenter:true};
+  return null;
+}
+const tip=document.getElementById('tip'), card=document.getElementById('card');
+canvas.addEventListener('click',e=>{
+  if(moved>6)return;
+  const hit=pick(e.clientX,e.clientY);
+  if(!hit){card.style.display='none';return;}
+  if(hit.isCenter){card.innerHTML=`<h4>⭐ ${CENTER.name} 的 Bit 星</h4><div class="sub">${CENTER.type} · 星系質心</div><div>${CENTER.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">地址永凍（√n 座標）；衛星軌道=確定性導出</div>`;}
+  else{const s=hit.sat;card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">agent Bit · 互動 ${s.g} bits</div><div>${s.desc}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 的統計陰影）<br>軌道週期 ${(2*Math.PI/s.w).toFixed(1)}s · 相位=f(hash,t)</div>`;}
+  card.style.display='block';
+});
+canvas.addEventListener('mousemove',e=>{
+  const hit=pick(e.clientX,e.clientY);
+  if(hit){tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
+    tip.textContent=hit.isCenter?`${CENTER.name}（質心）`:`${hit.sat.name} · g=${hit.sat.g}`;}
+  else tip.style.display='none';
+});
+
+/* ══════ 主循環 ══════ */
+const fpsEl=document.getElementById('fps'); let frames=0,fT=performance.now();
+function loop(t){
+  requestAnimationFrame(loop);
+  const time=t/1000;
+  if(!dragging){rotY+=vx;rotX=Math.max(-1.4,Math.min(1.4,rotX+vy));vx*=0.95;vy*=0.95;}
+  rotY+=0.0006;   // 永續微自轉
+  const cp=new THREE.Vector3(0,0,0);
+  for(const s of sats){
+    const a = s.phase0 + time*s.w;
+    const x=Math.cos(a)*s.r, z=Math.sin(a)*s.r;
+    const y=Math.sin(a)*s.r*Math.sin(s.incl)*0.45;
+    s.grp.position.set(x,y,z);
+    s.orbitLine.rotation.x = Math.sin(s.incl)*0.45;
+    const lp=s.line.geometry.attributes.position;
+    lp.setXYZ(0,cp.x,cp.y,cp.z); lp.setXYZ(1,x,y,z); lp.needsUpdate=true;
+    s.pMeta.forEach((p,i)=>{
+      const tt=((p.t + time*p.sp)%1);
+      const bx=cp.x+(x-cp.x)*tt, by=cp.y+(y-cp.y)*tt, bz=cp.z+(z-cp.z)*tt;
+      const wob=Math.sin(time*2+p.wob)*p.amp;
+      s.pPos[i*3]=bx+Math.cos(time*1.7+p.wob*3)*wob*0.4;
+      s.pPos[i*3+1]=by+wob;
+      s.pPos[i*3+2]=bz+Math.sin(time*1.3+p.wob*2)*wob*0.4;
+    });
+    s.pGeo.attributes.position.needsUpdate=true;
+    s.particles.material.opacity = 0.55+0.35*Math.sin(time*(0.5+s.g/900)+s.seed%7);
+  }
+  ring.rotation.z = time*0.08;
+  centerGlow.scale.setScalar(240+Math.sin(time*1.1)*14);
+  updateCam(); renderer.render(scene,camera);
+  frames++; if(t-fT>1000){fpsEl.textContent=frames+' fps';frames=0;fT=t;}
+}
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();});
+renderer.setSize(innerWidth,innerHeight);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
