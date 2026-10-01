@@ -50,7 +50,7 @@ const SATS = [
   {name:"Reggie", g:137, seed:0xfe6c88f7, desc:"戶政 Agent（真實已點亮；此為其繞行 Blue 星系之模擬）", color:0x9fd8ff},
   {name:"Peter 的 agent", g:46, seed:0x6f1849a1, desc:"互動 46 bits——最遠軌道。未出生，暫為模擬", color:0xa3ffd8},
 ];
-const R_INNER = 120, K = 1600;
+const R_INNER = 280, K = 2400;   // 軌道帶外擴：最近軌道也須在 Blue 光暈(≈120)＋引力線起點(210)之外
 const orbitR = g => R_INNER + K/Math.sqrt(g);
 /* Kepler 風格：越近轉越快（降速版——太陽系日常感） */
 const orbitW = g => 0.07 * Math.sqrt(20000/orbitR(g));
