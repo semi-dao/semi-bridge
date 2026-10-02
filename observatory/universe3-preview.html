@@ -43,7 +43,7 @@
 <div id="privacy" style="display:none">🔓 無遮蔽模式（Blue 本人檢視）</div>
 
 <button id="back">← 上一層</button>
-<style>#back{position:fixed;top:14px;left:14px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
+<style>#back{position:fixed;top:14px;right:14px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
 <script type="module">
 import * as THREE from 'three';
 
@@ -164,25 +164,48 @@ const stars=BITS.map(b=>{
 /* [Blue 引力塵埃令 10-02] 引力用塵埃表達：每顆星周圍塵埃密集（高斯散布），
    星密集處塵埃自然疊加→拉遠看像發亮星雲。引力不畫線，引力養塵埃。 */
 {
-  const N_PER=140, SPREAD=190;
-  const pos=[],col=[];
+  /* [Blue 令 10-02v2] 塵埃要「聚集」不是「平均」：半徑冪次衰減取樣——
+     越靠近星越密（r = R·u³，u∈[0,1) → 中心密度是高斯的數倍）、外圈迅速稀疏。
+     質量→密度：Blue 星暈半徑更大。密集星群處雲疊雲=發亮星雲。 */
+  const N_PER=260, R_CORE=230;
+  const pos=[],col=[],sizes=[];
   const rng2=(function(s){return function(){s=(s*9301+49297)%233280;return s/233280;}})(424242);
-  const gauss=()=>((rng2()+rng2()+rng2())-1.5)*SPREAD;   // 三平均≈高斯
-  stars.forEach((st,si)=>{
+  stars.forEach(st=>{
     const b=st.b;
-    const density=b.blue?2.2:1.4;                        // Blue 星（人類Bit）質量大→塵埃更密
-    const n=Math.floor(N_PER*density);
+    const R=R_CORE*(b.blue?1.5:1);                        // Blue 星引力井更寬
+    const n=Math.floor(N_PER*(b.blue?1.6:1));
     for(let j=0;j<n;j++){
-      pos.push(st.pos.x+gauss(),st.pos.y+gauss(),st.pos.z+gauss());
-      const warm=b.blue?0.13:0.10;                        // 金暖色系
-      const c=new THREE.Color().setHSL(warm+rng2()*.06,.7,.45+rng2()*.3);
+      const u=rng2(), r=R*Math.pow(u,3);                  // 冪次衰減：擠在星旁
+      const th=rng2()*Math.PI*2, ph=Math.acos(2*rng2()-1);
+      pos.push(st.pos.x+r*Math.sin(ph)*Math.cos(th), st.pos.y+r*Math.cos(ph)*.7, st.pos.z+r*Math.sin(ph)*Math.sin(th));
+      const warm=b.blue?0.13:0.10;
+      const c=new THREE.Color().setHSL(warm+rng2()*.05,.75,.5+rng2()*.35);
       col.push(c.r,c.g,c.b);
+      sizes.push(6+rng2()*16);                            // 近星塵埃更亮更大
     }
   });
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
-  L1.add(new THREE.Points(g,new THREE.PointsMaterial({size:14,map:DIAMOND,vertexColors:true,transparent:true,opacity:.8,depthWrite:false,blending:THREE.AdditiveBlending})));
+  const m=new THREE.PointsMaterial({size:12,map:DIAMOND,vertexColors:true,transparent:true,opacity:.85,depthWrite:false,blending:THREE.AdditiveBlending});
+  L1.add(new THREE.Points(g,m));
+  /* 遠看星雲感：每星一團柔光霧 sprite（徑向漸層）——大小∝質量，疊加即發亮 */
+  function radialTex(){
+    const cv=document.createElement('canvas');cv.width=cv.height=128;
+    const c=cv.getContext('2d');
+    const gr=c.createRadialGradient(64,64,4,64,64,64);
+    gr.addColorStop(0,'rgba(255,238,190,.9)');gr.addColorStop(.4,'rgba(255,214,120,.38)');gr.addColorStop(1,'rgba(255,200,90,0)');
+    c.fillStyle=gr;c.fillRect(0,0,128,128);
+    return new THREE.CanvasTexture(cv);
+  }
+  const NEB=radialTex();
+  stars.forEach(st=>{
+    const b=st.b;
+    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:NEB,transparent:true,opacity:.55,depthWrite:false,blending:THREE.AdditiveBlending}));
+    sp.scale.setScalar(b.blue?520:360);                  // Blue 星=大質量=大星雲
+    sp.position.copy(st.pos);
+    L1.add(sp);
+  });
 }
 
 /* ★ L1 公開層：每顆星永久標籤（canvas 藥丸）＋LOD 兩級——遠=§n 短標、近=全名 */
@@ -298,24 +321,31 @@ let target=BLUE_POS.clone(),dist=4200,rotX=0.38,rotY=0.9;
 {const q=new URLSearchParams(location.search);if(q.get('dist'))dist=Math.max(60,+q.get('dist'));if(q.get('layer'))state=q.get('layer');}
 let follow=null,frozen=false,simTime=0,lastFrame=performance.now();
 let flyAnim=null;
-function flyTo(dest,endDist){flyAnim={t0:performance.now(),dur:1300,fromT:target.clone(),toT:dest.clone(),fromD:dist,toD:endDist};}
+function flyTo(dest,endDist,dur=1300){flyAnim={t0:performance.now(),dur,fromT:target.clone(),toT:dest.clone(),fromD:dist,toD:endDist};}
 function updateCam(){
   const t=follow?follow.core.getWorldPosition(new THREE.Vector3()):target;
   camera.position.set(t.x+dist*Math.cos(rotX)*Math.sin(rotY),t.y+dist*Math.sin(rotX),t.z+dist*Math.cos(rotX)*Math.cos(rotY));
   camera.lookAt(t);
 }
+function ensureBrainFrame(){
+  let bf=document.getElementById('brainFrame');
+  if(bf)return bf;
+  bf=document.createElement('iframe');bf.id='brainFrame';
+  bf.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:5;display:none;';
+  bf.src='brain-official.html?v=20261002f';
+  document.body.appendChild(bf);
+  return bf;
+}
 function applyLayerVisibility(){
   const _t=document.getElementById('tip');if(_t)_t.style.display='none';
   L1.visible = state==='L1';
   L2.visible = state==='L2';          // 修：宏觀層絕不渲染 L2 軌道（6 衛星事故根因）
-  L3.visible = state==='L3' && !document.getElementById('brainFrame');
+  L3.visible = false;                                    // L3 一律走 iframe（本尊渲染）
   let bf=document.getElementById('brainFrame');
   if(state==='L3'&&!bf){
-    bf=document.createElement('iframe');bf.id='brainFrame';
-    bf.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2';
-    bf.src='brain-official.html?v=20261002e';
-    document.body.appendChild(bf);
-  } else if(bf){ bf.style.display = state==='L3'?'block':'none'; }
+    bf=ensureBrainFrame();                               // 進層瞬間建（此時多半已預載好）
+  }
+  if(bf) bf.style.display = state==='L3'?'block':'none';
   document.getElementById('privacy').style.display = 'none';
   document.getElementById('back').style.display = state==='L1'?'none':'block';
   const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
@@ -339,7 +369,7 @@ function tapHandler(cx,cy){
 function enterLayer(cx,cy){
   const hit=pick(cx,cy);
   if(state==='L1'){
-    if(hit&&hit.blueStar){state='L2';follow=null;flyTo(BLUE_POS,950);frozen=true;applyLayerVisibility();}
+    if(hit&&hit.blueStar){enterL2Flow();}
     else if(hit&&hit.star){follow=null;flyTo(hit.star.pos,170);}
     else{follow=null;flyTo(new THREE.Vector3(0,0,0),4200);}
   }else if(state==='L2'){
@@ -347,22 +377,50 @@ function enterLayer(cx,cy){
     const m=new THREE.Vector2(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);
     ray.setFromCamera(m,camera);
     if(ray.intersectObject(sysHit,false).length||!hit){
-      /* [Blue 鏡頭令] 進去＝先拉遠（退到宏觀全境）→ 再落入 L3 合理距離。深入感。 */
-      state='L3';follow=null;applyLayerVisibility();
-      flyTo(BLUE_POS,20000);                       // 第一段：急速拉遠（宇宙縮成一點）
-      setTimeout(()=>{ if(state==='L3') flyTo(BLUE_POS,4200); },950);   // 第二段：落回大腦全景
+      enterL3Flow();
     }
   }else if(state==='L3'){
-    /* [Blue 鏡頭令] 出來＝從貼近（近到幾乎觸碰）拉出到 L2 合理距離。浮出感。方向與進去相反。 */
-    state='L2';applyLayerVisibility();
-    dist=Math.min(dist,300);                       // 先夾到貼近（若已在近處則保持）
-    flyTo(BLUE_POS,950);                           // 拉出到 L2 距離
+    state='L2';follow=null;frozen=true;applyLayerVisibility();
+    dist=300;flyTo(BLUE_POS,950,2200);
   }
 }
+/* [Blue 導播令 10-02v3] L1→L2 飛入=持續 zoom in 到貼近 → 切 L2 從近拉開（進去感）；
+   返回=精確倒放：先收近（跟飛入結尾同一格）→ 切 L1 → 從貼近拉回宏觀（出來感） */
+let l2Loading=false;
+function enterL2Flow(){
+  if(l2Loading)return; l2Loading=true;
+  follow=null; frozen=true;
+  flyTo(BLUE_POS,240,2400);                                // ① L1 持續 zoom in：飛向 Blue 星、越來越近
+  setTimeout(()=>{
+    if(state!=='L2'){ state='L2';frozen=false;applyLayerVisibility();dist=300;flyTo(BLUE_POS,950,2200); }  // ② 切 L2 從近處拉開
+    l2Loading=false;
+  },2300);
+}
+/* [Blue 導播令 10-02v2] L2→L3 優雅交接：L2 緩緩 zoom in 不停格 → iframe 就緒 → L3 從遠方滑入 */
+let l3Loading=false;
+function enterL3Flow(){
+  if(l3Loading)return; l3Loading=true;
+  follow=null; frozen=true;
+  flyTo(BLUE_POS,380,4000);                               // ① L2 4 秒緩緩逼近質心（持續渲染）
+  const bf=ensureBrainFrame();                            // ② 後台載入大腦本尊
+  const goL3=()=>{ setTimeout(()=>{
+    if(state!=='L3'){ state='L3';applyLayerVisibility();dist=12000;flyTo(BLUE_POS,4200,2600); }  // ③ 遠方滑入全景
+    l3Loading=false;
+  },1400); };
+  if(bf.dataset.loaded==='1') goL3();
+  else bf.addEventListener('load',()=>{ bf.dataset.loaded='1'; goL3(); },{once:true});
+}
 document.getElementById('back').addEventListener('click',()=>{
-  if(state==='L3'){state='L2';applyLayerVisibility();dist=Math.min(dist,300);flyTo(BLUE_POS,950);}
-  else if(state==='L2'){state='L1';flyTo(BLUE_POS,4200);}
-  follow=null;applyLayerVisibility();
+  if(state==='L3'){
+    /* L3→L2：iframe 內縮回近 → 切 L2 從貼近拉出到 950 */
+    state='L2';follow=null;frozen=true;applyLayerVisibility();
+    dist=300;flyTo(BLUE_POS,950,2200);
+  } else if(state==='L2'){
+    /* L2→L1：倒放飛入——先收近到貼近 Blue 星（同飛入結尾格）→ 切 L1 拉回宏觀 */
+    follow=null;frozen=true;
+    flyTo(BLUE_POS,240,2200);
+    setTimeout(()=>{ if(state!=='L2'){state='L1';applyLayerVisibility();dist=240;flyTo(BLUE_POS,4200,2600);frozen=false;} },2100);
+  }
 });
 canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));
 
