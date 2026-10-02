@@ -228,8 +228,10 @@ const stars=BITS.map(b=>{
     }
     return new THREE.CanvasTexture(cv);
   }
-  /* [Blue 令 v5] 星雲=流體霧（smoke 紋理非正圓漸層）：每星 6 綻雲絮沿牽引軸排開＝紡錘絲帶。
-     圓形光暈只留給星球本身（glowSprite）。 */
+  /* [Blue 令 v10] 星雲＝塵埃軌跡＋霧絮「相加」：霧絮位置取自塵埃同源分布（冪次衰減＋鄰星拉伸
+     的實際取樣點），霧落在塵埃帶上——兩者疊成同一個引力形狀，不再是兩套獨立几何。 */
+  const N_PER2=260, R_CORE2=230;
+  const rng3=(function(s){return function(){s=(s*9301+49297)%233280;return s/233280;}})(777777);
   stars.forEach((st,si)=>{
     const b=st.b;
     const prevSt=stars[si-1], nextSt=stars[si+1];
@@ -238,14 +240,21 @@ const stars=BITS.map(b=>{
     if(nextSt)axis.add(new THREE.Vector3().subVectors(nextSt.pos,st.pos).normalize());
     if(axis.lengthSq()<1e-6)axis.set(0,1,0);
     axis.normalize();
-    const baseS=b.blue?560:380, reach=(b.blue?560:380)*1.35;
-    for(let k=0;k<3;k++){                                 // [Blue 令 v7] 霧量 50%：6綻→3綻＋濃度減半
-      const t=(k/2)*2-1;                                  // -1..1
+    const R=R_CORE2*(b.blue?1.5:1);
+    const nSmoke=Math.floor(4*(b.blue?1.5:1));
+    for(let k=0;k<nSmoke;k++){
+      // 與塵埃完全同款的取樣：冪次半徑＋球面角＋沿軸拉伸（同 rng 數學、不同 seed → 相同分布）
+      const u=rng3(), r=R*Math.pow(u,3);
+      const th=rng3()*Math.PI*2, ph=Math.acos(2*rng3()-1);
+      let p=new THREE.Vector3(r*Math.sin(ph)*Math.cos(th), r*Math.cos(ph)*.7, r*Math.sin(ph)*Math.sin(th));
+      const along=p.dot(axis);
+      p.addScaledVector(axis,along*3.6);
+      if(rng3()<0.75) p.addScaledVector(axis,r*rng3()*.9);
       const tex=smokeTex(b.n*131+k*17);
-      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:.21*(1-Math.abs(t)*.35),depthWrite:false,blending:THREE.AdditiveBlending,rotation:((b.n*7+k*97)%628)/100}));
-      const s=baseS*(1-Math.abs(t)*.4)*(0.8+((b.n*13+k*31)%23)/23*.4);
-      sp.scale.set(s*1.5,s*0.7,1);                        // 寬扁=流動感
-      sp.position.copy(st.pos).addScaledVector(axis,t*reach);
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:.18,depthWrite:false,blending:THREE.AdditiveBlending,rotation:rng3()*6.28}));
+      const s=R*(1.1+rng3()*.5);
+      sp.scale.set(s*1.6,s*0.75,1);
+      sp.position.copy(st.pos).add(p);
       L1.add(sp);
     }
   });
@@ -388,7 +397,8 @@ function ensureBrainFrame(){
   bf=document.createElement('iframe');bf.id='brainFrame';
   /* [Blue 令 v6] 重疊漸層：iframe 蓋上/退場用 opacity 漸變（底層 u3 持續渲染到漸變完成） */
   bf.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:5;opacity:0;pointer-events:none;transition:opacity 1.1s ease;';
-  bf.src='brain-official.html?v=20261002h&flyin=1';
+  bf.src='brain-official.html?v=20261002i&flyin=1';
+  bf.addEventListener('load',()=>{ bf.dataset.loaded='1'; },{once:true});   // 載入即標記（進 L3 快路徑）
   document.body.appendChild(bf);
   return bf;
 }
@@ -480,8 +490,16 @@ function enterL3Flow(){
     if(state!=='L3'){ state='L3';applyLayerVisibility();dist=12000;flyTo(BLUE_POS,4200,1300); }  // ③ 遠方滑入全景
     l3Loading=false;
   },1400); };
-  if(bf.dataset.loaded==='1') goL3();
-  else bf.addEventListener('load',()=>{ bf.dataset.loaded='1'; goL3(); },{once:true});
+  /* [修] 三路就緒判斷：已標記載入完 / load 事件 / 兜底輪詢（contentWindow 存在且 state 未變）*/
+  if(bf.dataset.loaded==='1'){ goL3(); }
+  else{
+    bf.addEventListener('load',()=>{ bf.dataset.loaded='1'; goL3(); },{once:true});
+    let tries=0;
+    const poll=setInterval(()=>{
+      tries++;
+      if(bf.dataset.loaded==='1'||tries>16){ clearInterval(poll); bf.dataset.loaded='1'; goL3(); }  // 8 秒兜底：iframe 遲早會好
+    },500);
+  }
 }
 document.getElementById('back').addEventListener('click',()=>{
   if(state==='L3'){
