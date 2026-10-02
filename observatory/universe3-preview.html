@@ -57,6 +57,7 @@ const BITS = [
  {n:7, id:"bit-000007", hash:"0bfb7e531893", label:"宇宙開幕", sd:5},
  {n:8, id:"bit-000008", hash:"cfa36541878a", label:"§5.6 實名制", sd:5},
  {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"Blue 星系（Reggie 誕生）", sd:6, blue:true},
+ {n:10, id:"bit-000010", hash:"c13f27dd7ab5", label:"§8.1 吸積宇宙（絕對位置定理 v2）", sd:6},
 ];
 const R0=420;
 function starPos(b){
@@ -139,7 +140,7 @@ L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.po
 /* ★ 宏觀的 Blue 貼身迷你衛星（比例修正：緊貼主星自轉） */
 const miniSats=COMPANIONS.map((c,i)=>{
   const r=58+i*26, w=0.5-i*0.12;
-  const grp=new THREE.Group();stars[8].grp.add(grp);
+  const BLUE_STAR=stars.find(st=>st.b.blue);const grp=new THREE.Group();BLUE_STAR.grp.add(grp);
   const core=new THREE.Mesh(new THREE.SphereGeometry(4,10,10),new THREE.MeshBasicMaterial({color:c.color}));
   grp.add(core);grp.add(glowSprite(c.color,26,.95));
   return{c,r,w,phase:i*2.1,grp};
@@ -283,7 +284,7 @@ function pick(cx,cy){
     return null;
   }
   if(state==='L1'){
-    const cands=[{m:stars[8].hit,r:{blueStar:true}},...stars.map(st=>({m:st.hit,r:{star:st}}))];
+    const cands=[{m:BLUE_STAR.hit,r:{blueStar:true}},...stars.map(st=>({m:st.hit,r:{star:st}}))];
     const hs=ray.intersectObjects(cands.map(o=>o.m),false);
     if(hs.length)return cands.find(o=>o.m===hs[0].object).r;
     return null;
