@@ -616,7 +616,7 @@ function loop(t){
       });
       s.pGeo.attributes.position.needsUpdate=true;
     }
-    if(!frozen){sysRing.rotation.z=time*0.08;sysCoreGlow.scale.setScalar(240+Math.sin(time*1.1)*14);}
+    if(!frozen){sysCoreGlow.scale.setScalar(240+Math.sin(time*1.1)*14);}   // [Blue 令] 環已拆——glow 呼吸保留
   }
   /* L3 大腦緩慢漂移＋呼吸 */
   if(L3.visible){
