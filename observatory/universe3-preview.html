@@ -282,17 +282,17 @@ document.getElementById('back').addEventListener('click',()=>{
 canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));
 
 let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
-const ptrs=new Map();let pinch0=0,distP0=0;
+const ptrs=new Map();let pinch0=0,distP0=0,panC0=null;
 canvas.addEventListener('pointerdown',e=>{
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(ptrs.size===1){dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');}
-  else if(ptrs.size===2){dragging=false;const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);distP0=dist;}
+  else if(ptrs.size===2){dragging=false;const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);distP0=dist;panC0=null;}
   canvas.setPointerCapture(e.pointerId);
 });
 addEventListener('pointerup',e=>{
   ptrs.delete(e.pointerId);
   if(!ptrs.size){
-    dragging=false;canvas.classList.remove('dragging');
+    dragging=false;canvas.classList.remove('dragging');panC0=null;
     if(moved<8 && e.pointerType!=='mouse') tapHandler(e.clientX,e.clientY);   // mobile tap：雙擊偵測
   }
 });
@@ -300,7 +300,21 @@ addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dra
 canvas.addEventListener('pointermove',e=>{
   if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(ptrs.size===2){const[a,b]=[...ptrs.values()];const p=Math.hypot(a.x-b.x,a.y-b.y);
-    if(pinch0>0)dist=Math.max(60,Math.min(30000,distP0*pinch0/p));moved+=9;return;}
+    if(pinch0>0)dist=Math.max(60,Math.min(30000,distP0*pinch0/p));
+    /* [新] 雙指平移：兩指中心移動 → 相機平面平移 target */
+    const cx=(a.x+b.x)/2,cy=(a.y+b.y)/2;
+    if(panC0===null)panC0={x:cx,y:cy};
+    else{
+      const dx=cx-panC0.x,dy=cy-panC0.y;
+      if(Math.abs(dx)+Math.abs(dy)>2){
+        const k=dist*0.0016;
+        const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+        const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+        target.add(right.multiplyScalar(-dx*k)).add(up.multiplyScalar(dy*k));
+        panC0={x:cx,y:cy};moved+=9;
+      }
+    }
+    return;}
   if(!dragging)return;const dx=e.clientX-px,dy=e.clientY-py;moved+=Math.abs(dx)+Math.abs(dy);
   if(Math.abs(dx)>Math.abs(dy))frozen=false;
   rotY+=dx*0.005;rotX=Math.max(-1.4,Math.min(1.4,rotX+dy*0.004));vx=dx*0.004;vy=dy*0.003;px=e.clientX;py=e.clientY;
