@@ -170,14 +170,28 @@ const stars=BITS.map(b=>{
   const N_PER=260, R_CORE=230;
   const pos=[],col=[],sizes=[];
   const rng2=(function(s){return function(){s=(s*9301+49297)%233280;return s/233280;}})(424242);
-  stars.forEach(st=>{
+  stars.forEach((st,si)=>{
     const b=st.b;
     const R=R_CORE*(b.blue?1.5:1);                        // Blue 星引力井更寬
     const n=Math.floor(N_PER*(b.blue?1.6:1));
+    /* [Blue 令 v3] 鄰星牽引：塵埃沿「前後鄰星連線」方向拉長（引力被兩顆鄰星瓜分） */
+    const prevSt=stars[si-1], nextSt=stars[si+1];
+    const toPrev=prevSt?new THREE.Vector3().subVectors(prevSt.pos,st.pos).normalize():null;
+    const toNext=nextSt?new THREE.Vector3().subVectors(nextSt.pos,st.pos).normalize():null;
+    const axis=new THREE.Vector3();
+    if(toPrev)axis.add(toPrev);
+    if(toNext)axis.add(toNext);
+    if(axis.lengthSq()<1e-6)axis.set(0,1,0);
+    axis.normalize();                                       // 淨牽引方向（前後鄰星向量和）
     for(let j=0;j<n;j++){
       const u=rng2(), r=R*Math.pow(u,3);                  // 冪次衰減：擠在星旁
       const th=rng2()*Math.PI*2, ph=Math.acos(2*rng2()-1);
-      pos.push(st.pos.x+r*Math.sin(ph)*Math.cos(th), st.pos.y+r*Math.cos(ph)*.7, st.pos.z+r*Math.sin(ph)*Math.sin(th));
+      let p=new THREE.Vector3(r*Math.sin(ph)*Math.cos(th), r*Math.cos(ph)*.7, r*Math.sin(ph)*Math.sin(th));
+      // 沿牽引軸拉伸 2.6 倍（橢球分布）＋ 70% 塵埃偏向牽引側
+      const along=p.dot(axis);
+      p.addScaledVector(axis,along*1.6);
+      if(rng2()<0.7) p.addScaledVector(axis,r*rng2()*.5/R*R*.45);
+      pos.push(st.pos.x+p.x, st.pos.y+p.y, st.pos.z+p.z);
       const warm=b.blue?0.13:0.10;
       const c=new THREE.Color().setHSL(warm+rng2()*.05,.75,.5+rng2()*.35);
       col.push(c.r,c.g,c.b);
@@ -286,8 +300,7 @@ const L2=new THREE.Group();L2.position.copy(BLUE_POS);scene.add(L2);
 const sysCore=new THREE.Mesh(new THREE.SphereGeometry(26,32,32),new THREE.MeshBasicMaterial({color:0xfff4cf}));
 L2.add(sysCore);
 const sysCoreGlow=glowSprite(0xfff0c0,240);L2.add(sysCoreGlow);
-const sysRing=new THREE.Mesh(new THREE.TorusGeometry(52,1.6,8,90),new THREE.MeshBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.55}));
-sysRing.rotation.x=Math.PI/2.35;L2.add(sysRing);
+/* [Blue 令] 主星不畫土星環——真實的環就是衛星公轉本身 */
 const sysHit=new THREE.Mesh(new THREE.SphereGeometry(90,8,8),new THREE.MeshBasicMaterial({visible:false}));L2.add(sysHit);
 const sats=COMPANIONS.map((s,idx)=>{
   const r=orbitR(s.g),w=orbitW(s.g);
@@ -297,10 +310,22 @@ const sats=COMPANIONS.map((s,idx)=>{
   const core=new THREE.Mesh(new THREE.SphereGeometry(13,20,20),new THREE.MeshBasicMaterial({color:s.color}));
   core.add(glowSprite(s.color,120,.9));grp.add(core);
   const hit=new THREE.Mesh(new THREE.SphereGeometry(44,8,8),new THREE.MeshBasicMaterial({visible:false}));grp.add(hit);
-  const pts=[];for(let i=0;i<=128;i++){const a=i/128*Math.PI*2;pts.push(new THREE.Vector3(Math.cos(a)*r,0,Math.sin(a)*r));}
-  const orbit=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-    new THREE.LineDashedMaterial({color:s.color,transparent:true,opacity:.55,dashSize:10,gapSize:8}));
-  orbit.computeLineDistances();orbit.rotation.x=tilt;L2.add(orbit);
+  /* [Blue 令] 軌道=稀疏塵埃雲（看得出軌跡就好，不用虛線） */
+  const ON=90,oPos=new Float32Array(ON*3),oCol=new Float32Array(ON*3);
+  const orng=(function(sd){return function(){sd=(sd*9301+49297)%233280;return sd/233280;}})(s.seed>>>3);
+  for(let k=0;k<ON;k++){
+    const a=k/ON*Math.PI*2+orng()*.5, rr=r*(0.94+orng()*0.12), yy=(orng()-.5)*r*.05;
+    const x=Math.cos(a)*rr, z=Math.sin(a)*rr;
+    // 套 tilt 旋轉（繞 x 軸）
+    const y=Math.cos(tilt)*yy - Math.sin(tilt)*z, z2=Math.sin(tilt)*yy + Math.cos(tilt)*z;
+    oPos[k*3]=x;oPos[k*3+1]=y;oPos[k*3+2]=z2;
+    const c=new THREE.Color(s.color);
+    oCol[k*3]=c.r;oCol[k*3+1]=c.g;oCol[k*3+2]=c.b;
+  }
+  const oGeo=new THREE.BufferGeometry();
+  oGeo.setAttribute('position',new THREE.BufferAttribute(oPos,3));
+  oGeo.setAttribute('color',new THREE.BufferAttribute(oCol,3));
+  L2.add(new THREE.Points(oGeo,new THREE.PointsMaterial({size:6,map:DIAMOND,vertexColors:true,transparent:true,opacity:.6,depthWrite:false,blending:THREE.AdditiveBlending})));
   const lineGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
   const line=new THREE.Line(lineGeo,new THREE.LineBasicMaterial({color:s.color,transparent:true,opacity:.5}));L2.add(line);
   const NP=Math.min(80,Math.round(s.g/6)+14);
@@ -309,7 +334,7 @@ const sats=COMPANIONS.map((s,idx)=>{
   const particles=new THREE.Points(pGeo,new THREE.PointsMaterial({color:s.color,size:5.5,transparent:true,opacity:.95,blending:THREE.AdditiveBlending,depthWrite:false}));
   L2.add(particles);
   const pMeta=Array.from({length:NP},(_,i)=>({t:i/NP,sp:0.10+((s.seed>>(i%16))%97)/97*0.16,amp:3+((s.seed>>(i%12))%80)/80*7,wob:(s.seed>>(i%10))%628/100}));
-  return{...s,r,w,phase0,tilt,grp,core,hit,orbit,line,particles,pGeo,pPos,pMeta};
+  return{...s,r,w,phase0,tilt,grp,core,hit,line,particles,pGeo,pPos,pMeta};
 });
 
 /* ═══ L3 大腦星系層＝iframe 本尊渲染（brain-official.html，進層動態載入） ═══ */
@@ -332,7 +357,7 @@ function ensureBrainFrame(){
   if(bf)return bf;
   bf=document.createElement('iframe');bf.id='brainFrame';
   bf.style.cssText='position:fixed;inset:0;width:100%;height:100%;border:0;z-index:5;display:none;';
-  bf.src='brain-official.html?v=20261002f';
+  bf.src='brain-official.html?v=20261002g&flyin=1';
   document.body.appendChild(bf);
   return bf;
 }
@@ -390,9 +415,12 @@ let l2Loading=false;
 function enterL2Flow(){
   if(l2Loading)return; l2Loading=true;
   follow=null; frozen=true;
-  flyTo(BLUE_POS,240,2400);                                // ① L1 持續 zoom in：飛向 Blue 星、越來越近
+  flyTo(BLUE_POS,240,2400);                                // ① L1 持續 zoom in：飛向 Blue 星、貼近
   setTimeout(()=>{
-    if(state!=='L2'){ state='L2';frozen=false;applyLayerVisibility();dist=300;flyTo(BLUE_POS,950,2200); }  // ② 切 L2 從近處拉開
+    if(state==='L1'){ state='L2';frozen=false;applyLayerVisibility();
+      dist=9000;flyTo(BLUE_POS,950,2600);                  // ② L2 從遠方 zoom in 到適當距離（進去感）
+      ensureBrainFrame();                                  // [Blue 令] 預載 L3（使用者進 L2 時大腦本尊已開始載）
+    }
     l2Loading=false;
   },2300);
 }
@@ -412,14 +440,15 @@ function enterL3Flow(){
 }
 document.getElementById('back').addEventListener('click',()=>{
   if(state==='L3'){
-    /* L3→L2：iframe 內縮回近 → 切 L2 從貼近拉出到 950 */
-    state='L2';follow=null;frozen=true;applyLayerVisibility();
-    dist=300;flyTo(BLUE_POS,950,2200);
-  } else if(state==='L2'){
-    /* L2→L1：倒放飛入——先收近到貼近 Blue 星（同飛入結尾格）→ 切 L1 拉回宏觀 */
+    /* [Blue 令 v3] L3→L2：連續 zoom out——先在 L3 內拉遠 → 切 L2 從近 300 續拉出到 950 */
     follow=null;frozen=true;
-    flyTo(BLUE_POS,240,2200);
-    setTimeout(()=>{ if(state!=='L2'){state='L1';applyLayerVisibility();dist=240;flyTo(BLUE_POS,4200,2600);frozen=false;} },2100);
+    flyTo(BLUE_POS,14000,1600);                          // L3 內先 zoom out（往外飛）
+    setTimeout(()=>{ if(state==='L3'){ state='L2';applyLayerVisibility();dist=300;flyTo(BLUE_POS,950,2200);} },1500);
+  } else if(state==='L2'){
+    /* [Blue 令 v3] L2→L1：連續 zoom out——L2 內先拉遠 → 切 L1 從近 240 續拉到宏觀 4200 */
+    follow=null;frozen=true;
+    flyTo(BLUE_POS,9000,1600);                           // L2 內 zoom out
+    setTimeout(()=>{ if(state==='L2'){ state='L1';applyLayerVisibility();dist=240;flyTo(BLUE_POS,4200,2600);frozen=false;} },1500);
   }
 });
 canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));

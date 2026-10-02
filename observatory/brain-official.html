@@ -1813,6 +1813,17 @@ let rotY=0.6, rotX=0.35, dist=1900,
     target=new THREE.Vector3(0,0,0);
 if(new URLSearchParams(location.search).get('zoom')==='mid') dist=3600; // 測試用：全宇宙視角
 if(new URLSearchParams(location.search).get('dist')){ dist=Math.min(9000, +new URLSearchParams(location.search).get('dist')); } // [v323] ?dist= 直接設距離（截圖用）
+/* [Blue 導播令 10-02] ?flyin=1：開場從遠方緩緩 zoom in 到全景（u3 三層宇宙進場動畫） */
+if(new URLSearchParams(location.search).get('flyin')==='1'){
+  dist=8800;
+  const _fi={t0:performance.now(),from:8800,to:1900,dur:3000};
+  const _fiTick=()=>{
+    const k=Math.min(1,(performance.now()-_fi.t0)/_fi.dur), e=1-Math.pow(1-k,3);
+    dist=_fi.from+(_fi.to-_fi.from)*e;
+    if(k<1) requestAnimationFrame(_fiTick);
+  };
+  setTimeout(()=>requestAnimationFrame(_fiTick),600);
+}
 let spaceHeld=false; // [v24] 空白鍵+左鍵拖曳=平移（中鍵備援）
 addEventListener('keydown',e=>{ // [v20] R=重置視角（逃生門）
   if(e.key===' '){ spaceHeld=true; }
