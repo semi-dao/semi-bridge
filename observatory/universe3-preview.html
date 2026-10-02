@@ -208,8 +208,8 @@ stars.forEach((s,i)=>{
   const prevDir=new THREE.Vector3().subVectors(A,prevA).normalize();  // 上段方向
   const lat=new THREE.Vector3().subVectors(dir,prevDir).normalize();  // 轉向分量（側向）
   if(!isFinite(lat.x)||lat.lengthSq()<1e-6) lat.set(-dir.z,0,dir.x).normalize();  // 直線前進→切向彎
-  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5).addScaledVector(lat,len*.12);
-  mid.y+=len*.04;   // 微微上浮（光學美感，非引力）
+  /* [Blue 令 10-02] 零向上分量——弧線彎向完全由慣性（上段→本段的轉向）決定。天上沒有引力源。 */
+  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5).addScaledVector(lat,len*.14);
   const curve=new THREE.QuadraticBezierCurve3(A,mid,B);
   const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)),
     new THREE.LineBasicMaterial({transparent:true,opacity:.5}));
@@ -315,13 +315,21 @@ function enterLayer(cx,cy){
     if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);return;}
     const m=new THREE.Vector2(cx/innerWidth*2-1,-(cy/innerHeight)*2+1);
     ray.setFromCamera(m,camera);
-    if(ray.intersectObject(sysHit,false).length||!hit){state='L3';follow=null;dist=4200;applyLayerVisibility();}
+    if(ray.intersectObject(sysHit,false).length||!hit){
+      /* [Blue 鏡頭令] 進去＝先拉遠（退到宏觀全境）→ 再落入 L3 合理距離。深入感。 */
+      state='L3';follow=null;applyLayerVisibility();
+      flyTo(BLUE_POS,20000);                       // 第一段：急速拉遠（宇宙縮成一點）
+      setTimeout(()=>{ if(state==='L3') flyTo(BLUE_POS,4200); },950);   // 第二段：落回大腦全景
+    }
   }else if(state==='L3'){
-    state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
+    /* [Blue 鏡頭令] 出來＝從貼近（近到幾乎觸碰）拉出到 L2 合理距離。浮出感。方向與進去相反。 */
+    state='L2';applyLayerVisibility();
+    dist=Math.min(dist,300);                       // 先夾到貼近（若已在近處則保持）
+    flyTo(BLUE_POS,950);                           // 拉出到 L2 距離
   }
 }
 document.getElementById('back').addEventListener('click',()=>{
-  if(state==='L3'){state='L2';flyTo(BLUE_POS,950);}
+  if(state==='L3'){state='L2';applyLayerVisibility();dist=Math.min(dist,300);flyTo(BLUE_POS,950);}
   else if(state==='L2'){state='L1';flyTo(BLUE_POS,4200);}
   follow=null;applyLayerVisibility();
 });
@@ -436,7 +444,7 @@ canvas.addEventListener('mousemove',e=>{
   if(IS_TOUCH)return;
   const hit=pick(e.clientX,e.clientY);
   if(hit){tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
-    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':hit.memory?(hit.memory.preview.slice(0,18)+'…'):'';}
+    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.blueStar?'Blue 星（雙擊＝飛入星系）':hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':hit.memory?(hit.memory.preview.slice(0,18)+'…'):'';}
   else tip.style.display='none';
 });
 
