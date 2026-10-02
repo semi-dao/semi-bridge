@@ -187,10 +187,10 @@ const stars=BITS.map(b=>{
       const u=rng2(), r=R*Math.pow(u,3);                  // 冪次衰減：擠在星旁
       const th=rng2()*Math.PI*2, ph=Math.acos(2*rng2()-1);
       let p=new THREE.Vector3(r*Math.sin(ph)*Math.cos(th), r*Math.cos(ph)*.7, r*Math.sin(ph)*Math.sin(th));
-      // 沿牽引軸拉伸 2.6 倍（橢球分布）＋ 70% 塵埃偏向牽引側
+      // [Blue 令] 拉伸加強：橢球更扁長——沿軸 3.6 倍拉伸＋ 75% 塵埃甩向牽引側
       const along=p.dot(axis);
-      p.addScaledVector(axis,along*1.6);
-      if(rng2()<0.7) p.addScaledVector(axis,r*rng2()*.5/R*R*.45);
+      p.addScaledVector(axis,along*3.6);
+      if(rng2()<0.75) p.addScaledVector(axis,r*rng2()*.9);
       pos.push(st.pos.x+p.x, st.pos.y+p.y, st.pos.z+p.z);
       const warm=b.blue?0.13:0.10;
       const c=new THREE.Color().setHSL(warm+rng2()*.05,.75,.5+rng2()*.35);
@@ -213,12 +213,24 @@ const stars=BITS.map(b=>{
     return new THREE.CanvasTexture(cv);
   }
   const NEB=radialTex();
-  stars.forEach(st=>{
+  /* [Blue 令 v4] 霧團也拉長：每星沿牽引軸排 5 顆遞減 sprite——團→紡錘（與顆粒拉伸同軸） */
+  stars.forEach((st,si)=>{
     const b=st.b;
-    const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:NEB,transparent:true,opacity:.55,depthWrite:false,blending:THREE.AdditiveBlending}));
-    sp.scale.setScalar(b.blue?520:360);                  // Blue 星=大質量=大星雲
-    sp.position.copy(st.pos);
-    L1.add(sp);
+    const prevSt=stars[si-1], nextSt=stars[si+1];
+    const axis=new THREE.Vector3();
+    if(prevSt)axis.add(new THREE.Vector3().subVectors(prevSt.pos,st.pos).normalize());
+    if(nextSt)axis.add(new THREE.Vector3().subVectors(nextSt.pos,st.pos).normalize());
+    if(axis.lengthSq()<1e-6)axis.set(0,1,0);
+    axis.normalize();
+    const baseS=b.blue?520:360, reach=(b.blue?520:360)*1.35;
+    for(let k=-2;k<=2;k++){                             // -2..2 五顆：中心大、兩端小
+      const t=k/2;                                       // -1..1
+      const s=baseS*(1-Math.abs(t)*.55);
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:NEB,transparent:true,opacity:.5*(1-Math.abs(t)*.4),depthWrite:false,blending:THREE.AdditiveBlending}));
+      sp.scale.setScalar(s);
+      sp.position.copy(st.pos).addScaledVector(axis,t*reach);
+      L1.add(sp);
+    }
   });
 }
 
