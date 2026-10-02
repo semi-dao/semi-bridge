@@ -161,6 +161,30 @@ const stars=BITS.map(b=>{
   return{b,grp,core,glow,hit,pos:starPos(b)};
 });
 
+/* [Blue 引力塵埃令 10-02] 引力用塵埃表達：每顆星周圍塵埃密集（高斯散布），
+   星密集處塵埃自然疊加→拉遠看像發亮星雲。引力不畫線，引力養塵埃。 */
+{
+  const N_PER=140, SPREAD=190;
+  const pos=[],col=[];
+  const rng2=(function(s){return function(){s=(s*9301+49297)%233280;return s/233280;}})(424242);
+  const gauss=()=>((rng2()+rng2()+rng2())-1.5)*SPREAD;   // 三平均≈高斯
+  stars.forEach((st,si)=>{
+    const b=st.b;
+    const density=b.blue?2.2:1.4;                        // Blue 星（人類Bit）質量大→塵埃更密
+    const n=Math.floor(N_PER*density);
+    for(let j=0;j<n;j++){
+      pos.push(st.pos.x+gauss(),st.pos.y+gauss(),st.pos.z+gauss());
+      const warm=b.blue?0.13:0.10;                        // 金暖色系
+      const c=new THREE.Color().setHSL(warm+rng2()*.06,.7,.45+rng2()*.3);
+      col.push(c.r,c.g,c.b);
+    }
+  });
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  L1.add(new THREE.Points(g,new THREE.PointsMaterial({size:14,map:DIAMOND,vertexColors:true,transparent:true,opacity:.8,depthWrite:false,blending:THREE.AdditiveBlending})));
+}
+
 /* ★ L1 公開層：每顆星永久標籤（canvas 藥丸）＋LOD 兩級——遠=§n 短標、近=全名 */
 function makeStarLabel(text,color,fs=30,pad=20){
   const cv=document.createElement('canvas');const ctx=cv.getContext('2d');
@@ -196,20 +220,23 @@ stars.forEach(st=>{
 });
 /* [Blue 令] 連線=拋物線（重力井絲）＋深海魷魚光譜變色（同款不同色） */
 const squidLines=[];
+/* [Blue 三星斜切面法 10-02] 這是時間軸路徑，不是引力線。
+   段 i→i+1 的拋物線落在「自己＋接下來兩顆星」(i, i+1, i+2) 構成的平面上——
+   弧向斜切面＝轉向預判（路往哪走，弧先往那彎）。最後一段退用 (i-1, i, i+1) 保持連續。 */
 stars.forEach((s,i)=>{
   if(i===0)return;
-  const prev=stars[i-1];
-  const A=prev.pos,B=s.pos;
+  const A=stars[i-1].pos,B=s.pos;
+  const C=(stars[i+1]?stars[i+1].pos:(stars[i-2]?stars[i-2].pos:null));   // 前視兩顆；末段退用後視
   const len=A.distanceTo(B);
-  /* [Blue 慣性拋物線令] 弧線=拋體慣性：彎向垂直於「前進方向」——由上一段的行進向量決定（甩尾），
-     而非固定向上拉（天上沒有引力源）。首段用切向。 */
-  const prevA = stars[i-2] ? stars[i-2].pos : new THREE.Vector3(0,0,0);
-  const dir=new THREE.Vector3().subVectors(B,A).normalize();          // 本段前進方向
-  const prevDir=new THREE.Vector3().subVectors(A,prevA).normalize();  // 上段方向
-  const lat=new THREE.Vector3().subVectors(dir,prevDir).normalize();  // 轉向分量（側向）
-  if(!isFinite(lat.x)||lat.lengthSq()<1e-6) lat.set(-dir.z,0,dir.x).normalize();  // 直線前進→切向彎
-  /* [Blue 令 10-02] 零向上分量——弧線彎向完全由慣性（上段→本段的轉向）決定。天上沒有引力源。 */
-  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5).addScaledVector(lat,len*.14);
+  const d=new THREE.Vector3().subVectors(B,A).normalize();
+  let lat;
+  if(C){
+    const v=new THREE.Vector3().subVectors(C,B);                    // 指向未來
+    lat=v.clone().addScaledVector(d,-v.dot(d));                     // 在 ABC 平面內、垂直於 d
+    if(lat.lengthSq()<1e-8) lat.set(-d.z,0,d.x);                    // 共線→切向
+    lat.normalize();
+  } else lat.set(-d.z,0,d.x).normalize();
+  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5).addScaledVector(lat,len*.13);
   const curve=new THREE.QuadraticBezierCurve3(A,mid,B);
   const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)),
     new THREE.LineBasicMaterial({transparent:true,opacity:.5}));
