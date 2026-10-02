@@ -239,10 +239,10 @@ const stars=BITS.map(b=>{
     if(axis.lengthSq()<1e-6)axis.set(0,1,0);
     axis.normalize();
     const baseS=b.blue?560:380, reach=(b.blue?560:380)*1.35;
-    for(let k=0;k<6;k++){
-      const t=(k/5)*2-1;                                  // -1..1
+    for(let k=0;k<3;k++){                                 // [Blue 令 v7] 霧量 50%：6綻→3綻＋濃度減半
+      const t=(k/2)*2-1;                                  // -1..1
       const tex=smokeTex(b.n*131+k*17);
-      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:.42*(1-Math.abs(t)*.35),depthWrite:false,blending:THREE.AdditiveBlending,rotation:((b.n*7+k*97)%628)/100}));
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,opacity:.21*(1-Math.abs(t)*.35),depthWrite:false,blending:THREE.AdditiveBlending,rotation:((b.n*7+k*97)%628)/100}));
       const s=baseS*(1-Math.abs(t)*.4)*(0.8+((b.n*13+k*31)%23)/23*.4);
       sp.scale.set(s*1.5,s*0.7,1);                        // 寬扁=流動感
       sp.position.copy(st.pos).addScaledVector(axis,t*reach);
@@ -375,6 +375,7 @@ let target=BLUE_POS.clone(),dist=4200,rotX=0.38,rotY=0.9;
 {const q=new URLSearchParams(location.search);if(q.get('dist'))dist=Math.max(60,+q.get('dist'));if(q.get('layer'))state=q.get('layer');}
 let follow=null,frozen=false,simTime=0,lastFrame=performance.now();
 let flyAnim=null;
+let layerFade={t0:0,from:0,to:1,dur:1100,active:false};   // [v8] L1↔L2 重疊漸層狀態
 function flyTo(dest,endDist,dur=1300){flyAnim={t0:performance.now(),dur,fromT:target.clone(),toT:dest.clone(),fromD:dist,toD:endDist};}
 function updateCam(){
   const t=follow?follow.core.getWorldPosition(new THREE.Vector3()):target;
@@ -400,8 +401,8 @@ function brainFade(show){
 }
 function applyLayerVisibility(){
   const _t=document.getElementById('tip');if(_t)_t.style.display='none';
-  L1.visible = state==='L1';
-  L2.visible = state==='L2';          // 修：宏觀層絕不渲染 L2 軌道（6 衛星事故根因）
+  L1.visible = state==='L1' || layerFade.active;
+  L2.visible = state==='L2' || layerFade.active;   // 漸變期間兩層同時渲染（重疊漸層）
   L3.visible = false;                                    // L3 一律走 iframe（本尊渲染）
   let bf=document.getElementById('brainFrame');
   if(state==='L3'&&!bf){
@@ -449,14 +450,21 @@ function enterLayer(cx,cy){
 /* [Blue 導播令 10-02v3] L1→L2 飛入=持續 zoom in 到貼近 → 切 L2 從近拉開（進去感）；
    返回=精確倒放：先收近（跟飛入結尾同一格）→ 切 L1 → 從貼近拉回宏觀（出來感） */
 let l2Loading=false;
+/* [Blue 令 v8] L1↔L2 重疊漸層：L1 zoom in 貼近後，L2 直接疊上淡入（鏡頭不縮放、無縫接軌）；
+   返回＝L2 淡出露出 L1（同格），L1 再 zoom out 回宏觀。實現：兩層同時可見＋全域不透明度漸變。 */
+function crossFadeL2(showing){
+  layerFade={t0:performance.now(),from:showing?0:1,to:showing?1:0,dur:1100,active:true};
+}
 function enterL2Flow(){
   if(l2Loading)return; l2Loading=true;
   follow=null; frozen=true;
-  flyTo(BLUE_POS,240,1200);                                // ① L1 持續 zoom in：飛向 Blue 星、貼近
+  flyTo(BLUE_POS,240,1200);                                // ① L1 持續 zoom in：貼近 Blue 星
   setTimeout(()=>{
-    if(state==='L1'){ state='L2';frozen=false;applyLayerVisibility();
-      dist=9000;flyTo(BLUE_POS,950,1300);                  // ② L2 從遠方 zoom in 到適當距離（進去感）
-      ensureBrainFrame();                                  // [Blue 令] 預載 L3（使用者進 L2 時大腦本尊已開始載）
+    if(state==='L1'){
+      state='L2';frozen=false;applyLayerVisibility();
+      dist=950;                                            // ② L2 無縮放——直接在合理距離淡入（重疊漸層）
+      crossFadeL2(true);
+      ensureBrainFrame();                                  // 預載 L3
     }
     l2Loading=false;
   },1150);
@@ -482,10 +490,10 @@ document.getElementById('back').addEventListener('click',()=>{
     flyTo(BLUE_POS,14000,800);                            // L3 內先 zoom out（往外飛）
     setTimeout(()=>{ if(state==='L3'){ state='L2';applyLayerVisibility();dist=300;flyTo(BLUE_POS,950,1100);} },750);
   } else if(state==='L2'){
-    /* [Blue 令 v3] L2→L1：連續 zoom out——L2 內先拉遠 → 切 L1 從近 240 續拉到宏觀 4200 */
+    /* [Blue 令 v8] L2→L1：重疊漸層——L2 淡出露出同格 L1（鏡頭不動）→ L1 再 zoom out 回宏觀 */
     follow=null;frozen=true;
-    flyTo(BLUE_POS,9000,800);                             // L2 內 zoom out
-    setTimeout(()=>{ if(state==='L2'){ state='L1';applyLayerVisibility();dist=240;flyTo(BLUE_POS,4200,1300);frozen=false;} },750);
+    state='L1'; dist=950; crossFadeL2(false); applyLayerVisibility();
+    setTimeout(()=>{ flyTo(BLUE_POS,4200,1300); frozen=false; },1100);
   }
 });
 canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));
@@ -607,6 +615,12 @@ canvas.addEventListener('mousemove',e=>{
 const fpsEl=document.getElementById('fps');let frames=0,fT=performance.now();
 function loop(t){
   requestAnimationFrame(loop);
+  if(layerFade.active){
+    const k=Math.min(1,(performance.now()-layerFade.t0)/layerFade.dur);
+    const p=layerFade.from+(layerFade.to-layerFade.from)*k;   // 0=L1全显 1=L2全显
+    L1.visible = p<0.999; L2.visible = p>0.001;                // 交錯開關＝時間混色（60fps 下視覺漸變）
+    if(k>=1){ layerFade.active=false; L1.visible=state==='L1'; L2.visible=state==='L2'; }
+  }
   /* 深海魷魚光譜：金線 hue 緩慢漂移（每條線獨立韻律） */
   squidLines.forEach(l=>{
     const u=l.userData;
