@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><title>橋樑大腦圖譜 — 3D 星系版</title>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"><title>橋樑大腦圖譜 — 3D 星系版</title>
 <style>#ui,#hint,#fps,#subLegend,#legend,#card,#tip,#editBar{display:none !important}
 
 html,body{margin:0;height:100%;overflow:hidden;background:#060a10;font-family:'PingFang TC','Noto Sans TC',sans-serif}
-canvas{display:block}
+canvas{display:block;touch-action:none;-webkit-user-select:none;user-select:none}
 #ui{position:fixed;top:16px;left:16px;color:#d8e8d8;font-size:13px;line-height:1.7;text-shadow:0 1px 4px #000;pointer-events:none;z-index:5}
 #ui b{color:#F0CE5E;font-size:15px}
 .legendDot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 5px 0 0;vertical-align:baseline}
@@ -16,7 +17,7 @@ canvas{display:block}
 #hint{position:fixed;bottom:20px;left:16px;color:rgba(216,232,216,.55);font-size:12px;text-shadow:0 1px 3px #000;z-index:5;pointer-events:none} /* [v188 Blue 移位令] 左下→右下 */
 </style>
 <!-- [v59] importmap 移除——直接絕對路徑 import，零相容性風險 -->
-</head><body>
+<script>document.addEventListener('gesturestart',e=>e.preventDefault());document.addEventListener('gesturechange',e=>e.preventDefault());document.addEventListener('dblclick',e=>e.preventDefault());</script></head><body>
 <div id="ui"><b>大腦圖譜 · 3D 星系</b><br>
 房間=星團顏色　·　線=因果/連動/結構　·　左鍵拖曳=旋轉（慣性）　滾輪=縮放　中鍵=平移　雙擊星點=開檔
 </div>
