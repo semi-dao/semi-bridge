@@ -1815,8 +1815,9 @@ if(new URLSearchParams(location.search).get('zoom')==='mid') dist=3600; // 測�
 if(new URLSearchParams(location.search).get('dist')){ dist=Math.min(9000, +new URLSearchParams(location.search).get('dist')); } // [v323] ?dist= 直接設距離（截圖用）
 /* [Blue 導播令 10-02] ?flyin=1：開場從遠方緩緩 zoom in 到全景（u3 三層宇宙進場動畫） */
 if(new URLSearchParams(location.search).get('flyin')==='1'){
-  dist=8800;
-  const _fi={t0:performance.now(),from:8800,to:1900,dur:1500};
+  /* [Blue 令 v9] 進場定格在「本頁最遠距離」（滾輪上限 9000）——從更遠處滑入後停駐全景 */
+  dist=9000;
+  const _fi={t0:performance.now(),from:22000,to:9000,dur:1500};
   const _fiTick=()=>{
     const k=Math.min(1,(performance.now()-_fi.t0)/_fi.dur), e=1-Math.pow(1-k,3);
     dist=_fi.from+(_fi.to-_fi.from)*e;
