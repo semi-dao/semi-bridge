@@ -1816,7 +1816,7 @@ if(new URLSearchParams(location.search).get('dist')){ dist=Math.min(9000, +new U
 /* [Blue 導播令 10-02] ?flyin=1：開場從遠方緩緩 zoom in 到全景（u3 三層宇宙進場動畫） */
 if(new URLSearchParams(location.search).get('flyin')==='1'){
   dist=8800;
-  const _fi={t0:performance.now(),from:8800,to:1900,dur:3000};
+  const _fi={t0:performance.now(),from:8800,to:1900,dur:1500};
   const _fiTick=()=>{
     const k=Math.min(1,(performance.now()-_fi.t0)/_fi.dur), e=1-Math.pow(1-k,3);
     dist=_fi.from+(_fi.to-_fi.from)*e;
