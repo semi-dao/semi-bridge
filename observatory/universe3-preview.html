@@ -135,26 +135,38 @@ const stars=BITS.map(b=>{
   return{b,grp,core,glow,hit,pos:starPos(b)};
 });
 
-/* ★ L1 公開層：每顆星永久小標籤（canvas 藥丸——App galaxy.html label() 同款） */
-function makeStarLabel(text,color){
+/* ★ L1 公開層：每顆星永久標籤（canvas 藥丸）＋LOD 兩級——遠=§n 短標、近=全名 */
+function makeStarLabel(text,color,fs=30,pad=20){
   const cv=document.createElement('canvas');const ctx=cv.getContext('2d');
-  const fs=26;ctx.font=fs+'px PingFang TC';
-  const w=ctx.measureText(text).width+36;
-  cv.width=Math.ceil(w);cv.height=52;
-  ctx.fillStyle='rgba(8,14,10,.82)';ctx.beginPath();ctx.roundRect(0,0,cv.width,52,14);ctx.fill();
-  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(1,1,cv.width-2,50,14);ctx.stroke();
-  ctx.font=fs+'px PingFang TC';ctx.fillStyle='#e8f0e8';ctx.textBaseline='middle';
-  ctx.fillText(text,18,27);
+  ctx.font=`600 ${fs}px PingFang TC`;
+  const w=ctx.measureText(text).width+pad*2;
+  const h=fs+pad*1.2;
+  cv.width=Math.ceil(w);cv.height=Math.ceil(h);
+  ctx.fillStyle='rgba(8,14,10,.85)';ctx.beginPath();ctx.roundRect(0,0,cv.width,h,14);ctx.fill();
+  ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.beginPath();ctx.roundRect(1,1,cv.width-2,h-2,14);ctx.stroke();
+  ctx.font=`600 ${fs}px PingFang TC`;ctx.fillStyle='#e8f0e8';ctx.textBaseline='middle';
+  ctx.fillText(text,pad,h/2+1);
   const tx=new THREE.CanvasTexture(cv);tx.colorSpace=THREE.SRGBColorSpace;
-  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx,transparent:true,depthTest:false,opacity:.92}));
-  sp.scale.set(cv.width/3.2,52/3.2,1);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx,transparent:true,depthTest:false,opacity:.95}));
+  sp.userData.aspect=cv.width/h;
   return sp;
 }
+/* [修] 標籤掛在 grp 內、位置=相對原點的純偏移（grp 已含星絕對座標——舊版又加一次 st.pos=雙重位移真兇） */
+const STAR_LABELS=[];
 stars.forEach(st=>{
-  const short=st.b.id.replace('bit-0000','§')+(' '+st.b.label.split('（')[0].slice(0,10));
-  const sp=makeStarLabel(short, st.b.blue?'#F0CE5E':'#6a8f7a');
-  sp.position.copy(st.pos).add(new THREE.Vector3(0,st.b.blue?46:30,0));
-  st.grp.add(sp);
+  const far=makeStarLabel('§'+st.b.n, st.b.blue?'#F0CE5E':'#6a8f7a',34,14);
+  const nearText=st.b.blue?('§'+st.b.n+' Blue 星'):('§'+st.b.n+' '+st.b.label.split('（')[0].slice(0,12));
+  const near=makeStarLabel(nearText, st.b.blue?'#F0CE5E':'#8fd8a8',34,20);
+  const baseH=st.b.blue?58:44;
+  [far,near].forEach(sp=>{
+    sp.center.set(0.5,0);          // [修] 錨點=底中——標籤座標即星正上方，水平永遠置中
+    sp.position.set(0,baseH,0);
+    const H=st.b.blue?32:27;
+    sp.scale.set(H*sp.userData.aspect,H,1);
+    st.grp.add(sp);
+  });
+  near.visible=false;
+  STAR_LABELS.push({st,far,near});
 });
 L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.pos)),
   new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.38})));
@@ -379,6 +391,12 @@ canvas.addEventListener('mousemove',e=>{
 const fpsEl=document.getElementById('fps');let frames=0,fT=performance.now();
 function loop(t){
   requestAnimationFrame(loop);
+  /* 標籤 LOD：依相機到各星距離切換等級 */
+  STAR_LABELS.forEach(({st,far,near})=>{
+    const d=camera.position.distanceTo(st.grp.getWorldPosition(new THREE.Vector3()));
+    const showNear=d<1800;
+    if(far.visible===showNear){far.visible=!showNear;near.visible=showNear;}
+  });
   const dt=Math.min(0.05,(t-lastFrame)/1000);lastFrame=t;
   if(!frozen)simTime+=dt;
   const time=simTime;
