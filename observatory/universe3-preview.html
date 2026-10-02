@@ -134,6 +134,28 @@ const stars=BITS.map(b=>{
   const hit=new THREE.Mesh(new THREE.SphereGeometry(b.blue?80:56,8,8),new THREE.MeshBasicMaterial({visible:false}));grp.add(hit);
   return{b,grp,core,glow,hit,pos:starPos(b)};
 });
+
+/* ★ L1 公開層：每顆星永久小標籤（canvas 藥丸——App galaxy.html label() 同款） */
+function makeStarLabel(text,color){
+  const cv=document.createElement('canvas');const ctx=cv.getContext('2d');
+  const fs=26;ctx.font=fs+'px PingFang TC';
+  const w=ctx.measureText(text).width+36;
+  cv.width=Math.ceil(w);cv.height=52;
+  ctx.fillStyle='rgba(8,14,10,.82)';ctx.beginPath();ctx.roundRect(0,0,cv.width,52,14);ctx.fill();
+  ctx.strokeStyle=color;ctx.lineWidth=2;ctx.beginPath();ctx.roundRect(1,1,cv.width-2,50,14);ctx.stroke();
+  ctx.font=fs+'px PingFang TC';ctx.fillStyle='#e8f0e8';ctx.textBaseline='middle';
+  ctx.fillText(text,18,27);
+  const tx=new THREE.CanvasTexture(cv);tx.colorSpace=THREE.SRGBColorSpace;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tx,transparent:true,depthTest:false,opacity:.92}));
+  sp.scale.set(cv.width/3.2,52/3.2,1);
+  return sp;
+}
+stars.forEach(st=>{
+  const short=st.b.id.replace('bit-0000','§')+(' '+st.b.label.split('（')[0].slice(0,10));
+  const sp=makeStarLabel(short, st.b.blue?'#F0CE5E':'#6a8f7a');
+  sp.position.copy(st.pos).add(new THREE.Vector3(0,st.b.blue?46:30,0));
+  st.grp.add(sp);
+});
 L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.pos)),
   new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.38})));
 
@@ -327,6 +349,9 @@ canvas.addEventListener('click',e=>{
       <div class="row"><b>關係</b>：${s.relationship}</div>
       <div class="row"><b>起源</b>：${s.born}</div>
       <div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 統計陰影）· 週期 ${(2*Math.PI/s.w).toFixed(0)}s<br>❄ 已凍結——橫向拖曳恢復 · 雙擊主星進大腦星系</div>`;
+  }else if(hit.blueStar){
+    const st=BLUE_STAR;
+    card.innerHTML=`<h4>⭐ ${st.b.id} · Blue 星</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n} · 人類用戶 Bit</div><div>${st.b.label}<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系（${COMPANIONS.length} 顆衛星＋大腦星系）</b></div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
   }else if(hit.star){
     const st=hit.star;
     card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
