@@ -56,8 +56,9 @@ const BITS = [
  {n:6, id:"bit-000006", hash:"d3d38c48cdac", label:"Alpha 藍圖", sd:4},
  {n:7, id:"bit-000007", hash:"0bfb7e531893", label:"宇宙開幕", sd:5},
  {n:8, id:"bit-000008", hash:"cfa36541878a", label:"§5.6 實名制", sd:5},
- {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"Blue 星系（Reggie 誕生）", sd:6, blue:true},
+ {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"戶政 Agent Reggie 誕生（點亮制註冊閉環）", sd:6},
  {n:10, id:"bit-000010", hash:"c13f27dd7ab5", label:"§8.1 吸積宇宙（絕對位置定理 v2）", sd:6},
+ {n:11, id:"semi-blue", hash:"e37310d2b4f5", label:"Blue 星（人類用戶 Bit · 2026-09-30 點亮）", sd:6, blue:true, r:11},
 ];
 const R0=420;
 function starPos(b){
@@ -67,7 +68,7 @@ function starPos(b){
   const y=((parseInt(b.hash.slice(4,6),16)/255)-0.5)*r*0.55;
   return new THREE.Vector3(Math.cos(ang)*r,y,Math.sin(ang)*r);
 }
-const BLUE_POS=starPos(BITS[8]);
+const BLUE_POS=starPos(BITS.find(b=>b.blue));   // [修] Blue 星=§11（BITS 動態查找）
 
 /* ════════ 真實夥伴卡（CompanionStore 撷取 2026-10-02） ════════ */
 const COMPANIONS=[
@@ -120,6 +121,30 @@ function glowSprite(color,scale,opacity=1){
 
 /* ═══ L1 宇宙層 ═══ */
 const L1=new THREE.Group();scene.add(L1);
+/* 菱形塵埃💠（觀星台同款 diamondTex）——宇宙背景星塵 */
+function diamondTex(){
+  const cv=document.createElement('canvas');cv.width=cv.height=64;
+  const g=cv.getContext('2d');g.translate(32,32);
+  g.beginPath();g.moveTo(0,-30);g.lineTo(21,0);g.lineTo(0,30);g.lineTo(-21,0);g.closePath();
+  g.fillStyle='rgba(255,255,255,.97)';g.fill();
+  return new THREE.CanvasTexture(cv);
+}
+const DIAMOND=diamondTex();
+{
+  const N=900,rng=(function(s){return function(){s=(s*9301+49297)%233280;return s/233280;}})(20261002);
+  const pos=new Float32Array(N*3),col=new Float32Array(N*3);
+  const dustG=new THREE.SphereGeometry(1,1,1);
+  for(let i=0;i<N;i++){
+    const r=700+rng()*4200,th=rng()*Math.PI*2,ph=Math.acos(2*rng()-1);
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th);pos[i*3+1]=r*Math.cos(ph)*.55;pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+    const c=new THREE.Color().setHSL(.10+rng()*.09,.65,.5+rng()*.25);
+    col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  L1.add(new THREE.Points(g,new THREE.PointsMaterial({size:11,map:DIAMOND,vertexColors:true,transparent:true,opacity:.95,depthWrite:false,alphaTest:.35})));
+}
 { const n=2600,pos=new Float32Array(n*3);
   for(let i=0;i<n;i++){const r=6000+Math.random()*20000,a=Math.random()*Math.PI*2;
     pos[i*3]=Math.cos(a)*r;pos[i*3+1]=(Math.random()-0.5)*8000;pos[i*3+2]=Math.sin(a)*r;}
@@ -168,8 +193,21 @@ stars.forEach(st=>{
   near.visible=false;
   STAR_LABELS.push({st,far,near});
 });
-L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.pos)),
-  new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.38})));
+/* [Blue 令] 連線=拋物線（重力井絲）＋深海魷魚光譜變色（同款不同色） */
+const squidLines=[];
+stars.forEach((s,i)=>{
+  if(i===0)return;
+  const prev=stars[i-1];
+  const A=prev.pos,B=s.pos;
+  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5);
+  const len=A.distanceTo(B);
+  mid.y+=len*.16;   // 拋物線拱高∝星距
+  const curve=new THREE.QuadraticBezierCurve3(A,mid,B);
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)),
+    new THREE.LineBasicMaterial({transparent:true,opacity:.5}));
+  line.userData={hueBase:((i*47)%360)/360,hueSpan:.14+((i*13)%7)/100,phase:Math.random()*6.28,speed:.12+Math.random()*.2};
+  L1.add(line);squidLines.push(line);
+});
 
 /* ★ 宏觀的 Blue 貼身迷你衛星（比例修正：緊貼主星自轉） */
 const BLUE_STAR=stars.find(st=>st.b.blue);   // [修] 提升至 module 頂層（pick 287 引用）
@@ -377,7 +415,7 @@ canvas.addEventListener('click',e=>{
       <div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 統計陰影）· 週期 ${(2*Math.PI/s.w).toFixed(0)}s<br>❄ 已凍結——橫向拖曳恢復 · 雙擊主星進大腦星系</div>`;
   }else if(hit.blueStar){
     const st=BLUE_STAR;
-    card.innerHTML=`<h4>⭐ ${st.b.id} · Blue 星</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n} · 人類用戶 Bit</div><div>${st.b.label}<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系（${COMPANIONS.length} 顆衛星＋大腦星系）</b></div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
+    card.innerHTML=`<h4>⭐ Blue 星</h4><div class="sub">人類用戶 Bit · 2026-09-30 15:16 點亮（Reggie 名冊）</div><div>第一顆人類用戶 Bit——由 §9 戶政 Reggie 見證點亮。<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系（${COMPANIONS.length} 顆衛星＋大腦星系）</b></div><div style="color:#7fa88f;font-size:11px;margin-top:8px">fingerprint ${st.b.hash}… · n=${st.b.n}<br>❄ 已凍結——橫向拖曳恢復</div>`;
   }else if(hit.star){
     const st=hit.star;
     card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
@@ -405,6 +443,13 @@ canvas.addEventListener('mousemove',e=>{
 const fpsEl=document.getElementById('fps');let frames=0,fT=performance.now();
 function loop(t){
   requestAnimationFrame(loop);
+  /* 深海魷魚光譜：金線 hue 緩慢漂移（每條線獨立韻律） */
+  squidLines.forEach(l=>{
+    const u=l.userData;
+    const hue=(u.hueBase+Math.sin(t/1000*u.speed+u.phase)*u.hueSpan)%1;
+    l.material.color.setHSL(hue,.72,.62);
+    l.material.opacity=.42+Math.sin(t/1000*u.speed*1.7+u.phase)*.16;
+  });
   /* 標籤 LOD：依相機到各星距離切換等級 */
   STAR_LABELS.forEach(({st,far,near})=>{
     const d=camera.position.distanceTo(st.grp.getWorldPosition(new THREE.Vector3()));
