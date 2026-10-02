@@ -202,6 +202,47 @@ bitMeshes.forEach(m=>{
   galaxy.add(sp); labelSprites.push(sp);
 });
 
+/* ════════ [Reggie 動態餵食 2026-10-02] 內嵌版先渲染秒開；鏈上較新→補新星（append-only） ════════ */
+let chainLine = null;   // 金線引用（刷新時重拉）
+{
+  // 把原本的金線記下來（最後一條 Line）
+  const lines = [];
+  galaxy.traverse(o=>{ if(o.isLine) lines.push(o); });
+  chainLine = lines[lines.length-1];
+}
+async function reggieRefresh(){
+  try{
+    const ctrl=new AbortController(); setTimeout(()=>ctrl.abort(),5000);
+    const r=await fetch('https://registry.semidao.net/v1/bits',{signal:ctrl.signal});
+    const j=await r.json();
+    const chainN=j.bits.length;
+    if(chainN<=LEDGER.bits.length) return;   // 鏈上沒有新星
+    for(let i=LEDGER.bits.length;i<chainN;i++){
+      const b=j.bits[i];
+      const rec={id:b.id,sd_day:b.sd_day||null,n:b.n,what:b.what,hash:(b.hash||'').slice(0,12),collapsed_at:b.collapsed_at,phase:b.phase||'',evidence:b.evidence||[]};
+      LEDGER.bits.push(rec);
+      const pos=starPos(rec);
+      const m=new THREE.Mesh(starGeo,new THREE.MeshBasicMaterial({color:0xffe9a3}));
+      m.position.copy(pos); m.userData=rec; galaxy.add(m); bitMeshes.push(m);
+      const halo=new THREE.Sprite(new THREE.SpriteMaterial({map:GLOW,color:0xffd76e,transparent:true,opacity:.6,blending:THREE.AdditiveBlending,depthWrite:false}));
+      halo.scale.setScalar(HALO_R*4.4); halo.position.copy(pos); galaxy.add(halo); haloSprites.push(halo);
+      const picker=new THREE.Mesh(haloGeo,new THREE.MeshBasicMaterial({visible:false}));
+      picker.position.copy(pos); picker.userData=rec; galaxy.add(picker); haloPickers.push(picker);
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${rec.id.replace('bit-','SD')} · ${short(rec.what)}`),transparent:true,depthWrite:false}));
+      sp.scale.set(700,121,1); sp.position.copy(m.position).add(new THREE.Vector3(0,115,0));
+      galaxy.add(sp); labelSprites.push(sp);
+    }
+    // 金線重拉（含新星）
+    if(chainLine){ galaxy.remove(chainLine); }
+    const pts=new THREE.CatmullRomCurve3(bitMeshes.map(m=>m.position),false,'catmullrom',.3).getPoints(240);
+    chainLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({color:0xffd76e,transparent:true,opacity:.7}));
+    galaxy.add(chainLine);
+    document.title=`SemiDAO 觀星台 · ${LEDGER.bits.length} bits（Reggie 鏈即時）`;
+  }catch(e){ /* Reggie 不可達→內嵌版照跑 */ }
+}
+reggieRefresh();
+
 /* ════════ 互動（App 手感 + 光暈級撿取 + 詳情按鈕） ════════ */
 let mode=null;
 let spaceHeld=false;
