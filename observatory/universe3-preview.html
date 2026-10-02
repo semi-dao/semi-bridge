@@ -138,9 +138,10 @@ L1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(stars.map(s=>s.po
   new THREE.LineBasicMaterial({color:0xf0ce5e,transparent:true,opacity:.38})));
 
 /* ★ 宏觀的 Blue 貼身迷你衛星（比例修正：緊貼主星自轉） */
+const BLUE_STAR=stars.find(st=>st.b.blue);   // [修] 提升至 module 頂層（pick 287 引用）
 const miniSats=COMPANIONS.map((c,i)=>{
   const r=58+i*26, w=0.5-i*0.12;
-  const BLUE_STAR=stars.find(st=>st.b.blue);const grp=new THREE.Group();BLUE_STAR.grp.add(grp);
+  const grp=new THREE.Group();BLUE_STAR.grp.add(grp);
   const core=new THREE.Mesh(new THREE.SphereGeometry(4,10,10),new THREE.MeshBasicMaterial({color:c.color}));
   grp.add(core);grp.add(glowSprite(c.color,26,.95));
   return{c,r,w,phase:i*2.1,grp};
