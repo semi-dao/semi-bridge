@@ -3865,13 +3865,19 @@ addEventListener('resize',()=>{
 
 /* [三層宇宙網頁版] 觸控轉譯層——手機也能玩：單指=旋轉（官方 pointer 已有）、雙指捏合=飛行 */
 (function(){
-  let pinch0=0;
+  let pinch0=0, twoFinger=false;
   addEventListener('touchstart',e=>{
     if(e.touches.length===2){
+      twoFinger=true;
       const a=e.touches[0],b=e.touches[1];
       pinch0=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
     }
   },{passive:true});
+  addEventListener('touchend',e=>{ if(e.touches.length<2){twoFinger=false;pinch0=0;} },{passive:true});
+  /* 雙指期間：攔截 pointer 事件到 capture 階段——官方旋轉邏輯收不到，不再亂跳 */
+  ['pointerdown','pointermove','pointerup'].forEach(ev=>{
+    addEventListener(ev,e=>{ if(twoFinger) e.stopPropagation(); }, true);
+  });
   addEventListener('touchmove',e=>{
     if(e.touches.length===2&&pinch0>0){
       e.preventDefault();
