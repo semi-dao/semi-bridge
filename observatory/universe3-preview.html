@@ -31,9 +31,10 @@
 </head>
 <body>
 <script>window.onerror=function(m,s,l,c){var d=document.getElementById('__trap');if(!d){d=document.createElement('div');d.id='__trap';d.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(60,0,0,.92);color:#ff9999;font:12px monospace;padding:12px 16px;border-radius:8px;z-index:99;max-width:80vw;white-space:pre-wrap';document.body.appendChild(d);}d.textContent='⚠ '+m+' @'+l+':'+c;};</script><canvas id="c"></canvas>
-<div id="ui" style="display:none"><b>SEMIDAO · 三層宇宙</b><br>
-<span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span></div>
-<div id="hint" style="display:none">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 橫向拖曳＝恢復 · 「← 上一層」按鈕＝返回 · R＝回宏觀</div>
+<div id="ui"><b>SEMIDAO · 三層宇宙</b><br>
+<span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span><br>
+<span class="sim">左鍵拖曳=旋轉（慣性）· 滾輪=縮放 · 中鍵/雙指拖=平移 · 雙擊=飛行/進層 · R=回宏觀</span></div>
+<div id="hint">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 中鍵/雙指拖曳＝平移 · 「← 上一層」＝返回 · R＝回宏觀</div>
 <div id="fps" style="display:none"></div>
 <div id="lod" style="display:none"></div>
 <div id="layers" style="display:none"></div>
@@ -199,9 +200,16 @@ stars.forEach((s,i)=>{
   if(i===0)return;
   const prev=stars[i-1];
   const A=prev.pos,B=s.pos;
-  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5);
   const len=A.distanceTo(B);
-  mid.y+=len*.16;   // 拋物線拱高∝星距
+  /* [Blue 慣性拋物線令] 弧線=拋體慣性：彎向垂直於「前進方向」——由上一段的行進向量決定（甩尾），
+     而非固定向上拉（天上沒有引力源）。首段用切向。 */
+  const prevA = stars[i-2] ? stars[i-2].pos : new THREE.Vector3(0,0,0);
+  const dir=new THREE.Vector3().subVectors(B,A).normalize();          // 本段前進方向
+  const prevDir=new THREE.Vector3().subVectors(A,prevA).normalize();  // 上段方向
+  const lat=new THREE.Vector3().subVectors(dir,prevDir).normalize();  // 轉向分量（側向）
+  if(!isFinite(lat.x)||lat.lengthSq()<1e-6) lat.set(-dir.z,0,dir.x).normalize();  // 直線前進→切向彎
+  const mid=new THREE.Vector3().addVectors(A,B).multiplyScalar(.5).addScaledVector(lat,len*.12);
+  mid.y+=len*.04;   // 微微上浮（光學美感，非引力）
   const curve=new THREE.QuadraticBezierCurve3(A,mid,B);
   const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(28)),
     new THREE.LineBasicMaterial({transparent:true,opacity:.5}));
@@ -320,14 +328,16 @@ document.getElementById('back').addEventListener('click',()=>{
 canvas.addEventListener('dblclick',e=>enterLayer(e.clientX,e.clientY));
 
 let dragging=false,px=0,py=0,moved=0,vy=0,vx=0;
-const ptrs=new Map();let pinch0=0,distP0=0,panC0=null;
+const ptrs=new Map();let pinch0=0,distP0=0,panC0=null,midPan=null;
 canvas.addEventListener('pointerdown',e=>{
+  if(e.button===1){midPan={x:e.clientX,y:e.clientY};e.preventDefault();return;}   // [新] 中鍵=平移（正式版同款）
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(ptrs.size===1){dragging=true;moved=0;px=e.clientX;py=e.clientY;vy=vx=0;canvas.classList.add('dragging');}
   else if(ptrs.size===2){dragging=false;const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y);distP0=dist;panC0=null;}
   canvas.setPointerCapture(e.pointerId);
 });
 addEventListener('pointerup',e=>{
+  if(midPan){midPan=null;return;}
   ptrs.delete(e.pointerId);
   if(!ptrs.size){
     dragging=false;canvas.classList.remove('dragging');panC0=null;
@@ -336,6 +346,14 @@ addEventListener('pointerup',e=>{
 });
 addEventListener('pointercancel',e=>{ptrs.delete(e.pointerId);if(!ptrs.size){dragging=false;canvas.classList.remove('dragging');}});
 canvas.addEventListener('pointermove',e=>{
+  if(midPan){   // [新] 中鍵拖曳=平移
+    const dx=e.clientX-midPan.x,dy=e.clientY-midPan.y;
+    const k=dist*0.0016;
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    target.add(right.multiplyScalar(-dx*k)).add(up.multiplyScalar(dy*k));
+    midPan={x:e.clientX,y:e.clientY};return;
+  }
   if(ptrs.has(e.pointerId))ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
   if(ptrs.size===2){const[a,b]=[...ptrs.values()];const p=Math.hypot(a.x-b.x,a.y-b.y);
     if(pinch0>0)dist=Math.max(60,Math.min(30000,distP0*pinch0/p));
@@ -378,23 +396,6 @@ function pick(cx,cy){
   }
   return null;
 }
-canvas.addEventListener('dblclick',e=>{
-  const hit=pick(e.clientX,e.clientY);
-  if(state==='L1'){
-    if(hit&&hit.blueStar){state='L2';follow=null;flyTo(BLUE_POS,950);frozen=true;applyLayerVisibility();}
-    else if(hit&&hit.star){follow=null;flyTo(hit.star.pos,170);}
-    else{follow=null;flyTo(new THREE.Vector3(0,0,0),4200);}
-  }else if(state==='L2'){
-    if(hit&&(hit.sysCore||hit.sat)){ /* 雙擊主星或衛星核心皆進大腦 */ }
-    // 主星雙擊 → 大腦
-    const m=new THREE.Vector2(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
-    ray.setFromCamera(m,camera);
-    if(ray.intersectObject(sysHit,false).length){state='L3';follow=null;dist=4200;applyLayerVisibility();}
-    else if(hit&&hit.sat){follow=hit.sat;flyTo(BLUE_POS,420);}
-  }else if(state==='L3'){
-    state='L2';flyTo(BLUE_POS,950);applyLayerVisibility();
-  }
-});
 addEventListener('keydown',e=>{if(e.key==='r'||e.key==='R'){state='L1';follow=null;flyTo(BLUE_POS,4200);rotX=0.38;rotY=0.9;applyLayerVisibility();}});
 
 const tip=document.getElementById('tip'),card=document.getElementById('card');
