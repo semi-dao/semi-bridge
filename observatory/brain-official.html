@@ -140,7 +140,7 @@ window.GPARAMS = {
   // （重撥不吵）、freqLo/Hi 110-880→315-1500（音域上移更空靈）、starVol
   // 0.12→0.23（星音主唱）、detuneCents 3→0（純律）。重置即定版樣子。
   pluckVol: 0.05, pluckDur: 3.4, repluckMs: 2800, freqLo: 315, freqHi: 1500,
-  starVol: 0.23, starCoolS: 3, detuneCents: 0, audioOn: true,
+  starVol: 0.23, starCoolS: 3, detuneCents: 0, audioOn: false, // [三層宇宙網頁版] 預設靜音（Blue 2026-10-02 令）
   // E 顏色（hex 字串——全彩 RGB）
   colImg: '#F0CE5E', colDoc: '#7FD894', colCode: '#B98AFF', colData: '#5FD8E8', colOther: '#FF9E6B',
   colThread: '#B28DFF', colUI: '#F0CE5E', colGold: '#F0CE5E',
@@ -1443,7 +1443,7 @@ if(!window.__audioUnlocked){
 }
 // sizeNorm 0(小)~1(大) → 音高反比（大=110Hz 低鳴、小=880Hz 清脆）
 function playTone(sizeNorm, kind, freqOverride){
-  if(!window.GPARAMS.audioOn) return; // [v232] 總開關
+  if(!window.GPARAMS.audioOn) return; if(location.search.indexOf('audio=1')<0 && !window.__AUDIO_UNLOCKED__) return; // [網頁版] 預設靜音，?audio=1 開啟
   // [小葵 2026-09-25 開機靜音令] Blue：「每次打開，聲音記得上次開啟，
   // 開機就『咚』一聲大響，挺嚇人」——開機後 3 秒內的音全吞（頁面載入
   // 初始化會觸發撥弦/星音；3 秒後正常的互動音不受影響）。
