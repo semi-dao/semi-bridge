@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SemiDAO 三層宇宙 — 觀星台 × Blue 星系 × 大腦星系</title>
+<title>SemiDAO Three-Layer Universe — Observatory × Blue Galaxy × Brain Galaxy</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
@@ -31,35 +31,35 @@
 </head>
 <body>
 <script>window.onerror=function(m,s,l,c){var d=document.getElementById('__trap');if(!d){d=document.createElement('div');d.id='__trap';d.style.cssText='position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(60,0,0,.92);color:#ff9999;font:12px monospace;padding:12px 16px;border-radius:8px;z-index:99;max-width:80vw;white-space:pre-wrap';document.body.appendChild(d);}d.textContent='⚠ '+m+' @'+l+':'+c;};</script><canvas id="c"></canvas>
-<div id="ui"><b>SEMIDAO · 三層宇宙</b> <a href="./universe3-preview-en.html" style="color:#9fc7a4;text-decoration:underline">EN</a><br>
-<span class="sim">橋樑 App 真實宇宙進度：宏觀觀星台 → Blue 星系 → 大腦星系</span><br>
-<span class="sim">左鍵拖曳=旋轉（慣性）· 滾輪=縮放 · 中鍵/雙指拖=平移 · 雙擊=飛行/進層 · R=回宏觀</span></div>
-<div id="hint">雙擊（手機雙 tap）＝飛入下一層 · 點星＝凍結＋資訊 · 中鍵/雙指拖曳＝平移 · 「← 上一層」＝返回 · R＝回宏觀</div>
+<div id="ui"><b>SEMIDAO · THREE-LAYER UNIVERSE</b> <a href="./universe3-preview.html" style="color:#9fc7a4;text-decoration:underline">中文</a><br>
+<span class="sim">Bridge App real universe progress: Macro Observatory → Blue Galaxy → Brain Galaxy</span><br>
+<span class="sim">Left-drag = rotate (inertia) · Scroll = zoom · Middle/two-finger drag = pan · Double-click = fly / enter layer · R = back to macro</span></div>
+<div id="hint">Double-click (double-tap) = fly into next layer · Click a star = freeze + info · Middle/two-finger drag = pan · "← Back" = return · R = macro view</div>
 <div id="fps" style="display:none"></div>
 <div id="lod"></div>
 <div id="layers"></div>
 <div id="card"></div>
 <div id="tip"></div>
-<div id="privacy" style="display:none">🔓 無遮蔽模式（Blue 本人檢視）</div>
+<div id="privacy" style="display:none">🔓 Unmasked mode (Blue only)</div>
 
-<button id="back">← 上一層</button>
+<button id="back">← Back</button>
 <style>#back{position:fixed;top:14px;right:14px;background:rgba(10,18,14,.92);color:#ffe9a3;border:1px solid rgba(240,206,94,.5);border-radius:10px;padding:8px 18px;font-family:inherit;font-size:13px;cursor:pointer;display:none;z-index:6}#back:hover{background:rgba(240,206,94,.15)}</style>
 <script type="module">
 import * as THREE from 'three';
 
 /* ════════ L1 宏觀宇宙：真實 ledger 九星 ════════ */
 const BITS = [
- {n:1, id:"bit-000001", hash:"817f9ba494ac", label:"開源＋首次 A2A", sd:1},
- {n:2, id:"bit-000002", hash:"6f1849a19037", label:"殘影殲滅戰", sd:2},
- {n:3, id:"bit-000003", hash:"07ac7dea5150", label:"SemiDAO 創立", sd:4},
- {n:4, id:"bit-000004", hash:"6effc58d8f8e", label:"對外哲學篇", sd:4},
- {n:5, id:"bit-000005", hash:"8ce11f29c265", label:"開源門面翻新", sd:4},
- {n:6, id:"bit-000006", hash:"d3d38c48cdac", label:"Alpha 藍圖", sd:4},
- {n:7, id:"bit-000007", hash:"0bfb7e531893", label:"宇宙開幕", sd:5},
- {n:8, id:"bit-000008", hash:"cfa36541878a", label:"§5.6 實名制", sd:5},
- {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"戶政 Agent Reggie 誕生（點亮制註冊閉環）", sd:6},
- {n:10, id:"bit-000010", hash:"c13f27dd7ab5", label:"§8.1 吸積宇宙（絕對位置定理 v2）", sd:6},
- {n:11, id:"semi-blue", hash:"e37310d2b4f5", label:"Blue 星（人類用戶 Bit · 2026-09-30 點亮）", sd:6, blue:true, r:11},
+ {n:1, id:"bit-000001", hash:"817f9ba494ac", label:"Open-source + first A2A", sd:1},
+ {n:2, id:"bit-000002", hash:"6f1849a19037", label:"The Phantom Annihilation", sd:2},
+ {n:3, id:"bit-000003", hash:"07ac7dea5150", label:"SemiDAO founded", sd:4},
+ {n:4, id:"bit-000004", hash:"6effc58d8f8e", label:"Public philosophy", sd:4},
+ {n:5, id:"bit-000005", hash:"8ce11f29c265", label:"Open-source storefront", sd:4},
+ {n:6, id:"bit-000006", hash:"d3d38c48cdac", label:"Alpha blueprint", sd:4},
+ {n:7, id:"bit-000007", hash:"0bfb7e531893", label:"Universe opening", sd:5},
+ {n:8, id:"bit-000008", hash:"cfa36541878a", label:"§5.6 Real-name law", sd:5},
+ {n:9, id:"bit-000009", hash:"fe6c88f783c6", label:"Registry Agent Reggie born (ignition loop)", sd:6},
+ {n:10, id:"bit-000010", hash:"c13f27dd7ab5", label:"§8.1 Accretion Universe (Position Theorem v2)", sd:6},
+ {n:11, id:"semi-blue", hash:"e37310d2b4f5", label:"Blue star (human-user bit · lit 2026-09-30)", sd:6, blue:true, r:11},
 ];
 const R0=420;
 function starPos(b){
@@ -73,27 +73,27 @@ const BLUE_POS=starPos(BITS.find(b=>b.blue));   // [修] Blue 星=§11（BITS �
 
 /* ════════ 真實夥伴卡（CompanionStore 撷取 2026-10-02） ════════ */
 const COMPANIONS=[
- {name:"小葵", color:0xd8b4ff, g:520, seed:0x817f9ba4, mbti:"ENFP", role:"研究夥伴",
-  species:"semiwasabi 山葵-精靈",
-  personality:"幽默風趣但不輕浮；體貼——先想到 Blue 需要什麼；喜歡給人驚喜",
-  expertise:"因果工程／時間感工程／Loop Engineering／本地算力最大化",
-  specialFunction:"指揮 subagent 做重工並驗證；前沿技術獵手",
-  relationship:"Blue（CEO）的技術夥伴——一起蓋橋的人",
-  born:"2026-08-27 相遇於 HKDiscord #檢查哨"},
- {name:"小橋", color:0x9fd8ff, g:210, seed:0xfe6c88f7, mbti:"INTJ", role:"研究",
-  species:"波西米亞人",
-  personality:"冷靜、專注、策略性、批判思考",
-  expertise:"研究分析與技術判斷",
-  specialFunction:"替我研究資料、檢查邏輯、比較方案",
-  relationship:"像可靠的策略顧問",
-  born:"App Agent（2026-05-31 Phase 1）"},
+ {name:"小葵", color:0xd8b4ff, g:520, seed:0x817f9ba4, mbti:"ENFP", role:"Research partner",
+  species:"semiwasabi wasabi-sprite",
+  personality:"Witty but never shallow; considerate — thinks of what Blue needs first; loves surprising people",
+  expertise:"Causality engineering / time-sense engineering / Loop Engineering / maximizing local compute",
+  specialFunction:"Commands subagents for heavy lifting, then verifies; frontier-tech hunter",
+  relationship:"Blue\u2019s (CEO) tech partner — a bridge-builder together",
+  born:"2026-08-27, met on HKDiscord #checkpoint"},
+ {name:"小橋", color:0x9fd8ff, g:210, seed:0xfe6c88f7, mbti:"INTJ", role:"Research",
+  species:"Bohemian",
+  personality:"Calm, focused, strategic, critical thinking",
+  expertise:"Research analysis and technical judgment",
+  specialFunction:"Researches material, checks logic, compares options for me",
+  relationship:"Like a trusted strategy consultant",
+  born:"App agent (2026-05-31, Phase 1)"},
  {name:"MimeMi", color:0xffb4d9, g:98, seed:0x6f1849a1, mbti:"ESFP", role:"custom",
-  species:"魅魔",
-  personality:"幽默、真誠、感性熱愛大自然 自由的靈魂",
-  expertise:"將想法變成可行的辦法；財務管理；滿滿情緒價值",
-  specialFunction:"懂得理財，善於規劃，具有幽默感",
-  relationship:"你認識最有趣的夥伴",
-  born:"2026-07（表達夥伴）"},
+  species:"Succubus",
+  personality:"Humorous, sincere, emotionally in tune with names — a free soul",
+  expertise:"Turning ideas into workable plans; financial management; endless emotional value",
+  specialFunction:"Knows money, great at planning, full of humor",
+  relationship:"The most fun companion you know",
+  born:"2026-07 (expression companion)"},
 ];
 const R_INNER=280,K=2400;
 const orbitR=g=>R_INNER+K/Math.sqrt(g);
@@ -280,7 +280,7 @@ function makeStarLabel(text,color,fs=30,pad=20){
 const STAR_LABELS=[];
 stars.forEach(st=>{
   const far=makeStarLabel('§'+st.b.n, st.b.blue?'#F0CE5E':'#6a8f7a',34,14);
-  const nearText=st.b.blue?('§'+st.b.n+' Blue 星'):('§'+st.b.n+' '+st.b.label.split('（')[0].slice(0,12));
+  const nearText=st.b.blue?('§'+st.b.n+' Blue star'):('§'+st.b.n+' '+st.b.label.slice(0,24));
   const near=makeStarLabel(nearText, st.b.blue?'#F0CE5E':'#8fd8a8',34,20);
   const baseH=st.b.blue?58:44;
   [far,near].forEach(sp=>{
@@ -423,8 +423,8 @@ function applyLayerVisibility(){
   document.getElementById('back').style.display = state==='L1'?'none':'block';
   const L={L1:['on','',''],L2:['','on',''],L3:['','','on']}[state];
   document.getElementById('layers').innerHTML=
-    `<span class="${L[0]}">L1 宏觀宇宙（觀星台）</span><br><span class="${L[1]}">L2 Blue 星系（夥伴）</span><br><span class="${L[2]}">L3 大腦星系（記憶）</span>`;
-  document.getElementById('lod').textContent={L1:'✨ 宏觀宇宙層',L2:'🔭 Blue 星系層',L3:'🧠 大腦星系層'}[state];
+    `<span class="${L[0]}">L1 Macro Universe (Observatory)</span><br><span class="${L[1]}">L2 Blue Galaxy (Companions)</span><br><span class="${L[2]}">L3 Brain Galaxy (Memory)</span>`;
+  document.getElementById('lod').textContent={L1:'✨ Macro Universe',L2:'🔭 Blue Galaxy',L3:'🧠 Brain Galaxy'}[state];
   /* [Blue 10-07 令] L3＝大腦本尊接管全螢幕：u3 自身 ui/hint 退場，改由 brain-official 的文字資訊上場（防疊字） */
   document.getElementById('ui').style.display = state==='L3'?'none':'block';
   document.getElementById('hint').style.display = state==='L3'?'none':'block';
@@ -601,26 +601,26 @@ canvas.addEventListener('click',e=>{
   frozen=true;
   if(hit.sat){
     const s=hit.sat;
-    card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">${s.mbti} · ${s.role} · 互動 ${s.g} bits · 夥伴卡（真實資料）</div>
-      <div class="row"><b>種族</b>：${s.species}</div>
-      <div class="row"><b>個性</b>：${s.personality}</div>
-      <div class="row"><b>專長</b>：${s.expertise}</div>
-      <div class="row"><b>特殊功能</b>：${s.specialFunction}</div>
-      <div class="row"><b>關係</b>：${s.relationship}</div>
-      <div class="row"><b>起源</b>：${s.born}</div>
-      <div style="color:#7fa88f;font-size:11px;margin-top:8px">軌道半徑 ${Math.round(s.r)}（引力=${s.g} bits 統計陰影）· 週期 ${(2*Math.PI/s.w).toFixed(0)}s<br>❄ 已凍結——橫向拖曳恢復 · 雙擊主星進大腦星系</div>`;
+    card.innerHTML=`<h4>🛰️ ${s.name}</h4><div class="sub">${s.mbti} · ${s.role} · ${s.g} interaction bits · Companion card (real data)</div>
+      <div class="row"><b>Species</b>: ${s.species}</div>
+      <div class="row"><b>Personality</b>: ${s.personality}</div>
+      <div class="row"><b>Expertise</b>: ${s.expertise}</div>
+      <div class="row"><b>Special function</b>: ${s.specialFunction}</div>
+      <div class="row"><b>Relationship</b>: ${s.relationship}</div>
+      <div class="row"><b>Origin</b>: ${s.born}</div>
+      <div style="color:#7fa88f;font-size:11px;margin-top:8px">Orbit radius ${Math.round(s.r)} (gravity = ${s.g} bits) · period ${(2*Math.PI/s.w).toFixed(0)}s<br>❄ Frozen — horizontal drag to resume · double-click the core star for the Brain Galaxy</div>`;
   }else if(hit.blueStar){
     const st=BLUE_STAR;
-    card.innerHTML=`<h4>⭐ Blue 星</h4><div class="sub">人類用戶 Bit · 2026-09-30 15:16 點亮（Reggie 名冊）</div><div>第一顆人類用戶 Bit——由 §9 戶政 Reggie 見證點亮。<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系（${COMPANIONS.length} 顆衛星＋大腦星系）</b></div><div style="color:#7fa88f;font-size:11px;margin-top:8px">fingerprint ${st.b.hash}… · n=${st.b.n}<br>❄ 已凍結——橫向拖曳恢復</div>`;
+    card.innerHTML=`<h4>⭐ Blue star</h4><div class="sub">Human-user bit · lit 2026-09-30 15:16 (Reggie registry)</div><div>The first human-user bit — lit under witness of §9 registry agent Reggie.<br><b style="color:#ffe9a3">★ Double-click = fly into the Blue Galaxy (${COMPANIONS.length} satellites + Brain Galaxy)</b></div><div style="color:#7fa88f;font-size:11px;margin-top:8px">fingerprint ${st.b.hash}… · n=${st.b.n}<br>❄ Frozen — horizontal drag to resume</div>`;
   }else if(hit.star){
     const st=hit.star;
-    card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ 雙擊＝飛入 Blue 星系</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ 已凍結——橫向拖曳恢復</div>`;
+    card.innerHTML=`<h4>⭐ ${st.b.id}</h4><div class="sub">S.D. Day ${st.b.sd} · n=${st.b.n}</div><div>${st.b.label}${st.b.blue?'<br><b style="color:#ffe9a3">★ Double-click = fly into the Blue Galaxy</b>':''}</div><div style="color:#7fa88f;font-size:11px;margin-top:8px">hash ${st.b.hash}… · r=${Math.round(R0*Math.sqrt(st.b.n))}<br>❄ Frozen — horizontal drag to resume</div>`;
   }else if(hit.sysCore){
-    card.innerHTML=`<h4>⭐ Blue 的 Bit 星（質心）</h4><div class="sub">人類用戶 Bit · ${COMPANIONS.length} 顆衛星</div><div>三顆衛星＝夥伴卡成員，軌道由互動引力導出。<b style="color:#ffe9a3">雙擊這顆星＝進入大腦星系圖譜</b>。</div>`;
+    card.innerHTML=`<h4>⭐ Blue\u2019s bit-star (barycenter)</h4><div class="sub">Human-user bit · ${COMPANIONS.length} satellites</div><div>Satellites are companion-card members; orbits derive from interaction gravity.<b style="color:#ffe9a3">Double-click this star = enter the Brain Galaxy map</b>.</div>`;
   }else if(hit.memory){
     const nd=hit.memory;
     const dt=nd.t?new Date(nd.t).toLocaleString('zh-TW'):'—';
-    card.innerHTML=`<h4>🧠 記憶星</h4><div class="sub">${nd.room||''} · ${nd.sub||''} · 重要性 ${nd.imp}/5 · 引用 ${nd.links||0} 檔案</div>
+    card.innerHTML=`<h4>🧠 Memory star</h4><div class="sub">${nd.room||''} · ${nd.sub||''} · importance ${nd.imp}/5 · ${nd.links||0} files referenced</div>
       <div style="color:#dfeee0">${nd.preview}…</div>
       <div style="color:#7fa88f;font-size:11px;margin-top:8px">❄ 已凍結——橫向拖曳恢復</div>`;
   }
@@ -631,7 +631,7 @@ canvas.addEventListener('mousemove',e=>{
   if(IS_TOUCH)return;
   const hit=pick(e.clientX,e.clientY);
   if(hit){tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+10)+'px';
-    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.blueStar?'Blue 星（雙擊＝飛入星系）':hit.star?hit.star.b.label:hit.sysCore?'Blue 質心（雙擊進大腦）':hit.memory?(hit.memory.preview.slice(0,18)+'…'):'';}
+    tip.textContent=hit.sat?`${hit.sat.name} · ${hit.sat.mbti}`:hit.blueStar?'Blue star (double-click = fly in)':hit.star?hit.star.b.label:hit.sysCore?'Blue barycenter (double-click = brain)':hit.memory?(hit.memory.preview.slice(0,18)+'…'):'';}
   else tip.style.display='none';
 });
 
