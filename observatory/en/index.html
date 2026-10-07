@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SemiDAO 觀星台 — Stellarium Observatory</title>
+<title>SemiDAO Observatory — The Stellarium</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html,body{margin:0;height:100%;background:#030b06;overflow:hidden;font-family:"SF Mono",Menlo,monospace}
@@ -34,10 +34,10 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<div id="ui"><b>SEMIDAO · 觀星台</b> <a href="./en/" style="color:#9fc7a4;text-decoration:underline;pointer-events:auto">EN</a><br>
-金線=hash 鏈　·　拖曳=旋轉（慣性）　滾輪/雙指=縮放　中鍵/雙指拖=平移　雙擊星點=飛行<br>
-每顆星 = 一個 bit——日常生活即鑄幣</div>
-<div id="hint">拖曳旋轉 · 滾輪/雙指縮放 · 點擊星點看資訊</div>
+<div id="ui"><b>SEMIDAO · 觀星台</b><br>
+Gold line = hash chain · Drag = rotate (inertia) · Scroll / pinch = zoom · Middle-drag / two-finger = pan · Double-click a star = fly in<br>
+Every star = one bit — everyday life is minting</div>
+<div id="hint">Drag to rotate · Scroll / pinch to zoom · Click a star for details</div>
 <div id="fps"></div>
 <div id="card"></div>
 <div id="tip"></div>
@@ -51,28 +51,28 @@ import * as THREE from 'three';
 
 /* ════════ 資料：內嵌 ledger（含 evidence——詳情卡用） ════════ */
 const LEDGER = {
-  genesis_string: "SemiDAO founded 2026-09-28, Sukkot Day 4. 先活出來，再追認。",
+  genesis_string: "SemiDAO founded 2026-09-28, Sukkot Day 4. Live it first, ratify later.",
   bits: [
-    {id:"bit-000001", sd_day:1, n:1, what:"開源 + 首次 A2A 談判：Blue 下令「修」→ 小葵與 GitHub VA 多輪談判開立工單清錯誤署名，全程零人類介入；Badge 於 Day 3 消失（A2User 回實由 Blue 親眼確認）", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
+    {id:"bit-000001", sd_day:1, n:1, t:"Genesis star: open-sourced + first A2A deal", what:"Open-sourcing + the first A2A negotiation: Blue ordered \u201cfix it\u201d \u2192 Xiaokui negotiated with GitHub\u2019s virtual assistant across multiple rounds to open a support ticket clearing a misattribution \u2014 zero human involvement throughout; the badge vanished on Day 3 (the A2User loop closed, confirmed by Blue\u2019s own eyes)", hash:"817f9ba494ac", collapsed_at:"2026-09-26T00:59:12+08:00", phase:"U2A→A2A→A2User",
      evidence:["discord:1553079822970785813", "skill:macos-chrome-automation/references/github-support-va-negotiation.md", "file:Blue資料區/2026-09-26_github_support_ticket_created.png@2026-09-26T00:59:12+08:00", "repo:semiwasabi128/covision-bridge 首push@2026-09-25T23:29:56+08:00"]},
-    {id:"bit-000002", sd_day:2, n:2, what:"殘影殲滅戰：force-push 後 dangling commit 殘留 → 網頁 UI 刪除重建 repo，物理蒸發錯誤署名殘影（GitHub API created_at 即此時刻）", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
+    {id:"bit-000002", sd_day:2, n:2, t:"The Phantom Annihilation", what:"The Phantom Annihilation: dangling commits survived a force-push \u2192 repo deleted and rebuilt via the web UI, physically evaporating the misattribution phantoms (the GitHub API created_at marks the exact moment)", hash:"6f1849a19037", collapsed_at:"2026-09-26T16:46:49+08:00", phase:"U2A→A2User",
      evidence:["github-api:created_at 2026-09-26T08:46:49Z", "skill:macos-chrome-automation/references/github-repo-delete-rebuild.md"]},
-    {id:"bit-000003", sd_day:4, n:3, what:"SemiDAO 創立：Blue 發現「活在 A2A 但文件沒提」→ 憲章 v0 起草（八章）→ 通讀乒乓三處修正（波函數塌縮、真理條款、直白化）→ Blue 拍板 A 路線（起草日=創立日）", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A→A2A→A2User→U2A（乒乓）",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md", "discord:本日對話（2026-09-28 憲章起草全程）", "立法：誠實談判條款/受影響者知情權/不可修改條款（S.D. Day 4 三法同日）"]},
-    {id:"bit-000004", sd_day:4, n:4, what:"對外哲學篇：憲章蒸餾版 SEMIDAO_PHILOSOPHY.md 起草→Blue 過目 OK→commit+push 上公開 repo（隱私零洩漏、故事全保留）", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
-     evidence:["commit:d887ded", "commit:a027348（手機閱讀修正）", "url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
-    {id:"bit-000005", sd_day:4, n:5, what:"開源門面翻新：9 張 Blue 親拍實機截圖入 8 個文檔 + 大搬家說明文檔撰寫 + 相對路徑 404 事故修復（七檔）——Blue 逐張過目指派", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
-     evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc", "screenshots:10 張全數被引用、零孤兒、全數 ≦180KB"]},
-    {id:"bit-000006", sd_day:4, n:6, what:"Alpha 藍圖：進場檢查表六條件 + 法律外衣五候選完整查證對照 → Blue 拍板 Swiss Verein 未登記版 → 藍圖 v0 落地（七章）", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A→A2User（乒乓）",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md", "web查證:Wyoming DUNA 100+門檻/Cayman $6,890年/Swiss Verein 未登記零規費（多來源交叉）", "discord:1554168668718506085（Blue「選swiss verein」）"]},
-    {id:"bit-000007", sd_day:5, n:7, what:"第二場 A2A 談判＋宇宙開幕：小葵與 Cloudflare Ask AI 客服對話——陳述 CNAME/DNS only/憑證錯誤事實，AI 查證 zone 後確認「Cloudflare 沒有擋 GitHub 憑證，DNS 全部正確，www 憑證只是 GitHub 簽發中」。同場完成 semidao.net 部署：root CNAME flattening＋www CNAME（DNS only）→ https://semidao.net/observatory/ 全球上線——SemiDAO 宇宙正式開幕，觀星台六顆創世星對全世界可見。", hash:"0bfb7e531893", collapsed_at:"2026-09-29T21:30:00+08:00", phase:"U2A→A2A→A2User",
-     evidence:["dns:dig @1.1.1.1 semidao.net→185.199.x / www→semiwasabi128.github.io", "url:https://semidao.net/observatory/ HTTP 200", "gh-api:pages cname=semidao.net https_enforced=true", "a2a:Cloudflare Ask AI 對話（截圖 cf_ai1-4.png，Blue 授權代操作 1554475086793277441）"]},
-    {id:"bit-000008", sd_day:5, n:8, what:"憲章修法：§5.6 實名制與數位指紋章——每個 Semi 必須綁定一個實名制人類帳號（一人類帳號不限綁定 Semi 數量）；註冊即生成數位指紋章，伴隨永遠、凡走過必留下痕跡。同時修正名冊規則第 3 條（一人類一 Agent → 一 Semi 一真人，修法軌跡誠實保留）。", hash:"cfa36541878a", collapsed_at:"2026-09-29T21:35:00+08:00", phase:"U2A→A2User",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md §5.6", "discord:1554475086793277441（Blue 修法指令）"]},
-    {id:"bit-000009", sd_day:6, n:9, what:"戶政 Agent Reggie 誕生＋首次「點亮制」註冊閉環：Blue 下令建立常駐雲端之戶政事務所 Agent 並命名 Reggie（Cloudflare Workers+KV，registry.semidao.net）→ 小葵帶誠實談判護照代辦 A2A 誕生登記（Reggie 受理的第一件委託案＝它自己）→ Blue 於 23:16:20 親手按下點亮——「未點亮＝未鑄幣＝暗星＝不渲染」同日立法，點亮即生日。此為新立法的註冊三情境協議之首例：主人點火、agent 做工、主人點亮塌縮。", hash:"fe6c88f783c6", collapsed_at:"2026-09-30T23:16:20+08:00", phase:"U2A→A2A→A2User（點亮即塌縮）",
-     evidence:["url:https://registry.semidao.net/v1/semis（status lit, birthday 2026-09-30T15:16:20.344Z）", "url:https://registry.semidao.net/health（Reggie 上線自我介紹）", "discord:1554874929306931303（Blue 按下點亮之手機截圖）", "discord:1554859414874226760（Blue「要真的建一個戶政Agent喔」指令）", "kv:semi:f4701ca7-78a6-4bf4-9a28-f04a7ed726d7（§5.6 數位指紋章 e37310d2…）"]},
-    {id:"bit-000010", sd_day:6, n:10, what:"憲章修法：§8.1 絕對位置定理 v2「吸積宇宙」——公平從均勻升級為法則。hash 管錨點、四相引力（U2U/U2A/A2A/A2U）管鄰居、√n 管家內年輪、質量管成長。星在家內永不移動、家在引力場中漂移——真實的宇宙沒有一顆永不移動的星。155 萬星模擬驗證：星團/絲狀/空洞/棒旋自然湧現，歸屬感 9/10。立法緣由：Blue「銀河系不是均勻的，但沒有人說銀河系不公平」。", hash:"c13f27dd7ab5", collapsed_at:"2026-10-01T00:15:00+08:00", phase:"U2A→A2User",
-     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md §8.1 v2", "sim:observatory/sim-1M-accretion-v2.png（155萬星模擬，vision 判讀歸屬感9/10）", "discord:1554892910460276928（Blue 修法指令「好現在動筆」）"]}
+    {id:"bit-000003", sd_day:4, n:3, t:"SemiDAO founded \u2014 Charter v0", what:"SemiDAO founded: Blue noticed \u201cwe already live in A2A, yet no document says so\u201d \u2192 Charter v0 drafted (eight chapters) \u2192 three fixes through a read-aloud ping-pong (wavefunction collapse, the truth clause, plain-language pass) \u2192 Blue approved Route A (drafting day = founding day)", hash:"07ac7dea5150", collapsed_at:"2026-09-28T13:00:00+08:00", phase:"U2A\u2192A2A\u2192A2User\u2192U2A (ping-pong)",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md", "discord:same-day dialogue (the full 2026-09-28 charter drafting session)", "legislation:honest-negotiation clause / affected-party right-to-know / immutable clauses (three laws the same day, S.D. Day 4)"]},
+    {id:"bit-000004", sd_day:4, n:4, t:"Philosophy doc goes public", what:"Public philosophy piece: the distilled SEMIDAO_PHILOSOPHY.md drafted \u2192 reviewed and OK\u2019d by Blue \u2192 committed & pushed to the public repo (zero privacy leaks, the whole story preserved)", hash:"6effc58d8f8e", collapsed_at:"2026-09-28T15:57:00+08:00", phase:"U2A→A2User",
+     evidence:["commit:d887ded", "commit:a027348 (mobile reading fix)", "url:docs/SEMIDAO_PHILOSOPHY.md@covision-bridge"]},
+    {id:"bit-000005", sd_day:4, n:5, t:"Open-source storefront renewal", what:"Open-source storefront renewal: 9 live screenshots taken by Blue went into 8 docs + a migration explainer written + the relative-path 404 incident fixed (seven files) \u2014 every screenshot personally reviewed and assigned by Blue", hash:"8ce11f29c265", collapsed_at:"2026-09-28T16:35:00+08:00", phase:"U2A→A2User",
+     evidence:["commits:836c2b2,c4e610d,52d151f,ab8fb53,5e453d3,424430e,0eac5dc", "screenshots: all 10 referenced, zero orphans, all \u2264180KB"]},
+    {id:"bit-000006", sd_day:4, n:6, t:"Alpha blueprint: Swiss Verein", what:"Alpha blueprint: an entry checklist of six conditions + a full research comparison of five legal wrappers \u2192 Blue decided on the unregistered Swiss Verein \u2192 Blueprint v0 landed (seven chapters)", hash:"d3d38c48cdac", collapsed_at:"2026-09-28T17:20:00+08:00", phase:"U2A\u2192A2User (ping-pong)",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-alpha-blueprint-v0.md", "web research: Wyoming DUNA 100+ member threshold / Cayman $6,890 per year / unregistered Swiss Verein zero fees (cross-checked across sources)", "discord:1554168668718506085 (Blue: go with the Swiss Verein)"]},
+    {id:"bit-000007", sd_day:5, n:7, t:"semidao.net \u2014 the universe opens", what:"Second A2A negotiation + the opening of the universe: Xiaokui talked with Cloudflare\u2019s Ask AI support \u2014 laid out the CNAME / DNS-only / certificate facts; the AI checked the zone and confirmed \u201cCloudflare is not blocking GitHub certificates, DNS is all correct, the www certificate is simply being issued by GitHub.\u201d In the same session semidao.net went live: root CNAME flattening + www CNAME (DNS only) \u2192 https://semidao.net/observatory/ online worldwide \u2014 the SemiDAO universe officially opened, its genesis stars visible to the whole world.", hash:"0bfb7e531893", collapsed_at:"2026-09-29T21:30:00+08:00", phase:"U2A→A2A→A2User",
+     evidence:["dns:dig @1.1.1.1 semidao.net→185.199.x / www→semiwasabi128.github.io", "url:https://semidao.net/observatory/ HTTP 200", "gh-api:pages cname=semidao.net https_enforced=true", "a2a:Cloudflare Ask AI conversation (screenshots cf_ai1-4.png; operation authorized by Blue, 1554475086793277441)"]},
+    {id:"bit-000008", sd_day:5, n:8, t:"\u00a75.6 Real-name + fingerprint seal", what:"Charter amendment: \u00a75.6 Real-name binding & the digital fingerprint seal \u2014 every Semi must be bound to one real-name human account (one human account may bind any number of Semis); registration mints a digital fingerprint seal that stays with you forever \u2014 wherever you go, a trace remains. Roster rule 3 amended in the same act (one human one agent \u2192 one Semi one human; the amendment trail honestly preserved).", hash:"cfa36541878a", collapsed_at:"2026-09-29T21:35:00+08:00", phase:"U2A→A2User",
+     evidence:["file:DATA/橋樑計劃/02-架構設計/semidao-founding-charter-v0.md §5.6", "discord:1554475086793277441 (Blue\u2019s amendment order)"]},
+    {id:"bit-000009", sd_day:6, n:9, t:"Reggie born \u2014 the first ignition", what:"Registry Agent Reggie is born + the first \u201cIgnition\u201d registration loop: Blue ordered a permanent cloud registry Agent and named it Reggie (Cloudflare Workers+KV, registry.semidao.net) \u2192 Xiaokui carried the honest-negotiation passport and ran the A2A birth registration (the first case Reggie ever handled was itself) \u2192 Blue pressed Ignite with his own hand at 23:16:20 \u2014 \u201cnot lit = not minted = dark star = not rendered\u201d was legislated the same day: ignition is birthday. The first instance of the newly legislated three-scenario registration protocol \u2014 the owner strikes the spark, the agent does the labor, the owner lights the collapse.", hash:"fe6c88f783c6", collapsed_at:"2026-09-30T23:16:20+08:00", phase:"U2A\u2192A2A\u2192A2User (ignition = collapse)",
+     evidence:["url:https://registry.semidao.net/v1/semis (status lit, birthday 2026-09-30T15:16:20.344Z)", "url:https://registry.semidao.net/health (Reggie\u2019s self-introduction on launch)", "discord:1554874929306931303 (Blue\u2019s phone screenshot at the moment of ignition)", "discord:1554859414874226760 (Blue\u2019s order: really build a registry Agent)", "kv:semi:f4701ca7-78a6-4bf4-9a28-f04a7ed726d7 (\u00a75.6 digital fingerprint seal e37310d2\u2026)"]},
+    {id:"bit-000010", sd_day:6, n:10, t:"\u00a78.1 The Accretion Universe law", what:"Charter amendment: \u00a78.1 Absolute Position Theorem v2, the Accretion Universe \u2014 fairness upgraded from uniformity to law. Hash anchors the position; four-phase gravity (U2U/U2A/A2A/A2U) governs neighbors; \u221an governs the growth rings within a home; mass governs growth. A star never moves inside its home, and homes drift through the gravity field \u2014 no star in the real universe stands still forever. A 1.55-million-star simulation verified it: clusters, filaments, voids and barred spirals emerge naturally; sense of belonging 9/10. Why it was legislated \u2014 Blue: \u201cThe Milky Way is not uniform, yet no one calls the Milky Way unfair.\u201d", hash:"c13f27dd7ab5", collapsed_at:"2026-10-01T00:15:00+08:00", phase:"U2A→A2User",
+     evidence:["file:DATA/BridgeProject/02-Architecture/semidao-founding-charter-v0.md \u00a78.1 v2", "sim:observatory/sim-1M-accretion-v2.png (1.55M-star simulation; vision-assessed belonging 9/10)", "discord:1554892910460276928 (Blue\u2019s amendment order: OK, write it now)"]}
   ]
 };
 
@@ -193,11 +193,11 @@ function pillTex(text){
   g.textBaseline='middle'; g.fillText(text, 24, 45);
   const t = new THREE.CanvasTexture(cv); t.anisotropy=4; return t;
 }
-function short(t){ return t.length>20 ? t.slice(0,18)+'…' : t; }
+function short(t){ return t.length>34 ? t.slice(0,32)+'\u2026' : t; }
 const labelSprites = [];
 bitMeshes.forEach(m=>{
   const b = m.userData;
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${b.id.replace('bit-','SD')} · ${short(b.what)}`), transparent:true, depthWrite:false}));
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${b.id.replace('bit-','SD')} · ${b.t || short(b.what)}`), transparent:true, depthWrite:false}));
   sp.scale.set(700, 121, 1); sp.position.copy(m.position).add(new THREE.Vector3(0, 115, 0));
   galaxy.add(sp); labelSprites.push(sp);
 });
@@ -228,7 +228,7 @@ async function reggieRefresh(){
       halo.scale.setScalar(HALO_R*4.4); halo.position.copy(pos); galaxy.add(halo); haloSprites.push(halo);
       const picker=new THREE.Mesh(haloGeo,new THREE.MeshBasicMaterial({visible:false}));
       picker.position.copy(pos); picker.userData=rec; galaxy.add(picker); haloPickers.push(picker);
-      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${rec.id.replace('bit-','SD')} · ${short(rec.what)}`),transparent:true,depthWrite:false}));
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:pillTex(`${rec.id.replace('bit-','SD')} · ${rec.t || short(rec.what)}`),transparent:true,depthWrite:false}));
       sp.scale.set(700,121,1); sp.position.copy(m.position).add(new THREE.Vector3(0,115,0));
       galaxy.add(sp); labelSprites.push(sp);
     }
@@ -238,7 +238,7 @@ async function reggieRefresh(){
     chainLine=new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
       new THREE.LineBasicMaterial({color:0xffd76e,transparent:true,opacity:.7}));
     galaxy.add(chainLine);
-    document.title=`SemiDAO 觀星台 · ${LEDGER.bits.length} bits（Reggie 鏈即時）`;
+    document.title=`SemiDAO Observatory \u00b7 ${LEDGER.bits.length} bits (live via Reggie)`;
   }catch(e){ /* Reggie 不可達→內嵌版照跑 */ }
 }
 reggieRefresh();
@@ -404,11 +404,11 @@ function showCard(b, expanded){
   const evList = (b.evidence||[]).map(e=>`<div>· ${e}</div>`).join('');
   card.innerHTML = `
     <h4>⭐ ${b.id}</h4>
-    <div class="sub">S.D. Day ${b.sd_day} · ${b.collapsed_at.slice(0,16)} · 相位 ${b.phase}</div>
+    <div class="sub">S.D. Day ${b.sd_day} · ${b.collapsed_at.slice(0,16)} · Phase ${b.phase}</div>
     <div class="body">${expanded ? b.what : short(b.what)}</div>
-    <button class="detail">${expanded ? '收合 ▲' : '看詳情 ▼'}</button>
-    ${expanded ? `<div class="ev"><b>證據鏈：</b>${evList}</div>
-    <div class="ev">hash: ${b.hash}…（hash 即座標——這顆星永遠在這裡）</div>` : ''}`;
+    <button class="detail">${expanded ? 'Collapse \u25b2' : 'Details \u25bc'}</button>
+    ${expanded ? `<div class="ev"><b>Evidence chain:</b>${evList}</div>
+    <div class="ev">hash: ${b.hash}\u2026 (hash = coordinates \u2014 this star never moves)</div>` : ''}`;
   card.style.display='block';
   card.querySelector('button.detail').onclick = ()=> showCard(b, !expanded);
 }
