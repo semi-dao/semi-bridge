@@ -425,6 +425,9 @@ function applyLayerVisibility(){
   document.getElementById('layers').innerHTML=
     `<span class="${L[0]}">L1 宏觀宇宙（觀星台）</span><br><span class="${L[1]}">L2 Blue 星系（夥伴）</span><br><span class="${L[2]}">L3 大腦星系（記憶）</span>`;
   document.getElementById('lod').textContent={L1:'✨ 宏觀宇宙層',L2:'🔭 Blue 星系層',L3:'🧠 大腦星系層'}[state];
+  /* [Blue 10-07 令] L3＝大腦本尊接管全螢幕：u3 自身 ui/hint 退場，改由 brain-official 的文字資訊上場（防疊字） */
+  document.getElementById('ui').style.display = state==='L3'?'none':'block';
+  document.getElementById('hint').style.display = state==='L3'?'none':'block';
 }
 applyLayerVisibility();
 if(state==='L2'){dist=1500;} if(state==='L3'){dist=4200;}
@@ -473,7 +476,7 @@ function enterL2Flow(){
   setTimeout(()=>{
     if(state==='L1'){
       state='L2';frozen=false;applyLayerVisibility();
-      dist=1500;                                           // ② L2 無縮放——直接在合理距離淡入（重疊漸層）[Blue 10-07 拉遠令：三衛星全貌]
+      dist=2000;                                           // ② L2 無縮放——直接在合理距離淡入（重疊漸層）[Blue 10-07 令二：L1→L2 再拉遠]
       crossFadeL2(true);
       ensureBrainFrame();                                  // 預載 L3
     }
