@@ -24,6 +24,18 @@ canvas{display:block;touch-action:none;-webkit-user-select:none;user-select:none
 <div id="card"></div>
 <div id="tip" style="position:fixed;display:none;background:rgba(8,14,10,.92);border:1px solid rgba(240,206,94,.5);border-radius:8px;padding:6px 10px;color:#e8f0e8;font-size:12px;pointer-events:none;z-index:8;white-space:nowrap;text-shadow:0 1px 2px #000"></div>
 <div id="hint">拖曳旋轉 · 滾輪縮放 · 點擊節點看資訊 · hover 顯示標題</div>
+<script>/* [Blue 令 10-07] ?lang=en：u3 英文版 iframe 進 L3 時 UI 文字切英文 */
+if(new URLSearchParams(location.search).get('lang')==='en'){
+  document.title='Bridge Brain Map \u2014 3D Galaxy';
+  document.documentElement.lang='en';
+  const _swap=()=>{
+    const ui=document.getElementById('ui');
+    if(ui)ui.innerHTML='<b>Brain Map \u00b7 3D Galaxy</b><br>Rooms = cluster colors \u00b7 Lines = causal / structural links \u00b7 Left-drag = rotate (inertia) \u00b7 Scroll = zoom \u00b7 Middle-drag = pan \u00b7 Double-click a node = open file';
+    const h=document.getElementById('hint');
+    if(h)h.textContent='Drag to rotate \u00b7 Scroll to zoom \u00b7 Click a node for info \u00b7 Hover shows the title';
+  };
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_swap);else _swap();
+}</script>
 <script>// [v183 螢保模式] ?saver=1 → 純淨畫面（無提示列/診斷列）
 if(new URLSearchParams(location.search).get('saver')==='1'){
   document.getElementById('hint').style.display='none';
