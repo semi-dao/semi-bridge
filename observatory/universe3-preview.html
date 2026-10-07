@@ -455,6 +455,7 @@ function enterLayer(cx,cy){
   }else if(state==='L3'){
     state='L2';follow=null;frozen=true;applyLayerVisibility();
     dist=300;flyTo(BLUE_POS,1500,2200);
+    setTimeout(()=>{ if(state==='L2')frozen=false; },2250);   // [Blue 10-07 公轉令] 進場動畫完→自動解凍
   }
 }
 /* [Blue 導播令 10-02v3] L1→L2 飛入=持續 zoom in 到貼近 → 切 L2 從近拉開（進去感）；
@@ -506,7 +507,9 @@ document.getElementById('back').addEventListener('click',()=>{
     /* [Blue 令 v3] L3→L2：連續 zoom out——先在 L3 內拉遠 → 切 L2 從近 300 續拉出到 950 */
     follow=null;frozen=true;
     flyTo(BLUE_POS,14000,800);                            // L3 內先 zoom out（往外飛）
-    setTimeout(()=>{ if(state==='L3'){ state='L2';applyLayerVisibility();dist=300;flyTo(BLUE_POS,1500,1100);} },750);
+    setTimeout(()=>{ if(state==='L3'){ state='L2';applyLayerVisibility();dist=300;flyTo(BLUE_POS,1500,1100);
+      setTimeout(()=>{ if(state==='L2')frozen=false; },1150);   // [Blue 10-07 公轉令] 進場動畫完→自動解凍
+    } },750);
   } else if(state==='L2'){
     /* [Blue 令 v8] L2→L1：重疊漸層——L2 淡出露出同格 L1（鏡頭不動）→ L1 再 zoom out 回宏觀 */
     follow=null;frozen=true;
