@@ -10,6 +10,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Flutter-02569B)](https://flutter.dev)
 
 > 一座讓人類與 AI「共同看見」的橋。不是工具，是同一個視野裡的夥伴。
+>
+> **共視是我們的方法，主權是我們的使命。**
+> 當知識的生產變成機器規模，「擁有」必須由物理與程式碼保證，而不是由許可證保證。
 
 ![Semi Bridge — 畫布](docs/screenshots/canvas.webp)
 
@@ -25,12 +28,21 @@
 
 Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊畫布上共同工作**——你看見的，就是 AI 看見的；AI 正在做的，你看得見過程。
 
-核心信念：
+但共視只是方法。這座橋存在的原因，寫在 2026 年的世界裡：
 
-- **共視（Covision）**：不是「人下命令、AI 執行」，是「共同看見 → 共同感覺 → 共同建造」
-- **資料主權**：你的對話、記憶、數位資產屬於你。金鑰匙原則、路徑主權、除痕不等於刪除
-- **AI 自由 + Token 自由**：模型可替換、provider 可攜、不鎖死任何雲端廠商
-- **為開源社群與 SemiDAO 而生**：這座橋本身就是公共財
+> 一家公司在一天內倒出 722 篇 AI 生成的數學手稿，全世界的數學家卻讀不完其中一篇；產生它們的模型不公開、也不釋出。當知識的生產變成機器規模、驗證仍停留在人類規模，「什麼是真的」的定義權就開始向圍牆內集中。
+
+國際數學聯盟（IMU）背書的**萊頓宣言**已向全世界呼籲：揭露工具使用、堅持同行評審、建設獨立於商業公司的公共計算設施。Semi Bridge 是這份呼召的工程回應——
+
+**我們不等公共叢集。我們讓每個人的桌面，今天就是主權終端。**
+
+### 核心價值
+
+- **🛡️ 知識主權（使命）**：你的對話、記憶、數位資產屬於你。金鑰匙原則（你的金鑰直連、橋不經手）、DataPathGate（白名單外攔截＋90 天帳本）、除痕≠刪除。古典資料靠工程攔截；信任地基 PQC-ready——後量子密碼學遷移軌道已畫進架構
+- **👁️ 共視（方法）**：不是「人下命令、AI 執行」，是「共同看見 → 共同感覺 → 共同建造」。主權不是孤立，是透明之下的自主
+- **🔑 AI 自由 + Token 自由**：模型可替換、provider 可攜、本地模型做重活、雲端只花在刀口。不鎖死任何廠商，也拒絕讓算力巨頭成為你的競爭者
+- **🌐 為全人類而生的公共財**：為開源社群與 SemiDAO 而建，Apache-2.0 全開源；插槽系統讓任何 GitHub 開源專案一鍵入住執行
+- **⚛️ 量子比特綠洲（願景）**：一個「擁有」由物理與程式碼保證的數位家園——不可複製定理是我們的隱喻，後量子密碼學是我們的地基。完整論述見[知識主權對帳書](docs/open-knowledge-sovereignty-alignment.md)
 
 ## 核心功能（現況）
 
@@ -86,8 +98,9 @@ docs/          # 設計規範、宣言、架構地圖
 
 <sub>羅盤圖譜：App 的每個器官是一個節點、線＝依賴連動——這一節的每份文件，講的都是圖上某一個器官。</sub>
 
-- [共視宣言（Covision Manifesto）](docs/COVISION_MANIFESTO.md) — 產品定位錨點
-- [資料主權宣言（Data Sovereignty Manifesto）](docs/DATA_SOVEREIGNTY_MANIFESTO.md)
+- **[知識主權對帳書（Knowledge Sovereignty Alignment）](docs/open-knowledge-sovereignty-alignment.md)** — 萊頓宣言 × SemiBridge 逐條對帳；量子比特綠洲（隱喻＋PQC 工程）；中英雙版
+- [共視宣言（Covision Manifesto）](docs/COVISION_MANIFESTO.md) — 方法論錨點：人機共視是全球 open-source 生態中的空白位
+- [資料主權宣言（Data Sovereignty Manifesto）](docs/DATA_SOVEREIGNTY_MANIFESTO.md) — 金鑰匙/DataPathGate/除痕≠刪除三原則，五層主權動線
 - [🧭 羅盤系統（Compass System）](docs/COMPASS_SYSTEM.md) — 人機共視的決策中樞：器官地圖 + 規則中心 + 軍醫藥箱，Agent 與人類讀同一份真相
 - [🌳 生命樹（Life Tree）](docs/LIFE_TREE.md) — 失敗即數位資產：歷史樹+反思樹雙幹、羅盤精靈儀表、做夢節律——走對走錯都記錄，自我進化有資料結構
 - [🧠 向量大腦（Vector Brain）](docs/VECTOR_BRAIN.md) — App 的記憶器官：四種記憶形態、混合搜尋、本地嵌入管線

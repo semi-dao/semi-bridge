@@ -10,6 +10,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Flutter-02569B)](https://flutter.dev)
 
 > A bridge where humans and AI *see together*. Not a tool — a companion in the same field of vision.
+>
+> **Covision is our method. Sovereignty is our mission.**
+> When knowledge production reaches machine scale, ownership must be guaranteed by physics and code — not by license.
 
 ![Semi Bridge — Canvas](docs/screenshots/canvas.webp)
 
@@ -21,12 +24,21 @@
 
 Semi Bridge is a Flutter desktop app where humans and AI agents **work together on the same canvas** — what you see is what the AI sees, and what the AI is doing is visible to you as it happens.
 
-Core beliefs:
+But covision is only the method. The reason this bridge exists is written in the world of 2026:
 
-- **Covision**: Not "human commands, AI executes" — but *see together → feel together → build together*
-- **Data sovereignty**: Your conversations, memories, and digital assets belong to you. The Golden Key principle, path sovereignty, and trace-erasure ≠ deletion
-- **AI freedom + token freedom**: Models are swappable, providers are portable, no cloud vendor lock-in
-- **Built for the open-source community and SemiDAO**: The bridge itself is a public good
+> One company dropped 722 AI-generated mathematical manuscripts onto GitHub in a single day — more than the world's mathematicians can ever fully read — produced by a model that is neither released nor disclosed. When production is machine-scale but verification stays human-scale, the power to define *what is true* begins to concentrate inside the walls.
+
+The IMU-endorsed **Leiden Declaration** has already called on the world: disclose tool use, uphold peer review, and build public computational infrastructure independent of commercial companies. Semi Bridge is the engineering answer to that call —
+
+**We are not waiting for the public clusters. Your desktop becomes a sovereign terminal today.**
+
+### Core Values
+
+- **🛡️ Knowledge sovereignty (the mission)**: Your conversations, memories, and digital assets belong to you. The Golden Key principle (your keys, direct connection, the bridge never touches them), DataPathGate (blocklist-by-default outside the whitelist, plus a 90-day ledger), and trace-erasure ≠ deletion. Classical data is protected by engineering; the foundation of trust is PQC-ready — the post-quantum cryptography migration track is drawn into the architecture
+- **👁️ Covision (the method)**: Not "human commands, AI executes" — but *see together → feel together → build together*. Sovereignty is not isolation; it is autonomy under transparency
+- **🔑 AI freedom + token freedom**: Models are swappable, providers are portable; local models do the heavy lifting while cloud tokens are spent only where they matter. No vendor lock-in — and no compute giant turned into your competitor
+- **🌐 A public good for all humanity**: Built for the open-source community and SemiDAO, Apache-2.0 throughout; the Slot System lets any open-source GitHub project move in and run with one command
+- **⚛️ The Qubit Oasis (the vision)**: A digital home where ownership is guaranteed by physics and code — the no-cloning theorem is our metaphor, post-quantum cryptography is our foundation. Full statement in the [Knowledge Sovereignty Alignment](docs/open-knowledge-sovereignty-alignment-en.md)
 
 ## Core Features (current state)
 
@@ -76,17 +88,21 @@ docs/          # Design specs, manifestos, architecture map
 
 ## Manifestos & Design Docs
 
-Most docs are currently in Traditional Chinese — English translations are on the roadmap.
+![Semi Bridge — Compass graph](docs/screenshots/compass-graph.webp)
 
-- [Covision Manifesto](docs/COVISION_MANIFESTO.md) — the product positioning anchor
-- [Data Sovereignty Manifesto](docs/DATA_SOVEREIGNTY_MANIFESTO.md)
+<sub>The compass graph: every app organ is a node, edges = dependencies — each document in this section is about one organ on this graph.</sub>
+
+- **[Knowledge Sovereignty Alignment](docs/open-knowledge-sovereignty-alignment-en.md)** — the Leiden Declaration × SemiBridge, clause by clause; the Qubit Oasis (metaphor + PQC engineering); bilingual editions
+- [Covision Manifesto](docs/COVISION_MANIFESTO.md) — the method anchor: human–AI covision is the empty seat in the global open-source ecosystem
+- [Data Sovereignty Manifesto](docs/DATA_SOVEREIGNTY_MANIFESTO.md) — the Golden Key / DataPathGate / trace-erasure ≠ deletion principles; the five-layer sovereignty journey
 - [🧭 Compass System](docs/COMPASS_SYSTEM.md) — the human-agent co-vision decision hub: organ map + rule center + medic kit. Agents and humans read the same source of truth
 - [🌳 Life Tree](docs/LIFE_TREE.md) — failure as digital asset: history tree + reflection tree, the compass sprite's gauges, and the dream rhythm — every step recorded, right or wrong, so self-evolution has a data structure
 - [🧠 Vector Brain](docs/VECTOR_BRAIN.md) — the app's memory organ: four memory forms, hybrid search, local embedding pipeline
 - [🔗 System Wiring](docs/SYSTEM_WIRING.md) — chat–canvas–vector DB–galaxy–embedding–compass–golden key–local model: how one sentence flows through the whole brain
-- [v0.4.0 LightUp](docs/V040_AGENT_AS_USER_DESIGN_INPUTS.md) — Agent-as-User: 7 semantic tools that make agents real users
+- [📦 Hermes Migration](docs/HERMES_MIGRATION.md) — bringing the agent home: personality, memory, schedules, conversation history — a copy moves, originals stay
 - [Open-source Manifesto](docs/opensource/MANIFESTO_DRAFT.md) — why we're opening up, what we believe, what stays private
 - [🔧 Modding Guide](docs/opensource/MODDING_GUIDE.md) — make this ride your own (four modding tiers)
+- [v0.4.0 LightUp](docs/V040_AGENT_AS_USER_DESIGN_INPUTS.md) — Agent-as-User: 7 semantic tools that make agents real users
 - [Design system](docs/BRIDGE_TIER_SYSTEM.md) · [Unified design language](docs/BRIDGE_UNIFIED_DESIGN_LANGUAGE.md)
 - [Architecture map](docs/APP_ARCHITECTURE_MAP.md)
 
