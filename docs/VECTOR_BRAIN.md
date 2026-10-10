@@ -1,5 +1,9 @@
 # 向量大腦（Vector Brain）— App 的記憶器官
 
+![向量大腦 — 你的資料變成 3D 星系](screenshots/brain-galaxy.webp)
+
+![星系節點詳情 — 點擊任一星點，右側展開完整節點資訊，檔案、照片、記憶都能直接開啟](screenshots/heart-galaxy-detail.webp)
+
 > v1.0 · 2026-09-26 · 橋樑（Bridge）— The Bridge Between Humans and AI
 >
 > 橋樑不是一個「聊天 App 加了搜尋」。對話流過去就流過去了；
