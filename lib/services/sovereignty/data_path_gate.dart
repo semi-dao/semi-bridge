@@ -45,7 +45,8 @@ enum DataPathClass {
   text('text'),
   image('image'),
   audio('audio'),
-  doc('doc');
+  doc('doc'),
+  webTraffic('web_traffic'); // [C4] 插槽對外流量
 
   const DataPathClass(this.wire);
   final String wire;
@@ -60,7 +61,8 @@ enum DataPathPurpose {
   memoryExtract('memory_extract'),
   vision('vision'),
   delegate('delegate'),
-  review('review');
+  review('review'),
+  slotWeb('slot_web'); // [C4] 插槽網路請求
 
   const DataPathPurpose(this.wire);
   final String wire;

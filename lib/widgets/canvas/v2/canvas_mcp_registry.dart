@@ -77,7 +77,7 @@ class CanvasMcpRegistry {
   /// 由 CanvasV2Workspace 注入 — 執行工作流
   Future<void> Function()? onExecute;
 
-  /// [v0.4.0 開光 · 2026-09-26] app_tap——畫布工具列語意點擊
+  /// [開光 P2 · 小葵 2026-09-26] app_tap——畫布工具列語意點擊
   /// 由 CanvasV2Workspace 注入：save/copy(另存)/test(靜態測試)/run(執行)
   Map<String, dynamic> Function(String button)? onTapButton;
 

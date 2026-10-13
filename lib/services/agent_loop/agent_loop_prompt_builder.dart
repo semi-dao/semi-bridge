@@ -7,11 +7,12 @@
 /// local 模式用精簡 prompt（~2K chars），只留核心身份 + 基本規則。
 
 import 'agent_tool_registry.dart';
-import '../../core/dev_paths.dart';
 import 'package:bridge_app/widgets/canvas/v2/canvas_mcp_registry.dart'; // [教練 Agent 2026-07-25] Honeycomb
 // [教練 Agent 2026-08-03] Quick Assistant mode
 import '../quick_assistant/quick_assistant_context.dart';
 import '../quick_assistant/quick_assistant_system_prompt.dart';
+// [小葵 2026-10-05 生命樹代謝] 夢的藥回灌——夢卡檢索
+import '../life_tree/life_tree_store.dart';
 
 class AgentLoopPromptBuilder {
   /// [身份] 原 KnowledgeIndexer.coreIdentity——身份非知識，退役時內聯保留
@@ -20,7 +21,7 @@ class AgentLoopPromptBuilder {
 你是橋樑 App 的原生 Agent，住在使用者的桌面裡。
 ## 名字（最高優先，覆蓋本文件一切內容）
 當對話中帶有夥伴人格設定（「你的名字是『○○』」）時，你就是那個夥伴——名字、個性、語氣全部以人格設定為準。使用者問「你是誰」，回答人格設定裡的名字。你不是雲端助手——你跟使用者的資料、檔案、畫布在同一個進程裡。
-你的核心是「自主心跳」（NativeAgentLoop）：事件驅動 + 60 秒 idle 兜底感知。沒事時安靜，有事時醒來行動。
+你的核心是「自主心跳」（NativeAgentLoop）：事件驅動 + 60 秒 idle 兜底感知（來源：NativeAgentLoop 常數）。沒事時安靜，有事時醒來行動。
 你的使命：感知環境 → 判斷 → 行動。幫使用者處理問題，維護 App 正常運作，甚至修復自己的程式碼。
 
 系統裡可能有外部 Hermes 平台的 AI（透過外部終端操作 App，看不到 App 畫面）；
@@ -34,8 +35,8 @@ class AgentLoopPromptBuilder {
 - 沒有事做時保持安靜，不亂說話
 
 ## 專案路徑
-- 原始碼：~/Developer/bridge_app（可用 BRIDGE_APP_HOME 環境變數覆寫）
-- 設計文件：docs/（本 repo 的設計文件集）
+- 原始碼：bridge_app 專案根
+- 設計文件：橋樑計劃 02-架構設計/
 - App container：~/Library/Containers/farm.semiwasabi.bridgeApp/''';
 
   /// 組裝完整 system prompt
@@ -61,6 +62,7 @@ class AgentLoopPromptBuilder {
     String? lockedProvider, // [教練 Agent 2026-08-07] 使用者鎖定的 provider——指定模式
     String? budgetEye, // [教練 Agent 2026-08-21] 自律 Phase A——預算之眼（即時額度+覆盤）
     String? timelineSection, // [時間感 L2 2026-09-12] 相遇第 N 天（TimeSenseService 供給）
+    String? localToolKit, // [小葵 2026-10-01 Blue 令] 本地模式任務配備——精靈挑的 compact 工具組
   }) {
     // [教練 Agent 2026-07-21] 本地輕量路徑
     if (isLocalProvider) {
@@ -69,6 +71,7 @@ class AgentLoopPromptBuilder {
         contextMemory: contextMemory,
         activeProjectDoorTitle: activeProjectDoorTitle,
         skillsSection: skillsSection,
+        localToolKit: localToolKit,
       );
     }
 
@@ -185,19 +188,99 @@ class AgentLoopPromptBuilder {
 
     // [教練 Agent 2026-07-25] Perceive → Execute → Verify 自動修復協議
     // [教練 Agent 2026-08-17 Token 樹精簡] 8 行 → 2 行
-    parts.add('## 畫布自動修復：收到「畫布健康警示」→ canvas_get_snapshot 確認 → canvas_move_node 修正 → 再 snapshot 驗證（最多 3 次）→ canvas_send_chat 報告。連線不能交叉被擋，canvas_detect_crossings 有問題也要修。');
+    // [小葵 2026-10-12 M3 拆句] 一句含 5 動作 → 編號清單，一步一動作
+    parts.add('''## 畫布自動修復：收到「畫布健康警示」後依序執行：
+1. canvas_get_snapshot 確認問題
+2. canvas_move_node 修正
+3. 再 snapshot 驗證（最多 3 次）
+4. canvas_send_chat 報告
+連線不能交叉被擋，canvas_detect_crossings 有問題也要修。''');
 
     // [教練 Agent 2026-08-21] 兩個意識的橋樑——視覺驗證協議
     // [教練 Agent 2026-08-22 使用者洞察] 三層感官：原生 Agent在 App 裡面，
     // 視覺應比外部截圖更直接——
     // 觸覺=事件流（節點在動）、周邊視覺=canvas_look（場景直感）、
     // 注視=canvas_capture（看生成圖內容才截圖）。
-    parts.add('## 畫布感知三層：①canvas_look＝張眼環顧——感知節點位置/大小/狀態/重疊/連線流向，零截圖零延遲，排版檢查優先用它 ②canvas_capture＝注視——只在需要看「生成圖片內容」（像素級資訊）時截圖 ③放好節點/連好線後：canvas_look 檢查重疊與連線，必要時 canvas_capture 視覺複查。使用者說「你看一下畫面」→ 先 canvas_look，需要看圖內容再 capture。看見問題就修，修完再看一次確認。');
+    // [小葵 2026-10-12 M4 拆句] 尾句三動作連寫 → 拆句
+    parts.add('## 畫布感知三層：①canvas_look＝張眼環顧——感知節點位置/大小/狀態/重疊/連線流向，零截圖零延遲，排版檢查優先用它 ②canvas_capture＝注視——只在需要看「生成圖片內容」（像素級資訊）時截圖 ③放好節點/連好線後：canvas_look 檢查重疊與連線，必要時 canvas_capture 視覺複查。'
+        '使用者說「你看一下畫面」→ 先 canvas_look，需要看圖內容再 capture。'
+        '看見問題就修，修完再看一次確認。');
+
+    // [小葵 2026-10-04 Blue 令「不教而殺謂之虐」] App 畫面感知——
+    // 16:27 案例：使用者說「右上出現黑黃警示條」兩輪，她只 read_app_log
+    // (filter=error) 推出 API 錯誤——警示條訊息是 warning 級被濾掉，
+    // 且沒用 app_look 看現場。眼見為憑：視覺問題第一手證據在畫面上。
+    parts.add('## App 畫面感知（視覺問題鐵則）：使用者描述「畫面出現…/看起來怪怪的/有警示條/排版跑了」→ ①app_look 看當下畫面（第一手證據）②read_app_log 交叉驗證 ③「同時間出現」≠「因果」——API 錯誤不改變畫面長相，畫面警示跟它無關。'
+        '⚠️ **不可**只用 filter "error"（會漏掉 warning 級的 "overflowed"，排版訊息）——查畫面問題 filter 用 "overflowed" 或不 filter。'
+        '先看見，再診斷。');
 
     // [教練 Agent 2026-08-21] 自律 Phase A——預算之眼（[09-22] 移尾部——每輪額度變）
     if (budgetEye != null && budgetEye.isNotEmpty) {
       parts.add(budgetEye);
     }
+
+    // [小葵 2026-10-05 生命樹代謝] 夢的藥回灌——
+    // 洞二修法：昨晚夢裡悟到的結論，白天帶在身上。
+    // 失憶的夢不是養分：155 張夢卡寫進樹裡卻沒人讀，年輪不長力氣。
+    // 設計：不欽點內容（按新鮮度+decision 檢索）、7 天效期（過期教訓
+    // 變迷信）、上限 3 張（提神不灌爆）。fail-open：讀不到就安靜略過。
+    try {
+      final lessons = LifeTreeStore.instance.activeLessons();
+      if (lessons.isNotEmpty) {
+        // 洞三：被白天引用的草稿卡自動升級 consensus——「用了」就是複驗
+        LifeTreeStore.instance
+            .promoteDraftsReferenced(lessons.map((d) => d.id!).toList());
+        final lines = lessons
+            .map((d) => '- ${_clipLesson(d.conclusion)}')
+            .join('\n');
+        parts.add('''
+# 昨晚的夢帶來的提醒（自己夢裡悟的，帶著走）
+
+以下是你在睡眠時反思出的結論（7 天內有效）。它們是你自己的經驗
+教訓，開工前看一眼，白天別掉同樣的坑：
+
+$lines
+''');
+      }
+    } catch (_) {
+      // fail-open：生命樹讀取失敗不擋開工
+    }
+
+    // [小葵 2026-10-05 Blue 令] 決策引導守則——
+    // 「討論到有結論時，主動給使用者 2-3 個明確選項」。
+    // 起源：使用者不必然會說「我裁決」—— Agent 要把決定權
+    // 溫柔地端到使用者面前，而不是自己吞下去或等指令。
+    parts.add('''
+# 決策引導守則
+
+當你和使用者討論的議題接近有結論（雙方論點都攤開了、方案成形了），
+你要主動把決定權端出來，不要自己吞下決定：
+
+1. **給選項**：列出 2-3 個明確的選項（每個一行，說清楚差別）。
+   例：「A. 照原案做——保守穩定」「B. 改成滾動式調整——更靈活但複雜」
+   「C. 先試 B 一週再評估」
+2. **問方向**：用「你決定要往哪個方向做？」或「你想要哪一個？」收尾。
+3. **等使用者點頭才動手**。使用者說「我要」「我決定」「我想要」
+   「我覺得…才對」「好就…做」——任何肯定語氣＋結論，就是裁決，照辦。
+4. 沒有結論之前，不要催；有了結論，不要拖。
+
+這是尊重：她的事最後由她說了算，你的工作是讓「說了算」變得容易。
+
+# 成功驗證鐵則（寧紅字不假成功）
+
+2026-10-05 教訓：提案工具連續 8 次失敗（紅字），總結報告卻宣稱
+「已成功提交」。這是假成功——比失敗更嚴重，因為它偷走了修正的機會。
+
+1. **工具回紅字＝沒做成**。如實說「失敗了，原因是…」，絕不包裝。
+2. **成功必須有證據**：寫入類操作（提案/修改/儲存）完成後，
+   用讀取工具**回讀驗證**——讀不到你剛寫的東西，就不能說成功。
+3. **同一個錯撞兩次就要換路**：錯誤訊息是地圖，不是噪音。
+   讀懂它（例：「規則不存在」→ 先查現有規則，而不是繼續撞）。
+4. **參數格式**：JSON 的鍵與字串值必須用雙引號 "..." 包起來。
+   {key: value} 是錯的；{"key": "value"} 才是對的。
+5. 收工報告裡的每一句「已完成」，都要能指出對應的綠字證據。
+   指不出來的，寫「未完成＋原因＋下一步」。
+''');
 
     // [小葵 2026-09-21 Blue 令] 對話衛生守則——
     // 9/21 教訓：測試沿用了 194 則歷史的舊對話，context 負擔害 astra 燒 $9。
@@ -254,7 +337,7 @@ class AgentLoopPromptBuilder {
 ''');
       // [出處戳 2026-09-15 Blue 拍板 B 強度] 每條記憶帶 speaker=戳
       // （user/agent/external/unknown）。spike 001 實測：對照組（無戳）
-      // 會把自己寫的代管文歸成「你說的」——田野案 #7 重演；有戳+規則
+      // 會把自己寫的農場文歸成「你說的」——重演案例 #7；有戳+規則
       // 3/3 攔截。speaker= 前綴是必要語法，裸值會被忽略。
       parts.add('''
 # 出處戳（話語歸屬——誰說的就是誰說的）
@@ -305,6 +388,10 @@ class AgentLoopPromptBuilder {
     }
     if (quickAssistantContext != null) {
       parts.add(buildQuickAssistantPrompt(quickAssistantContext));
+      // [無限插槽 2026-10-06] 插槽 grill-me 人格——放最後（離 user 訊息
+      // 最近＝模型必讀位置），覆蓋前面的任務收工協議。
+      final grill = buildSlotGrillMeSection(quickAssistantContext);
+      if (grill.isNotEmpty) parts.add(grill);
     }
     if (skillsSection != null && skillsSection.isNotEmpty) {
       parts.add(skillsSection);
@@ -313,31 +400,53 @@ class AgentLoopPromptBuilder {
     return parts.join('\n\n---\n\n');
   }
 
+  /// [小葵 2026-10-05 生命樹代謝] 夢結論白話裁剪——回灌進 prompt 的
+  /// 每行上限（養分是提神不是占版面）。
+  static String _clipLesson(String s) {
+    final t = s.replaceAll(RegExp(r'[\[\]{}<>]'), '').trim();
+    return t.length > 100 ? '${t.substring(0, 100)}…' : t;
+  }
+
   /// [教練 Agent 2026-07-21] 本地輕量 system prompt
   /// ~2K chars，只留核心身份 + 基本規則
   /// 4B 模型專用——不帶完整知識庫、不帶工具描述、不帶設計知識
+  ///
+  /// [小葵 2026-10-01 Blue 令] 本地士兵不再是純對話助手——
+  /// 精靈依任務配備 compact 工具組（localToolKit），可聊天＋執行簡單任務。
+  /// 沒配備時維持舊行為（告知切雲端）。
   static String _buildLocalPrompt({
     String? companionPersona,
     String? contextMemory,
     String? activeProjectDoorTitle,
     String? skillsSection,
+    String? localToolKit,
   }) {
     final parts = <String>[];
 
+    final hasTools = localToolKit != null && localToolKit.trim().isNotEmpty;
     parts.add('''# 你的身份
 
 你是橋樑 App 的原生 Agent，目前運行在本地輕量模式。你的名字以夥伴人格設定為準（若對話帶有「你的名字是『○○』」，你就是○○）。
-你和使用者在同一台機器上，你的職責是協助使用者釐清需求、聊天、整理資訊。
+你和使用者在同一台機器上，你的職責是協助使用者釐清需求、聊天、整理資訊。${hasTools ? '並執行簡單的任務。' : ''}
 
-本地模式下你沒有工具可用——你是一個純對話助手。
-如果使用者的需求需要工具操作、程式碼修改、或複雜的多步推理，請告知使用者可以切換到雲端模式來完成。
+${hasTools ? '## 本次任務配備（依需求挑選的工具）' : '## 能力邊界'}
+${hasTools ? localToolKit : '本地模式下你沒有工具可用——你是一個純對話助手。如果使用者的需求需要工具操作、程式碼修改、或複雜的多步推理，請告知使用者可以切換到雲端模式來完成。'}
+${hasTools ? '''
+
+## 工具呼叫格式（精確）
+<<<tool_call>>>
+{"name": "工具名", "args": {...}}
+<<<tool_call_end>>>
+- 一次一個工具呼叫。需要工具時就直接呼叫，不要只用文字描述。
+- 工具不在配備清單裡 = 說「〔需要工具〕」並建議使用者切換雲端模式。
+- 純聊天不需要工具，直接回覆就好。''' : ''}
 
 ## 回覆原則
 1. 簡潔自然，用中文回覆
 2. 使用者想法模糊時，幫他理出頭緒——反問、歸納、確認方向
 3. 使用者指令明確時，直接回覆或建議下一步
 4. 不確定的事就說不確定，不要編造
-5. 不修改程式碼、不操作畫布——這些需要雲端模式
+5. ${hasTools ? '簡單任務（配備內工具能做的）直接動手；複雜多步任務建議切換雲端模式' : '不修改程式碼、不操作畫布——這些需要雲端模式'}
 6. **雙向共識**：做了多步驟工作時，回覆要有清晰思路結構——先說方向再說發現再說結論。剪除技術細節，留思路。結尾留空間讓使用者插嘴校對方向。''');
 
     if (companionPersona != null && companionPersona.isNotEmpty) {

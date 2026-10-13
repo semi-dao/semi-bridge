@@ -42,6 +42,8 @@ import '../chat/handlers/chat_tts_handler.dart';
 import '../chat/handlers/voice_speech_handler.dart'; // [教練 Agent 2026-07-28] Voice AI 語音辨識
 import '../../services/voice/voice_engine.dart';
 import '../../services/voice/voice_live_controller.dart';
+import '../../services/brain_container/brain_container_service.dart'; // [小葵 2026-09-24] 毫秒決策令——快軌語意記憶閃現
+import '../../services/api_service.dart'; // [小葵 2026-09-24] 總結令——語音沉澱 LLM 總結
 // [小葵 2026-08-30] 即時語音——快答慢想雙軌協調器
 import '../../services/voice/realtime_voice_orchestrator.dart';
 import '../../services/tts/kokoro_tts_service.dart';
@@ -176,6 +178,9 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
   String? _agentLoopStage;
   String? _agentLoopStageDetail;
 
+  // [小葵 2026-10-05 Blue 令] 上一次進泡泡的觀察文字（防同輪重複推送）
+  String? _lastBubbleSnippet;
+
   // [小葵 2026-09-19 過程直播] 上一輪 loading 狀態（偵測任務邊界用）
   bool _prevLoadingState = false;
   // [小葵 2026-09-22 修 Bug] 完成卡自動收回計時器——完成後 5 秒無人展開
@@ -264,6 +269,15 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
       if (_isRealtimeConversationActive) {
         // 使用者語音即時字幕——顯示「她聽到的字」而不是寫進輸入框
         if (mounted) setState(() => _realtimeSubtitle = text);
+        // [小葵 2026-09-24 業界對齊] Speculative prefill——partial 一到，
+        // 快軌 LLM 立刻開跑（業界 interim-first 模式）。VAD 判停口時
+        // LLM 已經跑大半，final 只是 commit——第一聲顯著提前。
+        // 注意：先剝除已送出前綴（macOS dictation 的 partial 跨句累積，
+        // 不剝會把前幾句也餵進 prefill）。
+        final fresh = _voiceSpeech.stripDispatchedPrefix(text);
+        if (fresh.trim().isNotEmpty) {
+          _realtimeVoice?.onPartialTranscript(fresh);
+        }
         return;
       }
       // [小葵 2026-09-24 Blue 抓包④] 長按模式：每輪重置基準——
@@ -303,12 +317,27 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
             _agentLoopToolName = toolName;
             _agentLoopToolStatus = toolStatus;
             // [小葵 2026-09-18] 思路+動作進日誌——Blue 要能看到 agent 在想什麼
-            if (llmSnippet.trim().isNotEmpty) {
-              _pushLoopLog('💭 ${llmSnippet.trim().replaceAll('\n', ' ')}');
+            final snippet = llmSnippet.trim();
+            if (snippet.isNotEmpty) {
+              _pushLoopLog('💭 ${snippet.replaceAll('\n', ' ')}');
+              // [小葵 2026-10-05 Blue 令] 中間觀察直進對話泡泡——
+              // 「使用者看到這樣的文字會很高興，而且會想要繼續看下去」。
+              // 過程即內容：不用等全部結論，分析邊跑邊讀。
+              // 防重複：內容夠長（>24 字）才值得進泡泡；同一輪只推一次。
+              if (snippet.length > 24 && snippet != _lastBubbleSnippet) {
+                _lastBubbleSnippet = snippet;
+                _controller.injectAssistantMessage(
+                  snippet,
+                  metadata: {
+                    'kind': 'loop_observation',
+                    'turn': turnIndex + 1,
+                  },
+                );
+              }
             }
             if (toolName != null) {
               _pushLoopLog(
-                  '🔧 $_translateToolName(toolName)${toolStatus == 'failed' ? ' ✗' : ' ✓'}');
+                  '🔧 ${_translateToolName(toolName)}${toolStatus == 'failed' ? ' ✗' : ' ✓'}');
             }
           });
         };
@@ -563,6 +592,11 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
       // [小葵 2026-09-24 Blue 抓包②] 停止分支漏了 _realtimeVoice——
       // orchestrator 沒停，TTS 佇列繼續播 =「停止後一直自言自語」。
       await _realtimeVoice?.stop();
+      // [小葵 2026-09-24 Blue 乒乓模型] 沉澱——語音聊的內容不蒸發：
+      // 對談窗口（最近 6 球）存成一條摘要訊息進對話，後續打字對話
+      // 能接著這個主軸繼續（「剛剛語音聊到…」成為可引用上下文）。
+      final talked = _realtimeVoice?.exportDialogue() ?? const <String>[];
+      _realtimeVoiceRaw = _realtimeVoice?.exportSessionLog(); // [總結令] 完整原料
       _realtimeVoice = null;
       await _voiceLive?.stop();
       _voiceLive = null;
@@ -570,6 +604,9 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
       await engine.stopConversation();
       _draftBeforeVoice = '';
       _realtimeSubtitle = '';
+      if (talked.length >= 2) {
+        await _depositVoiceSummary(talked);
+      }
     } else {
       // [小葵 2026-08-30] 即時模式升級——RealtimeVoiceOrchestrator
       // （快答慢想雙軌 + 逐句串流 TTS）接管「短按」；
@@ -593,6 +630,59 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
     if (mounted) setState(() {});
   }
 
+  /// [小葵 2026-09-24 Blue 乒乓模型·沉澱＋總結令] 語音對談的內容存回對話——
+  /// LLM 真總結：主題主軸＋啟發＋後續要執行的事。失敗退回精簡流水帳。
+  Future<void> _depositVoiceSummary(List<String> talked) async {
+    final raw = _realtimeVoiceRaw;
+    _realtimeVoiceRaw = null;
+    List<String> source = raw ?? talked;
+    if (source.length < 2) return;
+    try {
+      // 先試 LLM 總結（完整 session log 是原料）
+      final summarized = await ApiService.complete(
+        systemPrompt: '你是一段語音對談的總結器。輸入是「user:/agent:」逐輪記錄。'
+            '輸出一份繁中總結，格式：\n'
+            '🎙️ 語音對談總結\n'
+            '【主題主軸】一到兩句——這場對話累積出的核心話題。\n'
+            '【啟發亮點】條列最多 3 點——對話中冒出的想法或洞察。\n'
+            '【後續可執行】條列最多 3 點——聊到一半說「這個之後要做」的事；'
+            '沒有就寫「（無）」。\n'
+            '規則：只根據記錄總結，禁止發明不存在的事；口吻精簡，'
+            '像真人為自己寫的筆記。',
+        userPrompt: source.join('\n'),
+      );
+      final clean = summarized.trim();
+      if (clean.isNotEmpty) {
+        await _controller.injectAssistantMessage(
+          clean,
+          metadata: const {'kind': 'voice_session_summary'},
+        );
+        debugPrint('[DesktopChatPanel] 語音沉澱完成（LLM 總結）');
+        return;
+      }
+    } catch (e) {
+      debugPrint('[DesktopChatPanel] LLM 總結失敗，退回精簡記錄: $e');
+    }
+    // Fallback：精簡流水帳（原 v1 行為）
+    try {
+      final sb = StringBuffer('🎙️ 語音對談記錄（主軸）\n');
+      for (final line in source) {
+        if (line.startsWith('user: ')) {
+          sb.writeln('• ${line.substring(6)}');
+        } else if (line.startsWith('agent: ')) {
+          sb.writeln('  ↳ ${line.substring(7)}');
+        }
+      }
+      await _controller.injectAssistantMessage(
+        sb.toString().trimRight(),
+        metadata: const {'kind': 'voice_session_summary'},
+      );
+      debugPrint('[DesktopChatPanel] 語音沉澱完成（精簡記錄 fallback）');
+    } catch (e) {
+      debugPrint('[DesktopChatPanel] 語音沉澱失敗（不影響停止）: $e');
+    }
+  }
+
   // ──────────────────────────────────────────────────────
   // [小葵 2026-08-30] 即時語音（快答慢想雙軌）
   // ──────────────────────────────────────────────────────
@@ -600,6 +690,9 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
   RealtimeVoiceOrchestrator? _realtimeVoice;
   StreamSubscription<RealtimeVoiceEvent>? _realtimeEventSub;
   String _realtimeSubtitle = ''; // 快軌重點字幕（視覺第二通道）
+  /// [小葵 2026-09-24 總結令] 停止時撈完整 session log——LLM 總結原料。
+  /// 在 orchestrator stop 前先抓（stop 後仍可讀，但語意上先抓先贏）。
+  List<String>? _realtimeVoiceRaw;
 
   /// 啟動即時語音模式。成功回 true（caller 不啟動 fallback）。
   ///
@@ -636,6 +729,19 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
         kokoro: KokoroTtsService(),
         settings: voiceSettings,
         companionPersona: persona,
+        // [小葵 2026-09-24 Blue 毫秒決策令] 語意記憶閃現——
+        // 接球前問向量大腦「我們聊過這個嗎」（768 維本地，毫秒級）。
+        // 失敗回 null：快軌照跑，只是沒靈感。
+        memoryFlash: (userText) async {
+          try {
+            final hits = await BrainContainerService.instance
+                .retrieveMemories(query: userText, limit: 3);
+            if (hits.isEmpty) return null;
+            return hits.map((r) => r.content).toList();
+          } catch (_) {
+            return null;
+          }
+        },
       );
       await orch.start();
       _realtimeVoice = orch;
@@ -655,6 +761,9 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
           onSlowLane: _slowLaneSend,
         ),
         onExternalBargeIn: orch.onBargeIn,
+        // [小葵 2026-09-24 Blue 插嘴令] 真相源接線——orchestrator 的 TTS
+        // 不經 VoiceEngine，插嘴判定要用 orchestrator.isSpeaking。
+        isExternalAgentSpeaking: () => orch.isSpeaking,
       );
       await _voiceLive!.start();
       await _voiceSpeech.start();

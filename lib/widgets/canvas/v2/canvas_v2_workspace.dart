@@ -34,7 +34,7 @@ import 'package:bridge_app/services/semicanvas/workflow_executor.dart';
 import 'package:bridge_app/services/capability/service_registry.dart'; // [教練 Agent 2026-08-01] 能力中心
 import 'package:bridge_app/services/capability/capability_executor.dart'; // [教練 Agent 2026-08-01] 能力執行器
 import 'package:bridge_app/services/capability/capability_models.dart';
-import 'package:bridge_app/services/semicanvas/schedule_engine.dart';
+import 'package:bridge_app/services/semicanvas/app_schedule_engine.dart';
 import 'package:bridge_app/services/semicanvas/schedule_sync_service.dart';
 import 'package:bridge_app/services/vault/canvas_event_bus.dart'; // [教練 Agent 2026-07-22] Phase A
 import 'package:bridge_app/services/vault/canvas_snapshot_service.dart'; // [教練 Agent 2026-07-22] Phase B
@@ -122,8 +122,8 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
   CanvasController get controller => _controller;
   EntityGraphService? _entityGraph;
 
-  /// [教練 Agent 2026-07-24] 排程引擎 — 掃描畫布上的 schedule 節點並觸發執行
-  ScheduleEngine? _scheduleEngine;
+  /// [W1 2026-10-08] 排程引擎已搬遷至 AppScheduleEngine（App 層級
+  /// singleton，掃全庫）——見 initState 的 registerForeground。
 
   /// [教練 Agent 2026-07-24] 同步排程到 daemon，包含 DAG 定義
   void _syncWithCanvas() {
@@ -223,12 +223,14 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
       entityGraph: _entityGraph,
       canvasId: widget.initialCanvasId ?? 'default',
     );
-    // [教練 Agent 2026-07-24] 啟動排程引擎（P1: 前台模式）
+    // [W1 2026-10-08 小葵·引擎搬遷] 排程引擎升級 App 層級（AppScheduleEngine
+    // singleton，掃全庫）——workspace 不再自建引擎，退位為「前景畫布註冊」：
+    // 註冊自己的 _executeNode（真相回寫 params._lastOutput 保留）。
+    // afplay 自動播放已上移到 AppScheduleEngine（前景/背景都播），此處不重複。
     if (_entityGraph != null) {
-      _scheduleEngine = ScheduleEngine(
-        entityGraph: _entityGraph!,
-        nodeExecutor: _executeNode,
+      AppScheduleEngine.instance.registerForeground(
         canvasId: widget.initialCanvasId ?? 'default',
+        executor: _executeNode,
         // [小葵 2026-09-19 W0.5] 真相回寫——排程執行結果寫回節點 params._lastOutput
         onNodeResult: (nodeId, output) {
           final node = _controller.state.nodes[nodeId];
@@ -239,26 +241,7 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
           updated['_lastOutput'] = output;
           _controller.updateNodeParams(nodeId, props.nodeType, updated);
         },
-        onFired: (nodeId, nodeTitle, results) {
-          debugPrint('[ScheduleEngine] 排程觸發完成: $nodeTitle ($nodeId)');
-          // [小葵 2026-09-19 緊急手術] 以終為始——排程的終點是使用者「聽到」，
-          // 不是檔案落地。TTS 產出後自動 afplay 播出（macOS 原生，零依賴）。
-          for (final r in results) {
-            final out = r.output ?? '';
-            if (out.contains('.aiff') || out.contains('.mp3') || out.contains('.wav')) {
-              final m = RegExp(r'[\s]([^\s]+\.(?:aiff|mp3|wav|mp4|m4a))')
-                  .firstMatch(out);
-              final audioPath = m?.group(1);
-              if (audioPath != null) {
-                debugPrint('[ScheduleEngine] 自動播放: $audioPath');
-                Process.run('afplay', [audioPath]); // 不 await——播放不阻塞引擎
-              }
-              break;
-            }
-          }
-        },
       );
-      _scheduleEngine!.start();
       // [教練 Agent 2026-07-24] 排程同步服務 — 把 schedule 節點同步給 daemon
       _scheduleSync = ScheduleSyncService(entityGraph: _entityGraph!);
       _syncWithCanvas(); // 初次同步
@@ -294,7 +277,9 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
       debugPrint('[v199c] initialCanvasId 變更 → 重載: ${widget.initialCanvasId}');
       loadCanvasById(widget.initialCanvasId!);
       // [小橋 2026-09-18] 排程引擎同步跟隨畫布切換（修 canvasId 錯定 bug）
-      _scheduleEngine?.updateCanvasId(widget.initialCanvasId);
+      // [W1 2026-10-08] 改向 AppScheduleEngine 更新前景畫布路由
+      AppScheduleEngine.instance
+          .updateForegroundCanvasId(widget.initialCanvasId);
     }
   }
 
@@ -408,8 +393,8 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
     // 執行工作流 — 接上 WorkflowExecutor
     reg.onExecute = () => _executeWorkflow();
 
-    // [v0.4.0 開光 · 2026-09-26] app_tap——畫布工具列語意點擊。
-    // 與 UI 按鈕同一條程式路徑，零座標模擬。
+    // [開光 P2 · 小葵 2026-09-26] app_tap——畫布工具列語意點擊。
+    // 手的語意化：與 UI 按鈕同一條程式路徑，零座標模擬。
     reg.onTapButton = (button) {
       switch (button) {
         case 'save':
@@ -422,6 +407,7 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
           _runStaticTest();
           return {'success': true, 'button': '測試'};
         case 'run':
+          _onSave();
           _executeWorkflow();
           return {'success': true, 'button': '執行'};
         default:
@@ -2376,7 +2362,9 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
   @override
   void dispose() {
     _scheduleSyncTimer?.cancel();
-    _scheduleEngine?.dispose();
+    // [W1 2026-10-08] 引擎已搬 App 層——workspace 只解註冊前景畫布，
+    // 不再 dispose 引擎（AppScheduleEngine 生命周期跟著 App 走）
+    AppScheduleEngine.instance.unregisterForeground();
     _canvasFocusNode.dispose();
     // [隊友訊息流 C1 2026-09-08] 比對前景原體而非 controller getter——
     // ambient 覆寫期間 getter 回傳任務工作畫布，直接比對會漏清前景指標。
@@ -3062,28 +3050,16 @@ class CanvasV2WorkspaceState extends State<CanvasV2Workspace> {
           ),
         ),
         // 拖曳分隔條 — 調整聊天框寬度
-        GestureDetector(
-          onHorizontalDragUpdate: (details) {
-            final newWidth = (widget.chatWidth - details.delta.dx).clamp(240.0, 600.0);
+        // [W4.7c Blue 令 2026-10-09] 共用元件：常態灰色、拖曳中整條變紫
+        PurpleDragHandle(
+          color: BridgeDSColors.of(context).accentPurple,
+          trackColor: BridgeDSColors.of(context).borderSubtle,
+          onDrag: (delta) {
+            // [W4.7 Blue 令 2026-10-09] 最小值 240→320——太小時輸入框元件
+            // 溢出（黑黃警示條），320 是不溢出的實測下限
+            final newWidth = (widget.chatWidth - delta).clamp(320.0, 600.0);
             widget.onChatWidthChanged?.call(newWidth);
           },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.resizeColumn,
-            child: Container(
-              width: 4,
-              color: BridgeDSColors.of(context).borderSubtle,
-              child: Center(
-                child: Container(
-                  width: 2,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: BridgeDSColors.of(context).textMuted.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(1),
-                  ),
-                ),
-              ),
-            ),
-          ),
         ),
         // [教練 Agent 2026-07-19] 人機共視對話框——讓原生 Agent在畫布當下環境工作
         // [教練 Agent 2026-07-22] Phase 5+ 教學：攔截 onControllerReady 注入教學服務
@@ -3908,4 +3884,59 @@ class _ParamEditor extends StatelessWidget {
     ),
     contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
   );
+}
+
+
+// ─────────────────────────────────────────────────────────────
+// [W4.7c Blue 令 2026-10-09] 可拖分隔條（全 App 統一）：
+// 常態＝灰色細線；抓取拖曳中＝整條 4px 變紫發光（抓到線的回饋）。
+// ─────────────────────────────────────────────────────────────
+class PurpleDragHandle extends StatefulWidget {
+  final Color color;
+  final Color trackColor;
+  final void Function(double delta) onDrag;
+
+  const PurpleDragHandle({
+    super.key,
+    required this.color,
+    required this.trackColor,
+    required this.onDrag,
+  });
+
+  @override
+  State<PurpleDragHandle> createState() => _PurpleDragHandleState();
+}
+
+class _PurpleDragHandleState extends State<PurpleDragHandle> {
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        onHorizontalDragStart: (_) => setState(() => _dragging = true),
+        onHorizontalDragEnd: (_) => setState(() => _dragging = false),
+        onHorizontalDragCancel: () => setState(() => _dragging = false),
+        onHorizontalDragUpdate: (details) => widget.onDrag(details.delta.dx),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 100),
+          width: 4,
+          decoration: BoxDecoration(
+            color: _dragging
+                ? widget.color.withValues(alpha: 0.9)
+                : widget.trackColor,
+            boxShadow: _dragging
+                ? [
+                    BoxShadow(
+                      color: widget.color.withValues(alpha: 0.5),
+                      blurRadius: 8,
+                    ),
+                  ]
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
 }

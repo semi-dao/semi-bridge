@@ -73,6 +73,10 @@ class BrainDatabase {
   /// 是否已初始化
   bool get isInitialized => _initialized;
 
+  /// [H2 2026-10-07] 未初始化時回 null 而非 throw——
+  /// MemoryLayerService 等輕量讀者用（fail-quiet：沒開就當沒資料）。
+  Database? get tryDb => _initialized ? _db : null;
+
   /// 初始化資料庫。
   ///
   /// 步驟：
@@ -275,7 +279,7 @@ class BrainDatabase {
   /// 1. 使用者自訂路徑（SharedPreferences 'vault_db_directory'）— 安裝精靈設定
   /// 2. macOS: ApplicationSupportDirectory / iOS: ApplicationDocumentsDirectory
   ///
-  /// [教練 Agent 2026-07-22] Phase 1 ③ 支援使用者自訂 DB 路徑（如外接碟）
+  /// [教練 Agent 2026-07-22] Phase 1 ③ 支援 DB 路徑指定（如外接碟）
   /// [教練 Agent 2026-08-02] 收斂：DB 路徑單一化 + 啟動驗證
   ///   - 檢查 DB 檔案是否存在且 size > 0
   ///   - 如果無效，fallback 到 ApplicationSupport 路徑
@@ -303,7 +307,7 @@ class BrainDatabase {
       final customDbFile = File('$customDir/$_dbFileName');
       if (!customDbFile.parent.existsSync()) {
         // [小葵 2026-09-12] 外接碟未掛載根治——自訂路徑的父目錄不存在時，
-        // 絕不 createSync（在外接碟唯讀/未掛載時會 Permission denied 直接炸掉
+        // 絕不 createSync（在外接碟上會 Permission denied 直接炸掉
         // 整個 BrainContainer 初始化，連本地 DB fallback 都沒機會跑）。
         // 改為：跳過自訂路徑 → fallback 預設路徑（本地 956MB DB 完好），
         // 碟掛回後自動回到自訂路徑。設定的意圖保留，不等於硬崩潰。

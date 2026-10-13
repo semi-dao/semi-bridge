@@ -10,6 +10,8 @@
 
 import 'dart:convert';
 
+import '../activity/background_task_registry.dart';
+
 import 'package:flutter/foundation.dart';
 
 import '../brain_container/brain_database.dart';
@@ -59,6 +61,10 @@ class IdentityReembedService {
       debugPrint('[IdentityReembed] 開始：$_total 筆');
 
       for (final row in pending) {
+        // [U1] 溫和暫停——批次邊界檢查
+        while (BackgroundTaskRegistry.instance.isPauseRequested('identity_reembed')) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
         final relPath = row['file_path'] as String;
         final folderRoot = row['folder_root'] as String;
         final content = (row['content_text'] as String?) ??

@@ -25,6 +25,9 @@ class VectorSketchService {
   VectorSketchService._();
   static final VectorSketchService instance = VectorSketchService._();
 
+  static const _sketchPath =
+      '06_AI協作與知識庫/向量資料素描.md'; // 寫到知識庫根（記憶區）
+
   /// 執行素描。回傳 MD 全文。
   Future<String> run({bool writeBack = true}) async {
     final db = BrainDatabase.instance.db;

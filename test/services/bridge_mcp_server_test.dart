@@ -146,8 +146,14 @@ void main() {
       expect(result['protocolVersion'], '2026-07-28');
     });
 
-    // [v0.4.0 開光 2026-09-26] 22 → 29：app_view/app_look/window_map/app_tap/canvas_zoom/app_permissions/window_control
-    test('POST /mcp tools/list → 29 tools + 每個有 inputSchema (JSON Schema 2020-12)', () async {
+    // [開光 P0 2026-09-26] 22 → 28：app_view/render_layer/vector_search/get_agent_debug
+    // 首次納入 + auto_layout/get_last_response 補收錄。發現新工具時更新此數字。
+    // [開光 P1 2026-09-26] 28 → 30：app_look（語意化視網膜）+ window_map（心之地圖）。
+    // [開光 P2 2026-09-26] 30 → 32：app_tap（語意點擊）+ canvas_zoom（縮放讀寫）
+    // [開光 P3 2026-09-26] 32 → 34：app_permissions（權限即地圖）+ window_control（視窗管理）
+    // [S1+S2 合併 2026-10-12] 48（app_look/app_tap 雙 schema 重複註冊）→ 43：
+    // app_look 與 app_tap 各自雙 schema 合併為一份，重複註冊終結。
+    test('POST /mcp tools/list → 43 tools + 每個有 inputSchema (JSON Schema 2020-12)', () async {
       final res = await _httpPost(
         'http://127.0.0.1:$actualPort/mcp',
         body: {
@@ -173,7 +179,11 @@ void main() {
       expect(result['ttlMs'], 60000);
       expect(result['cacheScope'], 'private');
       final tools = result['tools'] as List<dynamic>;
-      expect(tools.length, 29);
+      // [開光 P0 2026-09-26] 22 → 28（見 test 名稱註解）
+      // [開光 P1 2026-09-26] 28 → 30：app_look + window_map
+      // [開光 P3 2026-09-26] 32 → 34：app_permissions + window_control
+      // [S1+S2 合併 2026-10-12] 48 → 43：app_look/app_tap 雙 schema 合併
+      expect(tools.length, 43);
 
       // 每個 tool 都必須有 inputSchema（JSON Schema 2020-12 結構）
       for (final t in tools) {
@@ -251,6 +261,401 @@ void main() {
       expect(body['result']['success'], true);
       expect(body['result']['message'], contains('畫布'));
       expect(triggered, isTrue);
+    });
+
+    // ── [開光 P0 · 小葵 2026-09-26] 單一真相源 + 眼/腦工具 ──────────
+    test('開光：GET /mcp/tools 與 tools/list 同源（單一真相源）', () async {
+      final restRes = await _httpGet('http://127.0.0.1:$actualPort/mcp/tools');
+      final rpcRes = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 100,
+          'method': 'tools/list',
+          'params': {
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/list',
+        },
+      );
+      final restBody = jsonDecode(restRes.body) as Map<String, dynamic>;
+      final rpcBody = jsonDecode(rpcRes.body) as Map<String, dynamic>;
+      final restNames = (restBody['tools'] as List<dynamic>).map((t) => t['name']).toSet();
+      final rpcNames = (rpcBody['result']['tools'] as List<dynamic>).map((t) => t['name']).toSet();
+      expect(restNames.length, greaterThanOrEqualTo(26)); // 22 + 開光新增 4（等於 tools/list 同步）
+      expect(restNames, equals(rpcNames)); // 同源鐵則：兩份清單完全一致
+    });
+
+    test('開光：dispatch schema 全收錄——清單列出的每個工具都必須有 case（反 get_last_response 蟲）', () async {
+      final res = await _httpGet('http://127.0.0.1:$actualPort/mcp/tools');
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final names = (body['tools'] as List<dynamic>).map((t) => t['name'] as String).toList();
+      // 2026-09-26 開光後：27 個工具全部收錄
+      expect(names, containsAll(<String>[
+        'get_canvas_state', 'screenshot', 'add_node', 'connect', 'remove_node',
+        'execute', 'navigate_to_canvas', 'send_chat', 'send_user_message',
+        'send_canvas_message', 'inject_message', 'navigate', 'get_app_state',
+        'list_canvases', 'load_canvas', 'get_annotations', 'get_latest_messages',
+        'brain_reindex', 'set_node_params', 'get_node_params', 'clear_canvas',
+        'load_template', 'auto_layout', 'get_last_response', 'app_view',
+        'render_layer', 'vector_search', 'get_agent_debug',
+        'app_look', 'window_map',
+        'app_tap', 'canvas_zoom',
+        'app_permissions', 'window_control',
+      ]));
+      expect(names.length, 43); // 三份清單漂移終結：一份 schema、一份 dispatch（S1+S2 合併後）
+    });
+
+    test('開光：app_view（無 UI 測試環境）→ available:false 不炸', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 101,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_view',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_view',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['result']['resultType'], 'complete');
+      // 無渲染環境 AppRetina.capture 回 null → available:false（不是 throw）
+      expect(body['result']['available'], false);
+    });
+
+    // ── [開光 P1 · 2026-09-26] app_look / window_map 專屬測試 ──────
+    test('開光 P1：app_look 給無效 target → -32602 帶合法清單（不猜）', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 201,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_look',
+            'arguments': {'target': '不存在的頁面'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_look',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['error']['code'], -32602);
+      expect(body['error']['message'], contains('home'));
+      expect(body['error']['message'], contains('canvas'));
+    });
+
+    test('開光 P1：app_look target=app（不導航，拍當下）→ 測試環境 available:false', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 202,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_look',
+            'arguments': {'target': 'app'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_look',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      // 測試環境無 UI：導航不觸發（target=app），拍照優雅降級 available:false
+      expect(body['result']['resultType'], 'complete');
+      expect(body['result']['available'], false);
+      expect(body['result']['target'], 'app');
+    });
+
+    test('開光 P1：window_map（無 window_manager 測試環境）→ 地圖優雅降級不炸', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 203,
+          'method': 'tools/call',
+          'params': {
+            'name': 'window_map',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'window_map',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['result']['resultType'], 'complete');
+      // 測試環境：window_manager 未初始化 → available:false 帶原因（誠實降級）
+      expect(body['result']['mainWindow']['available'], false);
+      // PID 必須有——地圖的基本盤
+      expect(body['result']['pid'], isA<int>());
+    });
+
+    // ── [開光 P2 · 2026-09-26] app_tap / canvas_zoom 專屬測試 ──────
+    test('開光 P2：app_tap 給無效 target → -32602 帶合法按鈕清單', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 301,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_tap',
+            'arguments': {'target': 'canvas_toolbar:爆炸按鈕'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_tap',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['error']['code'], -32602);
+      expect(body['error']['message'], contains('canvas_toolbar:save'));
+      expect(body['error']['message'], contains('canvas_toolbar:run'));
+    });
+
+    test('開光 P2：app_tap 未接線（測試環境無 workspace）→ -32603 誠實降級', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 302,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_tap',
+            'arguments': {'target': 'canvas_toolbar:save'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_tap',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      // 測試環境 onTap == null → -32603（不是 crash）
+      expect(body['error']['code'], -32603);
+      expect(body['error']['message'], contains('not connected'));
+    });
+
+    test('開光 P2：canvas_zoom 未接畫布（測試環境）→ -32603 誠實降級', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 303,
+          'method': 'tools/call',
+          'params': {
+            'name': 'canvas_zoom',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'canvas_zoom',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      // 測試環境無前景 controller → -32603（誠實，不假成功）
+      expect(body['error']['code'], -32603);
+      expect(body['error']['message'], contains('Canvas controller not connected'));
+    });
+
+    // ── [開光 P3 · 2026-09-26] app_permissions / window_control 測試 ──
+    test('開光 P3：app_permissions → 必含 entitlements 八欄 + dependencies 探測', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 401,
+          'method': 'tools/call',
+          'params': {
+            'name': 'app_permissions',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'app_permissions',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final r = body['result'];
+      expect(r['resultType'], 'complete');
+      // entitlements 八欄齊全（codesign 在 CI 可能失敗→available:false 也是合法，但欄位必在）
+      expect(r['entitlements'], isA<Map<String, dynamic>>());
+      expect(r['dependencies'], isA<Map<String, dynamic>>());
+      expect(r['dependencies'].containsKey('osascript'), true);
+      expect(r['pid'], isA<int>());
+    });
+
+    test('開光 P3：window_control 無效 action → -32602 帶合法清單', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 402,
+          'method': 'tools/call',
+          'params': {
+            'name': 'window_control',
+            'arguments': {'action': '爆炸'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'window_control',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['error']['code'], -32602);
+      expect(body['error']['message'], contains('focus'));
+      expect(body['error']['message'], contains('restore'));
+    });
+
+    test('開光 P3：window_control focus（測試環境 window_manager 未初始化）→ success:false 誠實降級', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 403,
+          'method': 'tools/call',
+          'params': {
+            'name': 'window_control',
+            'arguments': {'action': 'focus'},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'window_control',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final r = body['result'];
+      expect(r['resultType'], 'complete');
+      // 測試環境 window_manager 未初始化 → success:false 帶原因（UI 誠實鐵則）
+      expect(r['success'], false);
+      expect(r['message'], contains('window_manager'));
+    });
+
+    test('開光：vector_search 缺 q → -32602（參數驗證不靠撞）', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 102,
+          'method': 'tools/call',
+          'params': {
+            'name': 'vector_search',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'vector_search',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['error']['code'], -32602);
+      expect(body['error']['message'], contains('q required'));
+    });
+
+    test('開光：get_agent_debug（callback 未接線）→ available:false', () async {
+      final res = await _httpPost(
+        'http://127.0.0.1:$actualPort/mcp',
+        body: {
+          'jsonrpc': '2.0',
+          'id': 103,
+          'method': 'tools/call',
+          'params': {
+            'name': 'get_agent_debug',
+            'arguments': <String, dynamic>{},
+            '_meta': {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': <String, dynamic>{},
+            },
+          },
+        },
+        headers: {
+          'MCP-Protocol-Version': '2026-07-28',
+          'Mcp-Method': 'tools/call',
+          'Mcp-Name': 'get_agent_debug',
+        },
+      );
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(body['result']['resultType'], 'complete');
+      expect(body['result']['available'], isFalse);
     });
 
     // ── 標準錯誤碼 ──────────────────────────────────
@@ -403,9 +808,11 @@ Future<_HttpResponse> _httpPostRaw(
   final client = HttpClient();
   try {
     final req = await client.postUrl(Uri.parse(url));
-    req.headers.contentType = ContentType.json;
+    // [開光 P1 2026-09-26] ContentType.json 預設 charset=latin-1，req.write(中文) 會炸
+    // （Invalid argument (string): Contains invalid characters.）——JSON 一律 UTF-8 bytes。
+    req.headers.contentType = ContentType('application', 'json', charset: 'utf-8');
     headers?.forEach((k, v) => req.headers.set(k, v));
-    req.write(body);
+    req.add(utf8.encode(body));
     final res = await req.close();
     final resBody = await res.transform(utf8.decoder).join();
     return _HttpResponse(res.statusCode, resBody);

@@ -2,11 +2,11 @@
 // [v232 小葵 2026-09-03 Blue 設定窗令] 星系圖譜視覺/聽覺參數設定窗
 // 左側可收折、36 參數全上、全彩 RGB 色盤、每列可隱藏（持久化）。
 import 'dart:async';
-import '../../core/dev_paths.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/dev_paths.dart';
 
 /// 參數定義（id、名稱、群組、型別、預設、範圍）
 class GParamDef {

@@ -11,6 +11,8 @@ import '../../models/canvas/canvas_metadata.dart';
 import '../../models/project_door.dart';
 import '../../services/canvas_store.dart';
 import '../../services/project_door_store.dart';
+import '../../services/schedule_registry.dart';
+import '../../models/schedule_card.dart';
 import '../../theme/bridge_design_system.dart';
 import '../../theme/tier.dart';
 import '../../theme/tier_style.dart';
@@ -29,6 +31,9 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
   bool _isLoading = true;
   String? _error;
 
+  // [H4 2026-10-08] 排程任務卡（Hermes 28 cron 重現）
+  List<ScheduleCard> _schedules = const [];
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +41,10 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
   }
 
   Future<void> _loadData() async {
+    // [H4] 排程卡載入（fail-quiet——Hermes 資料不在也不阻擋看板）
+    ScheduleRegistry.instance.loadAll().then((cards) {
+      if (mounted) setState(() => _schedules = cards);
+    });
     try {
       final doors = await ProjectDoorStore().loadAll();
       final canvases = await CanvasStore.getAll();
@@ -114,7 +123,7 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
       );
     }
 
-    if (_doors.isEmpty) {
+    if (_doors.isEmpty && _schedules.isEmpty) {
       return _buildEmptyState();
     }
 
@@ -148,10 +157,176 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
               doors: groups[ProjectDoor.statusCompleted]!,
               accentColor: BridgeDSColors.of(context).accentBlue,
             ),
+            SizedBox(width: BridgeDS.spaceMD),
+            // [H4 2026-10-08] 排程欄——生活卡在上（有溫度），工作卡在
+            // 下（可折疊）。28 個 Hermes cron 重現為任務卡。
+            _buildScheduleColumn(),
           ],
         ),
       ),
     );
+  }
+
+  // ── [H4] 排程欄 ─────────────────────────────────────────
+
+  Widget _buildScheduleColumn() {
+    final ds = BridgeDSColors.of(context);
+    final life = _schedules
+        .where((c) => c.warmth == ScheduleWarmth.life)
+        .toList(growable: false);
+    final work = _schedules
+        .where((c) => c.warmth != ScheduleWarmth.life)
+        .toList(growable: false);
+    return Container(
+      width: 300,
+      padding: const EdgeInsets.all(BridgeDS.spaceMD),
+      decoration: BoxDecoration(
+        color: ds.surfaceElevated,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ds.borderSubtle),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.schedule_outlined, size: 16, color: ds.accentPurple),
+              const SizedBox(width: 6),
+              Text('排程',
+                  style: TierStyle.of(context, Tier.cardHeroTitle)
+                      .toTextStyle()),
+              const SizedBox(width: 8),
+              Text('${_schedules.length} 個約定',
+                  style: TierStyle.of(context, Tier.cardCaption)
+                      .toTextStyle()
+                      .copyWith(color: ds.textMuted)),
+            ],
+          ),
+          const SizedBox(height: BridgeDS.spaceMD),
+          // 生活卡——有溫度：暖色卡片、心意一行、下次相見
+          if (life.isNotEmpty) ...[
+            Text('生活 · 心意',
+                style: TierStyle.of(context, Tier.cardCaption)
+                    .toTextStyle()
+                    .copyWith(color: ds.accentPurple, fontWeight: FontWeight.w700)),
+            const SizedBox(height: BridgeDS.spaceSM),
+            for (final c in life) _buildLifeCard(c),
+            const SizedBox(height: BridgeDS.spaceMD),
+          ],
+          // 工作卡——看排程：緊湊列表
+          if (work.isNotEmpty) ...[
+            Text('工作 · 維運',
+                style: TierStyle.of(context, Tier.cardCaption)
+                    .toTextStyle()
+                    .copyWith(color: ds.textMuted, fontWeight: FontWeight.w700)),
+            const SizedBox(height: BridgeDS.spaceSM),
+            for (final c in work.take(8)) _buildWorkRow(c),
+            if (work.length > 8)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('…還有 ${work.length - 8} 個',
+                    style: TierStyle.of(context, Tier.cardCaption)
+                        .toTextStyle()
+                        .copyWith(color: ds.textMuted)),
+              ),
+          ],
+        ],
+      ),
+      ),
+    );
+  }
+
+  /// 生活卡——Blue：「不是冷冰冰數據與完成燈號」
+  Widget _buildLifeCard(ScheduleCard c) {
+    final ds = BridgeDSColors.of(context);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: BridgeDS.spaceSM),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            ds.accentPurple.withValues(alpha: 0.10),
+            ds.accentMiro.withValues(alpha: 0.06),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ds.accentPurple.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(c.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TierStyle.of(context, Tier.listItemTitle)
+                  .toTextStyle()
+                  .copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          // 心意一行——這是溫度所在
+          Text(c.warmLine ?? '',
+              style: TierStyle.of(context, Tier.cardCaption)
+                  .toTextStyle()
+                  .copyWith(color: ds.textSecondary, height: 1.4)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.favorite_outline,
+                  size: 12, color: ds.accentPurple),
+              const SizedBox(width: 4),
+              Text(_nextRunText(c),
+                  style: TierStyle.of(context, Tier.cardCaption)
+                      .toTextStyle()
+                      .copyWith(color: ds.accentPurple)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 工作卡——一行一個：名稱＋時間，冷靜有效率
+  Widget _buildWorkRow(ScheduleCard c) {
+    final ds = BridgeDSColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+                shape: BoxShape.circle, color: ds.textQuaternary),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(c.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TierStyle.of(context, Tier.listItemMeta).toTextStyle()),
+          ),
+          Text(c.humanSchedule,
+              style: TierStyle.of(context, Tier.cardCaption)
+                  .toTextStyle()
+                  .copyWith(color: ds.textMuted)),
+        ],
+      ),
+    );
+  }
+
+  String _nextRunText(ScheduleCard c) {
+    final n = c.nextRun;
+    if (n == null) {
+      final h = c.humanSchedule;
+      return h.contains('null') ? '已排定' : h;
+    }
+    final d = n.difference(DateTime.now());
+    if (d.inMinutes < 60) return '${d.inMinutes} 分鐘後';
+    if (d.inHours < 24) return '${d.inHours} 小時後';
+    return '${d.inDays} 天後';
   }
 
   // ── 空狀態 ──────────────────────────────────────────────

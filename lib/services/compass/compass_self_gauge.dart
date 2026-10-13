@@ -20,6 +20,7 @@ class CompassSelfMetrics {
   final int k1RuleShare; // 規則層分擔率（%）
   final int selfHeals; // W4 自癒事件數
   final int pendingWounds; // 未結案傷口數
+  final int cognitiveWounds; // 未結案認知傷口數（幻讀族——結論與事實不符）
   final int medicines; // 活規則數
   final int pitfalls; // 坑卡數
   final double coverage; // 器官覆蓋率（0-1）
@@ -35,6 +36,7 @@ class CompassSelfMetrics {
     required this.k1RuleShare,
     required this.selfHeals,
     required this.pendingWounds,
+    required this.cognitiveWounds,
     required this.medicines,
     required this.pitfalls,
     required this.coverage,
@@ -53,6 +55,13 @@ class CompassSelfMetrics {
     // 傷口堆積 → W4 出了口沒進口
     if (pendingWounds >= 5) {
       flags.add('未結案傷口 $pendingWounds 筆堆積——同工具反覆撞牆沒長出藥');
+    }
+    // [小葵 2026-10-05 開案令] 認知傷口——幻讀進夢的正門。
+    // 有任何未結案認知傷口就是紅燈：這種病（成功地錯了）不會
+    // 自動好，要夢裡消化成「誠實邊界」的藥。
+    if (cognitiveWounds > 0) {
+      flags.add('認知傷口 $cognitiveWounds 筆未結案——結論與事實不符'
+          '（宣稱看到沒有的東西），痊癒條件=主動說出看不見');
     }
     // 覆蓋率太低 → 裸奔器官多
     if (coverage < 0.5 && medicines > 0) {
@@ -133,13 +142,16 @@ class CompassSelfGauge {
         final ruleShare =
             k1Total > 0 ? (k1Rule * 100 / k1Total).round() : 0;
 
-        var pending = 0, meds = 0, pits = 0;
+        var pending = 0, meds = 0, pits = 0, cogWounds = 0;
         double cov = 0;
         try {
           final compass = _open('bridge_app', 'compass_store.db');
           try {
             pending = _count(compass,
                 "SELECT COUNT(*) FROM compass_pitfalls WHERE text LIKE '%【pending·傷口立案】%' AND text NOT LIKE '%【已自癒】%' AND text NOT LIKE '%【夢境銷案%'");
+            // [小葵 2026-10-05 開案令] 認知傷口計數（幻讀族——與工具傷口分開算）
+            cogWounds = _count(compass,
+                "SELECT COUNT(*) FROM compass_pitfalls WHERE text LIKE '%【pending·認知傷口】%' AND text NOT LIKE '%【已自癒】%' AND text NOT LIKE '%【夢境銷案%'");
             meds = _count(compass,
                 "SELECT COUNT(*) FROM compass_rules WHERE status='active'");
             pits = _count(compass, 'SELECT COUNT(*) FROM compass_pitfalls');
@@ -166,6 +178,7 @@ class CompassSelfGauge {
           k1RuleShare: ruleShare,
           selfHeals: heals,
           pendingWounds: pending,
+          cognitiveWounds: cogWounds,
           medicines: meds,
           pitfalls: pits,
           coverage: cov,
@@ -180,8 +193,8 @@ class CompassSelfGauge {
       debugPrint('[CompassSelf] compute 失敗: $e');
       return CompassSelfMetrics(
         k1Judgments: 0, k1Need: 0, k1Escalated: 0, k1EscalateRate: 0,
-        k1RuleShare: 0, selfHeals: 0, pendingWounds: 0, medicines: 0,
-        pitfalls: 0, coverage: 0, dreams: 0, unrevisited: 0,
+        k1RuleShare: 0, selfHeals: 0, pendingWounds: 0, cognitiveWounds: 0,
+        medicines: 0, pitfalls: 0, coverage: 0, dreams: 0, unrevisited: 0,
         computedAt: now,
       );
     }

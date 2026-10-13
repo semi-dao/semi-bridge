@@ -20,7 +20,9 @@ import 'screens/bridge_desktop_screen.dart';
 import 'services/agent_loop/agent_safety.dart'; // [D002] D002 safety confirmation
 import 'screens/desktop_welcome_screen.dart';
 import 'screens/desktop_summon_screen.dart';
-import 'screens/desktop_homepage_screen.dart';
+// [2026-10-06 封存] desktop_homepage_screen.dart → lib/screens/_archived/
+// （孤兒頁面：全 App 零導航入口，Blue 拍板封存）
+import 'screens/slot_management_screen.dart'; // [無限插槽 C2 2026-10-06 移植]
 import 'screens/lock_screen.dart';
 import 'screens/mobile_bridge_pairing_screen.dart';
 import 'screens/chat_screen.dart';
@@ -49,7 +51,9 @@ import 'services/brain_container/brain_database.dart'; // [教練 Agent 2026-07-
 import 'services/brain_container/embedding/embedding_model_manager.dart';
 import 'services/onboarding/onboarding_flow.dart'; // [教練 Agent 2026-07-22] Phase 1 ③ 安裝精靈
 import 'services/vault/vault_service.dart'; // [教練 Agent 2026-07-22] Phase 1 ② Vault 服務
-import 'services/skills/skill_store.dart'; // [教練 Agent S20] Skills 系統
+import 'services/skills/skill_store.dart';
+import 'services/slots/builtin_skills_intake.dart';
+import 'services/slots/hermes_skills_migration.dart'; // [教練 Agent S20] Skills 系統
 import 'services/skills/builtin_skills_loader.dart'; // [教練 Agent 2026-07-23] 內建 skills 載入
 import 'services/vector_db/asset_sandbox.dart'; // [教練 Agent 2026-07-25] 向量資料庫
 import 'services/vector_db/asset_index_service.dart'; // [教練 Agent 2026-07-25] 向量資料庫索引
@@ -71,10 +75,25 @@ OverlayState? d002Overlay;
 
 /// [D002 2026-08-10] D002 安全確認框——用全域 Overlay 顯示，繞過 GoRouter navigator 結構
 /// 回傳 true=確認執行, false=取消
+///
+/// [小葵 2026-10-03] 拒絕冷卻——使用者拒絕同一工具後 15 分鐘內不再跳框（自動拒絕）。
+/// 起源：restart_app 確認框一天跳多次的困擾案——Agent 每次被喚醒都重新提出，
+/// 使用者的「拒絕」沒有被記住 = 對「不要」的不尊重。冷卻期內直接自動拒絕，
+/// Agent 收到失敗訊息可改走別的路；使用者想主動執行時隨時可自己操作。
+final Map<String, DateTime> _d002LastRejectedAt = {};
+const Duration _d002RejectionCooldown = Duration(minutes: 15);
+
 Future<bool> showD002ConfirmationDialog({
   required String toolName,
   required Map<String, dynamic> args,
 }) {
+  // 拒絕冷卻檢查
+  final lastRejected = _d002LastRejectedAt[toolName];
+  if (lastRejected != null &&
+      DateTime.now().difference(lastRejected) < _d002RejectionCooldown) {
+    debugPrint('[D002] $toolName 冷卻期內（使用者已拒絕過），自動拒絕不跳框');
+    return Future.value(false);
+  }
   if (d002Overlay == null) {
     debugPrint('[D002] Overlay 未捕獲，無法顯示確認框');
     return Future.value(true);
@@ -148,6 +167,7 @@ Future<bool> showD002ConfirmationDialog({
                     children: [
                       TextButton(
                         onPressed: () {
+                          _d002LastRejectedAt[toolName] = DateTime.now(); // [小葵 2026-10-03] 記住拒絕——15 分鐘冷卻
                           entry.remove();
                           completer.complete(false);
                         },
@@ -244,9 +264,15 @@ final _router = GoRouter(
       path: '/desktop-summon',
       builder: (context, state) => const DesktopSummonScreen(),
     ),
+    // [2026-10-06 封存] '/desktop-homepage' 路由已移除——孤兒頁面（全 App
+    // 零導航入口，Blue 拍板封存），檔案在 lib/screens/_archived/。
+    // [無限插槽 C2 2026-10-06 移植] /slots 插槽管理頁（首頁插槽卡入口）
+    // ?prefill=<github url>：進頁自動開新增表單並預填（首頁「試一個範例」）
     GoRoute(
-      path: '/desktop-homepage',
-      builder: (context, state) => DesktopHomepageScreen(),
+      path: '/slots',
+      builder: (context, state) => SlotManagementScreen(
+        prefillRepoUrl: state.uri.queryParameters['prefill'],
+      ),
     ),
     GoRoute(
       path: '/bridge-desktop',
@@ -572,6 +598,22 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
       }
 
       await SkillStore.instance.initialize(skillsDir: skillsDir);
+
+      // [Blue 提議 2026-10-06] 內建 skills 收編進插槽管理——初始安裝
+      // 就看得到裝了什麼、不要可單獨卸載（冪等；卸載過不還魂）。
+      await BuiltinSkillsIntake.instance.runIfNeeded();
+
+      // [Blue 抓包 2026-10-06] 大搬家補線——Hermes skills（207 個）從未
+      // 接上。搬進 Documents/skills/hermes/ ＋收編插槽（冪等）。
+      try {
+        final (found, migrated) = await HermesSkillsMigration.instance
+            .migrate(appSkillsDir: skillsDir);
+        if (migrated > 0) {
+          debugPrint('[HermesSkillsMigration] 搬入 $migrated/$found 個 skills');
+        }
+      } catch (e) {
+        debugPrint('[HermesSkillsMigration] 失敗（下次啟動再試）: $e');
+      }
     } catch (e) {
       // Skills 載入失敗不影響 app 運行
       debugPrint('Skills init failed: $e');

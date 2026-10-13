@@ -5,10 +5,12 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   connectivity_plus
   desktop_drop
+  desktop_multi_window
   flutter_gemma
   flutter_inappwebview_windows
   flutter_secure_storage_windows
   flutter_tts
+  hotkey_manager_windows
   local_auth_windows
   media_kit_video
   screen_retriever_windows

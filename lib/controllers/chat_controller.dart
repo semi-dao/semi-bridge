@@ -25,6 +25,7 @@ import '../models/companion.dart';
 import '../models/conversation.dart';
 import '../models/task_evidence.dart'; // P0.5 對話任務證據
 import '../services/tasks/task_dispatcher.dart'; // [隊友訊息流 C2]
+import '../services/memory_layer_service.dart'; // [H2/M3 2026-10-07] 記憶2域10層分層注入
 import '../services/collab/meeting_layer.dart'; // [TRIO M3.5 2026-09-22] 會議接線
 import '../services/collab/intel_pool.dart'; // [TRIO M3.5] 情報池（會議紀錄入池）
 import '../services/tasks/task_session.dart'; // [隊友訊息流 C2]
@@ -128,6 +129,9 @@ import '../services/skills/skill_prompt_injector.dart';
 import '../services/paid_action_gate.dart';
 import '../services/causal/causal_ledger_service.dart'; // [因果引擎 L2] 證據等級
 import '../services/causal/time_sense_service.dart'; // [時間感 L2] 相遇時間軸
+import '../services/life_tree/life_tree_store.dart'; // [2026-10-05] 對話自動裁決夢卡
+import '../services/agent_loop/agent_loop_tools/tool_seek_tool.dart'
+    show CompassToolSeekTool; // [小葵 2026-10-01] 本地士兵配備
 
 /// [以利沙 Sprint 8 Step 1 2026-06-24]
 /// ChatController 骨架。
@@ -793,6 +797,8 @@ class ChatController extends ChangeNotifier {
     // 更新 controller 內存狀態
     _conversations = [newConv, ...conversations];
     _currentConversation = newConv;
+    // [跨輪層 2026-10-13] 新對話 = session store 重置（同 switchConversation）
+    _agentLoop?.resetSessionStore();
     _showSidebar = false;
     _activeProjectDoor = null;
     _lastProjectDoorJudgement = null;
@@ -969,6 +975,9 @@ class ChatController extends ChangeNotifier {
     if (_currentConversation != null) {
       await ConversationStore.save(_currentConversation!);
     }
+    // [跨輪層 2026-10-13] 切對話 = session store 重置——
+    // 舊對話的封存指針不能洩漏到新對話（context_recall 查不到跨對話內容）。
+    _agentLoop?.resetSessionStore();
     final latest = await ConversationStore.getById(conv.id);
     await ConversationStore.setCurrentId(conv.id);
     _currentConversation = latest ?? conv;
@@ -1703,6 +1712,23 @@ class ChatController extends ChangeNotifier {
       debugPrint('[AgentLoop] 記憶注入: ${contextMemory.length} 字');
     }
 
+    // [H2/M3 小葵 2026-10-07 Blue 贈禮] 記憶2域10層——分層全量注入。
+    // 語意檢索（上面）管「相關性」，分層快照管「身分連續」：
+    // L1 鐵則＋L2 身分＋L3 專案熱每次隨身（窗口 ~8K tokens），
+    // L4-L10 永不全量注入、只走上面檢索引用。超窗口走升降溫不刪除。
+    try {
+      final (layerSection, overCap) =
+          MemoryLayerService.instance.buildInjectionSection();
+      if (layerSection.isNotEmpty) {
+        contextMemory = layerSection + (contextMemory.isEmpty ? '' : '\n$contextMemory');
+        debugPrint(
+            '[MemoryLayer] L1-L3 注入: ${layerSection.length} 字'
+            '${overCap.isEmpty ? '' : '（${overCap.length} 條超窗口＝降溫候選）'}');
+      }
+    } catch (e) {
+      debugPrint('[MemoryLayer] 分層注入失敗（fail-quiet 不擋對話）: $e');
+    }
+
     // [教練 Agent 2026-07-22] 動態 Agent 路由——根據意圖模式決定本地或雲端
     // 取代原本靜態的 isLocal = (provider == 'local') 判斷
     // 路由層會根據 IntentSpineMode + MemoryGuard + server 狀態動態決定
@@ -1728,22 +1754,58 @@ class ChatController extends ChangeNotifier {
       delegate_subagent_tool.setSubagentLockedProvider(null);
     }
     final routedProvider = ProviderRouter.instance.current;
+    // [小葵 2026-10-01 補刀] 使用者存的 provider='local' 時 prompt 也必須走
+    // 本地輕量路徑——否則全裝 prompt（~6K chars）打進 ctx=4096 的 llama-server
+    // 直接爆掉（病例：activateBridgeRuntimeAsBrain 存了 provider='local'，但
+    // ProviderRouter.current=null → isLocal=false → 全裝 prompt + 本地端點 =
+    // 空回應）。
     final isLocal = userWantsCloud
         ? false // 使用者指定雲端 → 不是 local
-        : (routedProvider?.isLocal ?? false); // 沒指定 → 看 Router 路由結果
+        : (userProvider == 'local' ||
+            routedProvider?.isLocal ==
+                true); // 沒指定雲端 → 看 Router 路由結果
     final routeReason = routedProvider?.reason ?? 'default';
     debugPrint('[AgentLoop] 路由: ${isLocal ? "local" : "cloud"} — $routeReason');
 
     // [教練 Agent 2026-07-21] 本地模式截斷對話歷史——只帶最近 3 輪，避免 prompt 過大
+    // [小葵 2026-10-01 補刀] 則數截斷不夠——本地 ctx=4096，中文一字≈1 token，
+    // 一則舊的 [[TASK_DONE]] 巨無霸報告就能單獨爆掉預算（病例：閒聊對話
+    // 歷史打包 1548 tokens 仍超）。改雙重截斷：則數 ≤6 且總字數 ≤2200
+    // （中文 chars≈tokens 保守估）。從最新往回收，收滿為止。
     List<Map<String, String>>? effectiveHistory = conversationHistory;
-    if (isLocal &&
-        conversationHistory != null &&
-        conversationHistory.length > 6) {
-      effectiveHistory = conversationHistory.sublist(
-        conversationHistory.length - 6,
-      );
+    // [跨輪層 2026-10-13 Spike 002 延伸] 雲端模式歷史壓縮——CLM 形狀。
+    // 病因：完整歷史每輪重送，token 線性膨脹（使用者得手動 /reset /new 的根因）。
+    // 形狀：>10 輪時舊輪全文封存進 session store（永不刪）、保留最近 6 輪＋
+    // 指針摘要塊；LLM 需要細節時 context_recall 工具讀回。冪等：跨輪重送
+    // 的同內容回同指針，不重複入庫。本地模式走下方既有雙重截斷不變。
+    if (!isLocal && conversationHistory != null && conversationHistory.isNotEmpty) {
+      final compacted = _agentLoop!.compactHistoryForSession(conversationHistory);
+      if (compacted.length != conversationHistory.length) {
+        debugPrint(
+          '[AgentLoop] 雲端歷史壓縮：${conversationHistory.length} → '
+          '${compacted.length} 則（session store 封存）',
+        );
+      }
+      effectiveHistory = compacted;
+    }
+    if (isLocal && conversationHistory != null && conversationHistory.isNotEmpty) {
+      const maxTurns = 6;
+      const maxChars = 2200;
+      final recent = conversationHistory.length > maxTurns
+          ? conversationHistory.sublist(conversationHistory.length - maxTurns)
+          : conversationHistory;
+      final kept = <Map<String, String>>[];
+      var budget = maxChars;
+      for (final m in recent.reversed) {
+        final len = (m['content'] ?? '').length;
+        if (len > budget) break;
+        budget -= len;
+        kept.insert(0, m);
+      }
+      effectiveHistory = kept;
       debugPrint(
-        '[AgentLoop] 本地模式：截斷對話歷史 ${conversationHistory.length} → ${effectiveHistory.length} 則',
+        '[AgentLoop] 本地模式：截斷對話歷史 ${conversationHistory.length} → '
+        '${kept.length} 則（字數預算 $maxChars）',
       );
     }
 
@@ -1792,6 +1854,30 @@ class ChatController extends ChangeNotifier {
       debugPrint('[BudgetEye] 注入失敗（不擋對話）: $e');
     }
 
+    // [小葵 2026-10-01 Blue 令] 本地士兵配備——精靈依任務挑 compact 工具組。
+    // 戰術：本地 ctx 只有 4096，塞不下全工具手冊；用語意檢索挑 2-4 把
+    // 最相關的工具（toFullDescription 精簡描述），聊天題配備為空 = 純聊天。
+    // 未來作戰模式：本地 subagent 軍團以此為标配——輕裝上陣、按需領工具。
+    String? localToolKit;
+    if (isLocal) {
+      try {
+        final toolSeek = _agentToolRegistry?.get('compass_toolseek');
+        if (toolSeek != null && toolSeek is CompassToolSeekTool) {
+          final kit = await toolSeek.topToolsFor(userMessage, threshold: 0.55);
+          if (kit.isNotEmpty) {
+            final buf = StringBuffer();
+            for (final t in kit.take(4)) {
+              buf.writeln('- ${t.toFullDescription()}');
+            }
+            localToolKit = buf.toString();
+            debugPrint('[AgentLoop] 本地士兵配備 ${kit.take(4).length} 把工具');
+          }
+        }
+      } catch (e) {
+        debugPrint('[AgentLoop] 本地士兵配備失敗（fail-open 純對話）: $e');
+      }
+    }
+
     final systemPrompt = AgentLoopPromptBuilder.build(
       budgetEye: budgetEyeText,
       timelineSection: await _buildTimelineSection(),
@@ -1807,6 +1893,7 @@ class ChatController extends ChangeNotifier {
           : SkillPromptInjector.buildSkillSection(userMessage: userMessage),
       canvasContext: _buildCanvasContext(),
       isLocalProvider: isLocal,
+      localToolKit: localToolKit,
       agentKnowledgeContext: agentKnowledgeContext,
       personaCard: personaCardText,
       firstConversationDirective: firstConversationDirective,
@@ -4328,6 +4415,56 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // [小葵 2026-10-05 Blue 令] 對話中討論夢境議題後自動裁決
+  //
+  // Blue：「我希望未來我在對話中跟他討論他需要我裁決的事情，
+  // 討論好後確定裁決方案後。他可以自動的在這邊把未裁決的事情
+  // 變成已裁決，並且在已裁決的列表中顯示我裁決的內容＋日期。」
+  //
+  // v1 偵測（Blue 2026-10-05 擴權令）：不只是「裁決」二字——
+  // 「我要」「我決定」「我想要」「我覺得…才對」「好就…做」
+  // 「好就依你的決定做」——只要是認可的語氣而且有結論，都算。
+  // 誤判防護：必須有未裁決卡存在；訊息非疑問收尾；一則裁一張。
+  // ════════════════════════════════════════════════════════════════
+  static final RegExp _affirmativeDecision = RegExp(
+    r'裁決|我決定|決定[:：]|就依你的|就照你|就這樣(做|辦|定了)?|'
+    r'我(要|想要).{2,}|我覺得.{2,}(才對|比較好|好了)|'
+    r'好[，, ]?.{0,12}(做|辦|走|改|上)',
+  );
+
+  Future<void> applyImplicitDreamAdjudication(String reply) async {
+    try {
+      final text = reply.trim();
+      if (text.isEmpty) return;
+
+      final store = LifeTreeStore.instance;
+      // 最新一張未裁決的 propose/escalate 卡
+      final pending = store.recentDreams(limit: 60).where((d) =>
+          (d.decision == 'propose' || d.decision == 'escalate_to_user') &&
+          d.adjudicatedAt == null);
+      if (pending.isEmpty) return;
+
+      // 疑問收尾＝還在討論，不是裁決（「這樣做好嗎？」不算）
+      final isQuestion =
+          text.endsWith('?') || text.endsWith('？') || text.endsWith('嗎');
+      if (isQuestion) return;
+
+      // 認可語氣＋有結論（v1 語感詞庫）
+      if (!_affirmativeDecision.hasMatch(text)) return;
+
+      final target = pending.first;
+      // 裁決內容＝使用者整則訊息（回憶用；原始脈絡在對話史裡）
+      final ok = store.adjudicate(target.id!, text);
+      if (ok) {
+        debugPrint('[DreamAdjudication] 對話裁決已入帳：夢卡 #${target.id}');
+      }
+    } catch (e) {
+      // fail-open：自動裁決失敗不擋對話
+      debugPrint('[DreamAdjudication] 失敗（不擋對話）: $e');
+    }
+  }
+
   // [以利沙 Sprint 8 Step 6 2026-06-24]
   Future<void> applyImplicitProjectDoorJudgementFeedback(String reply) async {
     final card = _lastProjectDoorJudgement;
@@ -6438,7 +6575,7 @@ class ChatController extends ChangeNotifier {
       if (cid == null || cid.isEmpty) return null;
       final t = await TimeSenseService.instance.timelineFor(cid);
       if (t == null) return null;
-      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——田野提案 L4）
+      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——家庭提案 L4）
       final base = TimeSenseService.buildTimelineSection(t);
       final milestones = TimeSenseService.buildMilestoneSection(t);
       if (base == null) return milestones;
@@ -7068,6 +7205,9 @@ $base
 
     await applyImplicitRecalledInsightFeedback(text);
     await applyImplicitProjectDoorJudgementFeedback(text);
+    // [小葵 2026-10-05 Blue 令] 對話中討論夢境議題後自動裁決——
+    // 「討論好後確定裁決方案後，他可以自動的把未裁決的事情變成已裁決」
+    await applyImplicitDreamAdjudication(text);
 
     // [Phase 2 #4] 先跑 async 語意路由分類，結果注入 IntentSpineService
     await _ensureSemanticIntentInited();

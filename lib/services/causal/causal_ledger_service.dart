@@ -237,6 +237,42 @@ class CausalLedger {
     });
   }
 
+  /// [小葵 2026-10-05 開案令] 最近一筆指定工具的紀錄（認知傷口偵測用：
+  /// 上一輪 agent_perf 的完成時間——判斷「剛被罵的任務」）。
+  /// 回 null = 無紀錄或 DB 不可用（fail-open）。
+  CausalEntry? lastEntry({String? toolName}) {
+    final db = _db;
+    if (db == null) return null;
+    try {
+      final rows = toolName == null
+          ? db.select(
+              'SELECT * FROM agent_causal_ledger ORDER BY id DESC LIMIT 1')
+          : db.select(
+              'SELECT * FROM agent_causal_ledger WHERE tool_name = ? '
+              'ORDER BY id DESC LIMIT 1',
+              [toolName]);
+      if (rows.isEmpty) return null;
+      return _rowToEntry(rows.first);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [小葵 2026-10-05] 最近 N 筆紀錄（生命樹觀景窗「戰役」tab 用）。
+  /// fail-open：未初始化或失敗回空列表。
+  List<CausalEntry> recentEntries({int limit = 150}) {
+    final db = _db;
+    if (db == null) return const [];
+    try {
+      final rows = db.select(
+          'SELECT * FROM agent_causal_ledger ORDER BY id DESC LIMIT ?',
+          [limit]);
+      return [for (final r in rows) _rowToEntry(r)];
+    } catch (_) {
+      return const [];
+    }
+  }
+
   /// [L3 預留 Phase 1] 反饋查詢——按工具名+情境關鍵詞檢索歷史干預。
   /// Phase 0 先用關鍵詞 LIKE（單跳、零嵌入成本）；Phase 1 升級向量檢索。
   Future<List<CausalEntry>> recallSimilar(

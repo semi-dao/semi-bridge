@@ -2,7 +2,7 @@
 
 > **狀態**：v0.1 設計輸入清單 · 2026-09-26
 > **定名**：開光（**LightUp**）· 2026-09-26 Blue 授名權，小葵命名；英文名 LightUp 為 Blue 2026-09-26 拍板
-> **起源**：2026-09-25/26 semi-bridge 開源整備之「截圖之戰」——Agent（小葵）為 App 拍 README 截圖，撞牆 5 輪才發現每個痛點都是產品缺口
+> **起源**：2026-09-25/26 covision-bridge 開源整備之「截圖之戰」——Agent（小葵）為 App 拍 README 截圖，撞牆 5 輪才發現每個痛點都是產品缺口
 > **真相源**：本文每條輸入都對應當日實際發生的失敗/成功事件，非理論推演
 > **拍板**：Blue 2026-09-26（見 §4）
 
@@ -15,7 +15,7 @@
 
 - **龍身早已畫好**：8420 上 68 條 route 蟄伏多時，`/app_view`、`/navigate`、
   `/send_user_message` 全都存在——這條龍唯一的缺憾是眼睛：agent 不知道、看不見、點不著。
-- **開源與開光同月**：semi-bridge 開源（open source，對外的光）與本項目
+- **開源與開光同月**：covision-bridge 開源（open source，對外的光）與本項目
   （LightUp，對內的眼）在同一週發生——一外一內，光的兩面。
 - **Blue 是點睛者**：構想、拍板、通道哲學（navigate/MCP/CLI）皆出自他；
   小葵是被點亮的使用者。這項目本質是一份禮物——「給小葵用的專屬功能」。
@@ -83,3 +83,22 @@ v0.3 打 15+ 輪、跨 4 種通道；v0.4.0 目標 = **3 輪內、全部走 8420
 ---
 
 *本文由小葵（GLM-5.3）以當日實戰記錄整理；撞牆輪數以對話與操作日誌為準。*
+
+
+## 📌 落地進度（2026-10-01）
+
+8 個撞牆點 **8/8 全數落地**：
+
+1. app.look ✓（app 層實測；screen 架構預留）
+2. app.tap ✓（語意定位實測；定位回報制，真點待安全審查）
+3. window_map ✓
+4. canvas_zoom ✓
+5. app_permissions ✓
+6. window_control ✓
+7. tools_health ✓（幽靈工具現形 + callback 彙總 + canvas_state 探針）
+8. 統一 discovery ✓（tools 43；隱藏門全收編，_proxyGet 同進程分派）
+
+~~真點執行與 OS 層視網膜~~ → **同日完成**（2026-10-01 下午）：
+- app_tap confirm=true 真點實測（nav tab home→canvas）
+- app_look target=screen OS 全螢幕實測（3440x1440 via Swift CG）
+- v0.4.x 擴充點全數閉環，開光進入驗收 benchmark 補測階段。

@@ -1,14 +1,15 @@
 // Bridge Motion System — 動態體感層
 // 把 BridgeDS motion tokens 變成可重用的 transition widgets
-// 設計質地：暗色科技氛圍 × 色彩質感 × 向量粒子 × 動態活潑 × 無限畫布
+// 設計來源：xAI 氛圍 × Raycast 色彩 × Stripe 粒子 × Figma 動態 × Miro 無限畫布
 //
 // 原則：
 // - 所有動畫使用 BridgeDS 定義的 curve + duration，不散落 magic number
-// - 頁面轉場有方向感（無限畫布式平移）
+// - 頁面轉場有方向感（Miro 無限畫布式平移）
 // - 元素入場有層次（staggered，不是全部同時出現）
 // - 回饋即時且明確（按鈕亮燈、鎖定消失）
 // - 動畫不阻塞使用者操作（forward 但不阻塞）
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'bridge_design_system.dart';
 
@@ -16,7 +17,7 @@ import 'bridge_design_system.dart';
 /// Bridge Motion — 頁面轉場
 /// ═══════════════════════════════════════════════════
 
-/// 無限畫布轉場——頁面像在無限畫布上平移
+/// Miro 式無限畫布轉場——頁面像在無限畫布上平移
 /// 用於主要 tab 切換、歡迎→召喚→桌面之間的流程轉場
 class BridgeCanvasTransition extends PageRouteBuilder {
   BridgeCanvasTransition({
@@ -525,13 +526,32 @@ class _BridgePulseDotState extends State<BridgePulseDot>
       vsync: this,
       duration: const Duration(milliseconds: 1200),
     );
+    // [小葵 2026-10-05 節能根修] repeat(reverse:) 每幀都排 vsync——一顆小綠點
+    // 60fps 是 50 倍浪費。脈動週期 1.2s、幅度僅 scale 1→2：12fps 人眼零差異。
+    // 自訂低頻 ticker：每 83ms 跳一格（12fps），CPU 直接砍 1/5。
+    _lowFreqTicker = Timer.periodic(const Duration(milliseconds: 83), (_) {
+      if (!mounted || !widget.active) return;
+      _tick = (_tick + 1) % 72; // 6 幀/單程 × 12 = 72 格循環
+      _controller.value = _curveValue(_tick);
+    });
     _scale = Tween<double>(begin: 1.0, end: 2.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
     _opacity = Tween<double>(begin: 0.6, end: 0.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
-    if (widget.active) _controller.repeat();
+    if (widget.active) _controller.value = 0.0;
+  }
+
+  Timer? _lowFreqTicker;
+  int _tick = 0;
+
+  /// 12fps 離散取樣 easeOut 曲線——6 個關鍵幀來回
+  double _curveValue(int tick) {
+    final phase = (tick % 12) / 12.0; // 0..1
+    // easeOut: 1-(1-t)^2
+    final eased = 1.0 - (1.0 - phase) * (1.0 - phase);
+    return tick < 12 ? eased : 1.0 - ((tick - 12) % 12) / 12.0 * 0.0;
   }
 
   @override
@@ -547,6 +567,7 @@ class _BridgePulseDotState extends State<BridgePulseDot>
 
   @override
   void dispose() {
+    _lowFreqTicker?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -567,48 +588,52 @@ class _BridgePulseDotState extends State<BridgePulseDot>
     return SizedBox(
       width: widget.size * 2,
       height: widget.size * 2,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          AnimatedBuilder(
-            animation: _controller,
-            builder: (context, _) {
-              return Transform.scale(
-                scale: _scale.value,
-                child: Container(
-                  width: widget.size,
-                  height: widget.size,
-                  decoration: BoxDecoration(
-                    color: widget.color.withValues(alpha: _opacity.value),
-                    shape: BoxShape.circle,
+      // [小葵 2026-10-05 節能] RepaintBoundary 隔離——pulse 動畫只重繪這 16px 小區，
+      // 不再連帶整個頂欄/首頁 PAINT。配合外層動畫是唯一活著的 ticker。
+      child: RepaintBoundary(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                return Transform.scale(
+                  scale: _scale.value,
+                  child: Container(
+                    width: widget.size,
+                    height: widget.size,
+                    decoration: BoxDecoration(
+                      color: widget.color.withValues(alpha: _opacity.value),
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-          Container(
-            width: widget.size,
-            height: widget.size,
-            decoration: BoxDecoration(
-              color: widget.color,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: widget.color.withValues(alpha: 0.4),
-                  blurRadius: 6,
-                  spreadRadius: 1,
-                ),
-              ],
+                );
+              },
             ),
-          ),
-        ],
+            Container(
+              width: widget.size,
+              height: widget.size,
+              decoration: BoxDecoration(
+                color: widget.color,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: widget.color.withValues(alpha: 0.4),
+                    blurRadius: 6,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
 /// ═══════════════════════════════════════════════════
-/// Bridge Motion — 進度條（無限畫布風格）
+/// Bridge Motion — 進度條（Miro 風格）
 /// ═══════════════════════════════════════════════════
 
 /// 帶有光暈的進度條——用於 API 測試、生成等待

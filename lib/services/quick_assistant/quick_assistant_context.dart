@@ -48,6 +48,12 @@ class QuickAssistantContext {
   /// 使用者提問歷史（context）
   final List<String> conversationContext;
 
+  /// [無限插槽 2026-10-06] 本次對話聚焦的插槽（grill-me 用）——
+  /// 非空時 system prompt 注入「插槽面試官」人格：介紹專案→問需求→
+  /// 建議權限燈號，並壓掉任務收工協議（對話不是任務）。
+  final String? slotRepoUrl;
+  final String? slotLabel;
+
   QuickAssistantContext({
     required this.currentPage,
     this.currentSubPage = '',
@@ -57,6 +63,8 @@ class QuickAssistantContext {
     DateTime? openedAt,
     Map<String, String>? appDiagnostics,
     List<String>? conversationContext,
+    this.slotRepoUrl,
+    this.slotLabel,
   })  : openedAt = openedAt ?? DateTime.now(),
         appDiagnostics = appDiagnostics ?? {},
         conversationContext = conversationContext ?? [];

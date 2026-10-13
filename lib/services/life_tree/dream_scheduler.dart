@@ -22,9 +22,15 @@ class DreamScheduler {
   static final DreamScheduler instance = DreamScheduler._();
 
   String? _lastShallowNight; // 最近一次淺眠夢的日期（yyyy-mm-dd）
+  bool _inFlight = false; // [2026-10-05 雙 tick 修復] 重入鎖
 
   /// 每分鐘被 heartbeat 呼叫；只在冷門窗口行動
   Future<void> tick() async {
+    // [小葵 2026-10-05] 02:00 實測：兩場夢同毫秒寫入（session 6773/6780
+    // 差 7ms）——上游 heartbeat/probe 註冊疑似重複（app.dart initState
+    // 可能重入）。夢一晚一場是規格：這裡加鎖治本，上游幾隻手都一樣。
+    if (_inFlight) return;
+    _inFlight = true;
     try {
       final now = DateTime.now();
       // 冷門窗口 02:00–05:00
@@ -74,6 +80,8 @@ class DreamScheduler {
       }
     } catch (e) {
       debugPrint('[DreamScheduler] tick 失敗（fail-open）: $e');
+    } finally {
+      _inFlight = false;
     }
   }
 

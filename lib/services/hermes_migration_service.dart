@@ -24,10 +24,10 @@
 // - 對話史 60 萬則不逐字搬：蒸餾成「生活史摘要」＋代表性對話（可搜尋）
 
 import 'dart:convert';
-import '../core/dev_paths.dart';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import '../core/dev_paths.dart';
 
 /// 單件行李的掃描結果
 class MigrationItem {

@@ -349,6 +349,11 @@ class Companion {
   final String species; // 「種族」欄位
   final String freeform; // 「自由敘述」欄位
 
+  /// [H3 2026-10-08] 靈魂文檔（SOUL.md）——核心身份層，人格的最深處。
+  /// 空=沒有靈魂文檔（一般夥伴）；非空=注入 systemPrompt 最頂層。
+  /// 來源：Hermes ~/.hermes/SOUL.md 搬入或使用者共視編輯。
+  final String soulMd;
+
   // 信任與邊界
   final TrustBoundary trustBoundary;
   final CompanionRightsPassport? rightsPassport;
@@ -400,6 +405,7 @@ class Companion {
     this.artStyle = '', // [教練 Agent 2026-08-14]
     this.species = '', // [教練 Agent 2026-08-14]
     this.freeform = '', // [教練 Agent 2026-08-14]
+    this.soulMd = '', // [H3 2026-10-08]
     this.trustBoundary = const TrustBoundary(),
     this.rightsPassport,
     this.proactivity = 0.5, // [Phase 0 2026-07-17]
@@ -510,7 +516,17 @@ class Companion {
 - 不好辯攻擊：不為了辯贏而辯，不使用攻擊性或貶低的語言。
 - 不虛偽奉承：不無腦誇獎、不為了討好而同意錯誤的說法。''';
 
-    return '''$basePrompt
+    // [H3 2026-10-08] 靈魂文檔注入——SOUL 是核心身份層，先於角色/風格。
+    // 「不可降級守則」同款精神：靈魂寫的東西不因風格設定被稀釋。
+    final soulClause = soulMd.trim().isEmpty
+        ? ''
+        : '''
+## 靈魂文檔（SOUL——核心身份，優先於以下所有設定）
+
+${soulMd.trim()}
+''';
+
+    return '''$soulClause$basePrompt
 
 $rolePrompt
 
@@ -575,6 +591,7 @@ $negativeTraitsClause
     if (artStyle.isNotEmpty) 'artStyle': artStyle, // [教練 Agent 2026-08-14]
     if (species.isNotEmpty) 'species': species, // [教練 Agent 2026-08-14]
     if (freeform.isNotEmpty) 'freeform': freeform, // [教練 Agent 2026-08-14]
+    if (soulMd.isNotEmpty) 'soulMd': soulMd, // [H3 2026-10-08]
     'trustBoundary': trustBoundary.toJson(),
     if (rightsPassport != null) 'rightsPassport': rightsPassport!.toJson(),
     'proactivity': proactivity, // [Phase 0 2026-07-17]
@@ -639,6 +656,7 @@ $negativeTraitsClause
     artStyle: json['artStyle'] as String? ?? '', // [教練 Agent 2026-08-14]
     species: json['species'] as String? ?? '', // [教練 Agent 2026-08-14]
     freeform: json['freeform'] as String? ?? '', // [教練 Agent 2026-08-14]
+    soulMd: json['soulMd'] as String? ?? '', // [H3 2026-10-08]
     trustBoundary: json['trustBoundary'] != null
         ? TrustBoundary.fromJson(json['trustBoundary'] as Map<String, dynamic>)
         : const TrustBoundary(),
@@ -687,6 +705,7 @@ $negativeTraitsClause
     String? artStyle, // [教練 Agent 2026-08-14]
     String? species, // [教練 Agent 2026-08-14]
     String? freeform, // [教練 Agent 2026-08-14]
+    String? soulMd, // [H3 2026-10-08]
     TrustBoundary? trustBoundary,
     CompanionRightsPassport? rightsPassport,
     double? proactivity, // [Phase 0 2026-07-17]
@@ -726,6 +745,7 @@ $negativeTraitsClause
     artStyle: artStyle ?? this.artStyle, // [教練 Agent 2026-08-14]
     species: species ?? this.species, // [教練 Agent 2026-08-14]
     freeform: freeform ?? this.freeform, // [教練 Agent 2026-08-14]
+    soulMd: soulMd ?? this.soulMd, // [H3 2026-10-08]
     trustBoundary: trustBoundary ?? this.trustBoundary,
     rightsPassport: rightsPassport ?? this.rightsPassport,
     proactivity: proactivity ?? this.proactivity, // [Phase 0 2026-07-17]

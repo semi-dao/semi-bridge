@@ -321,6 +321,45 @@ class CompassStore {
     _events.add(CompassEvent('rulesChanged', {'ruleId': ruleId}));
   }
 
+  /// [小葵 2026-10-05 Blue 開案] agent 立案新規則——
+  /// 給「方案需要新規則」一條正路：建 pendingApply 的 behavioral 規則，
+  /// 等使用者在羅盤 UI 裁決套用。立新規則比改舊規則敏感，永不即時生效。
+  /// 已存在同 id → 拋錯（改參數請走 updateRuleParams）。
+  void createRule(
+    String ruleId, {
+    required String organId,
+    required String description,
+    required String why,
+    required Map<String, dynamic> params,
+    required CompassRuleKind kind,
+    required String author,
+  }) {
+    if (_db == null) throw StateError('CompassStore 未開啟');
+    if (rule(ruleId) != null) {
+      throw StateError('規則 $ruleId 已存在——改參數請走 updateRuleParams');
+    }
+    final now = DateTime.now();
+    _db!.execute(
+        'INSERT INTO compass_rules (id, organ_id, description, why, params_json, kind, status, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          ruleId,
+          organId,
+          description,
+          why,
+          jsonEncode(params),
+          kind.name,
+          // 立新規則一律待套用（behavioral 門檻）——人按「套用」才 active
+          CompassRuleStatus.pendingApply.name,
+          author,
+          now.toIso8601String(),
+        ]);
+    _db!.execute(
+        'INSERT INTO compass_rule_changes (rule_id, author, at, prev_params_json, new_params_json, reason) VALUES (?, ?, ?, ?, ?, ?)',
+        [ruleId, author, now.toIso8601String(), '{}', jsonEncode(params), '立案提案：$why']);
+    _bump(author, 'ruleCreate', '立案 $ruleId', ruleId: ruleId, organId: organId);
+    _events.add(CompassEvent('rulesChanged', {'ruleId': ruleId}));
+  }
+
   /// 人按「套用」：pendingApply → active（behavioral 規則的生效門）
   void applyRule(String ruleId, {required String byHuman}) {
     assertHumanWrite(byHuman);
@@ -457,11 +496,32 @@ class CompassStore {
         .select('SELECT * FROM compass_pitfalls WHERE organ_id = ? ORDER BY id DESC',
             [organId])
         .map((r) => CompassPitfall(
-              id: r['id'] as int,
+              id: r['id'] as int?,
               organId: r['organ_id'] as String,
               text: r['text'] as String,
               author: r['author'] as String,
-              at: DateTime.parse(r['at'] as String),
+              at: DateTime.tryParse(r['at'] as String? ?? '') ??
+                  DateTime.fromMillisecondsSinceEpoch(0),
+            ))
+        .toList();
+  }
+
+  /// [小葵 2026-10-05 Blue 令] 全部未結案傷口（跨器官）——
+  /// 夢卡「需要處理：未結案傷口 N 筆堆積」的內容展開用。
+  /// pending 判定：text 含【pending（還沒被夢境銷案改寫）。
+  List<CompassPitfall> pendingPitfalls({int limit = 30}) {
+    if (_db == null) return [];
+    return _db!
+        .select(
+            "SELECT * FROM compass_pitfalls WHERE text LIKE '%【pending%' ORDER BY id DESC LIMIT ?",
+            [limit])
+        .map((r) => CompassPitfall(
+              id: r['id'] as int?,
+              organId: r['organ_id'] as String,
+              text: r['text'] as String,
+              author: r['author'] as String,
+              at: DateTime.tryParse(r['at'] as String? ?? '') ??
+                  DateTime.fromMillisecondsSinceEpoch(0),
             ))
         .toList();
   }

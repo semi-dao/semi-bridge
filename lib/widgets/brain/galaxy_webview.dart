@@ -9,9 +9,9 @@
 // 是下一步；先以「3D 模式下 /app_view 不可用」為已知限制交付。
 
 import 'dart:async';
-import '../../core/dev_paths.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../../core/dev_paths.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';

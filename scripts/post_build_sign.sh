@@ -33,7 +33,7 @@ xattr -cr "$APP" 2>/dev/null || true
 echo "   ✅ Done"
 
 # 2. ad-hoc 簽名（帶 entitlements，確保 TCC 不會每次重置）
-ENTITLEMENTS="${ENTITLEMENTS:-$HOME/Developer/bridge_app/macos/Runner/Release.entitlements}"
+ENTITLEMENTS="$HOME/Developer/bridge_app/macos/Runner/Release.entitlements"
 if [ -f "$ENTITLEMENTS" ]; then
     echo "✍️  重新簽名（帶 entitlements）..."
     codesign --force --deep --sign - \

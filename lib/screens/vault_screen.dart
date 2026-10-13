@@ -6,7 +6,7 @@
 // 左側標籤面板 + 右側詳情面板
 // 三模式搜尋：全文 / 語意 / 標籤
 //
-// 設計文件：docs/COVISION_MANIFESTO.md
+// 設計文件：向量資料庫與畫布交互設計.md
 
 import 'dart:io';
 import 'package:bridge_app/services/material_pool_service.dart';
@@ -33,6 +33,10 @@ import '../theme/tier.dart';
 import '../theme/tier_style.dart';
 import '../widgets/bridge_desktop_widgets.dart';
 import 'vault/vault_entry_card.dart';
+import 'vault/memory_layer_gauge.dart'; // [H2/M5] 記憶十層儀表
+import 'vault/memory_layer_sidebar_section.dart'; // [H2/M5+] Blue 令：十層入側欄
+import 'vault/memory_layer_entries_view.dart'; // [H2/M5+] 層條目主區視圖
+import '../services/memory_layer_service.dart'; // [H2/M5+] MemoryLayer 定義
 import 'vault/vault_file_tree.dart';
 
 /// 向量資料庫頁面檢視模式
@@ -130,7 +134,10 @@ class VaultScreenState extends State<VaultScreen> {
   // [小葵 2026-08-29] 素材池
   bool _poolDrawerOpen = false;
 
-  // [小葵 2026-08-29] Finder 樹——選中資料夾路徑（null = 全部）
+  // [H2/M5+ 2026-10-07 Blue 令] 記憶十層——選中層（null = 全部）
+  MemoryLayer? _selectedLayer;
+
+// [小葵 2026-08-29] Finder 樹——選中資料夾路徑（null = 全部）
   String? _selectedFolderPath;
   final Set<String> _expandedTreeFolders = {};
 
@@ -1199,6 +1206,15 @@ class VaultScreenState extends State<VaultScreen> {
                     ),
                   ),
           ),
+          // ── [H2/M5+ Blue 令 v2] 記憶十層固定側欄底部（點擊展開列表）──
+          MemoryLayerSidebarSection(
+            selectedLayer: _selectedLayer,
+            onLayerTap: (layer) => setState(() {
+              _selectedLayer = layer;
+              _selectedFolderPath = null; // 層過濾與資料夾過濾互斥
+              _selectedRoom = null;
+            }),
+          ),
         ],
       ),
     );
@@ -1632,6 +1648,12 @@ class VaultScreenState extends State<VaultScreen> {
       return _buildEmptyState();
     }
 
+    // [H2/M5+ Blue 令 v2] 記憶層瀏覽最優先——點層即主區顯示（可編輯），
+    // 蓋過素材牆/檔案列表：層是第一公民不是附屬。
+    if (_selectedLayer != null) {
+      return MemoryLayerEntriesView(layer: _selectedLayer!);
+    }
+
     // [小葵 2026-08-29] 素材牆——挑選/預覽/打包的核心體驗（預設）
     if (_viewMode == VaultViewMode.materialWall) {
       return _buildMaterialWall();
@@ -1690,6 +1712,8 @@ class VaultScreenState extends State<VaultScreen> {
                         style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textMuted,)),
                   ],
                 ),
+                // [H2/M5 2026-10-07] 記憶十層容量儀表（Blue 贈禮可視化）
+                const MemoryLayerGauge(),
                 const SizedBox(height: BridgeDS.spaceSM),
                 if (_results.isNotEmpty) ...[
                   ..._results.map((entry) => Padding(
@@ -1738,8 +1762,8 @@ class VaultScreenState extends State<VaultScreen> {
   }
 
   /// [小葵 2026-09-09 Blue 令] 葉段分組 key——同葉名（品種名）跨根合併。
-  /// 例：人名資料區/.../北側陽台/象耳鹿角蕨子株 與
-  /// 01_現況紀錄/.../北側陽台/象耳鹿角蕨子株 → 同組「象耳鹿角蕨子株」。
+  /// 例：人名資料區/.../Blue陽台/象耳鹿角蕨子株 與
+  /// 01_現況紀錄/.../Blue陽台/象耳鹿角蕨子株 → 同組「象耳鹿角蕨子株」。
   /// （日期折疊後）葉段就是人類分類的最小單位——品種名。
   String _leafGroupKey(String folder) {
     final folded = _foldDateSegments(folder);

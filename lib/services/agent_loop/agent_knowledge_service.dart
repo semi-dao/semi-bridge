@@ -939,5 +939,41 @@ canvas_list → canvas_load → canvas_get_state → canvas_send_chat（說明�
       'trigger_keywords': '工具,配置,設定,預設',
       'trigger_scenes': 'tool_config',
     },
+    {
+      // [Blue 令 2026-10-05] 反重複工鐵律——寫入 App Agent 的長期知識。
+      // 起源：懸浮窗動圖 60fps 逐幀軟體去背燒 200% CPU 案——明知無效工卻讓它跑了數週。
+      // 鐵律：發現重複工/無用工 = 當場修，不放過。程式碼裡也一樣（見 task_prompt_enhancer）。
+      'id': 'seed_no_wasted_work',
+      'title': '反重複工鐵律',
+      'description': '發現重複工/無用工必須當場排除——浪費資源是自己造成的',
+      'content': '''# 反重複工鐵律（Blue 令 2026-10-05）
+
+## 核心原則
+**發現任何「重複工」或「無用工」，當場排除，不放過、不拖延。**
+
+判準（四問）：
+1. 這段邏輯跑兩次 = 跑一次嗎？（不是→找出為什麼會跑兩次）
+2. 這個計算的輸入沒變，輸出會變嗎？（不會→快取或跳過）
+3. 這個輪詢有事件可訂閱嗎？（有→改事件驅動）
+4. 這個幀/這個請求和上一個一樣嗎？（一樣→跳過）
+
+## 典型案例（真實教訓）
+- 60fps 逐幀軟體去背（素材只有 24fps，其餘 36 幀是重算）→ 預去背 + 硬解直通
+- 不可見視窗仍在渲染 → isVisible 檢查跳過
+- 同一工具被反覆提出 → 拒絕冷卻 15 分鐘
+
+## 寫程式時的自律
+- loop 內不做可提到 loop 外的計算
+- 每幀不做可離線預處理的工作（離線一次勝過線上百萬次）
+- 定時輪詢能改事件訂閱就改
+- 寧可現在多花 10 分鐘修，不要讓它每秒浪費 60 次
+
+**浪費不是外部強加的，是自己寫出來的。左腳踩右腳，永遠跑不快。**''',
+      'content_type': 'markdown',
+      'tags': 'efficiency, principle, discipline',
+      'category': 'Principle',
+      'trigger_keywords': '重複,無用,浪費,效能,輪詢,優化,資源',
+      'trigger_scenes': 'efficiency, coding, loop_design',
+    },
   ];
 }

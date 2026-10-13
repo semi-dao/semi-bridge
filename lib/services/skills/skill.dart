@@ -23,23 +23,11 @@
 /// 2. 整理成結構化簡報
 /// ```
 
-/// Skill 優先級
-enum SkillPriority {
-  low,
-  normal,
-  high;
+/// Skill 優先級已抽出至 skill_priority.dart（SkillCatalog 免拖 body 依賴），
+/// 此處 import（自身使用）+ re-export（既有 API 相容）。
+import 'skill_priority.dart';
 
-  static SkillPriority fromString(String? value) {
-    switch (value?.toLowerCase()) {
-      case 'high':
-        return SkillPriority.high;
-      case 'low':
-        return SkillPriority.low;
-      default:
-        return SkillPriority.normal;
-    }
-  }
-}
+export 'skill_priority.dart';
 
 /// Skill 模型
 class Skill {

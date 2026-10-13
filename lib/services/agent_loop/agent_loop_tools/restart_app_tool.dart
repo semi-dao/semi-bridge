@@ -11,9 +11,9 @@
 // 建議流程：patch_source_file → run_terminal("dart analyze ...") → run_terminal("flutter build") → restart_app
 
 import 'dart:io';
-import '../../../core/dev_paths.dart';
 import 'package:flutter/foundation.dart';
 import '../agent_tool.dart';
+import '../../../core/dev_paths.dart';
 import '../app_log_buffer.dart';
 import '../agent_checkpoint.dart';
 
@@ -53,10 +53,10 @@ class RestartAppTool extends AgentTool {
     try {
       // [小葵 2026-09-16 Blue 令] 開放重啟給 App Agent——路徑改為優先 Profile
       // （實際運行的 build），不存在再退 Debug。原本寫死 Debug 會重啟到舊 binary。
-      final profilePath =
-          resolveDevPath('~/Developer/bridge_app/build/macos/Build/Products/Profile/bridge_app.app');
-      final debugPath =
-          resolveDevPath('~/Developer/bridge_app/build/macos/Build/Products/Debug/bridge_app');
+      final profilePath = resolveDevPath('~/Developer/bridge_app/'
+          'build/macos/Build/Products/Profile/bridge_app.app');
+      final debugPath = resolveDevPath('~/Developer/bridge_app/'
+          'build/macos/Build/Products/Debug/bridge_app.app');
       final profileExists = await Directory(profilePath).exists();
       final appPath = profileExists ? profilePath : debugPath;
 

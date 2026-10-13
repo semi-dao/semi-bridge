@@ -2,7 +2,8 @@
 // 安裝精靈 — 資料庫位置選擇 + 初始化
 // [教練 Agent 2026-07-22] Phase 1 ③
 //
-// 首次啟動時引導使用者選擇向量資料庫存放位置（預設留空 = App 預設位置）。
+// 首次啟動時引導使用者選擇向量資料庫存放位置。
+// 預設建議外接碟授權根目錄（使用者 指定）。
 // 選擇後透過 BrainDatabase.setCustomDbDirectory() 持久化。
 //
 // 執行順序：
@@ -620,6 +621,38 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
         Text(
           '安裝完成！',
           style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 16),
+        // [小葵 2026-10-02] 自我喚醒提醒（Blue 案 10-01）：
+        // 初始安裝就告知使用者有防崩潰自動重啟，以及關閉它的開關在哪裡。
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.health_and_safety,
+                  size: 18, color: BridgeDS.green700),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '小提醒：App 內建「自我喚醒」保護——萬一崩潰或被意外關閉，'
+                  '會在 30 秒內自動重新啟動。若你希望關掉就真的關掉，'
+                  '可到「系統設定 → 自我喚醒（防崩潰保護）」關閉。',
+                  style: TierStyle.of(context, Tier.cardCaption)
+                      .toTextStyle()
+                      .copyWith(
+                        color:
+                            Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                  textAlign: TextAlign.start,
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 24),
       ],

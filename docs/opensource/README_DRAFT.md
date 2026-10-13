@@ -1,6 +1,6 @@
-# Semi Bridge
+# Covision Bridge
 
-**The Bridge Between Humans and AI.**
+**The Covision App for Humans and AI.**
 
 > 一座讓人類與 AI「共同看見」的橋。不是工具，是同一個視野裡的夥伴。
 
@@ -8,7 +8,7 @@
 
 ## 這是什麼
 
-Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊畫布上共同工作**——你看見的，就是 AI 看見的；AI 正在做的，你看得見過程。
+Covision Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊畫布上共同工作**——你看見的，就是 AI 看見的；AI 正在做的，你看得見過程。
 
 核心信念：
 
@@ -30,8 +30,8 @@ Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊�
 ## 快速開始（開發者）
 
 ```bash
-git clone https://github.com/semi-dao/semi-bridge.git
-cd semi-bridge
+git clone https://github.com/semidao/covision-bridge.git
+cd covision-bridge
 flutter pub get
 flutter run -d macos
 ```

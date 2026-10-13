@@ -251,6 +251,8 @@ class _GoldenKeysScreenState extends State<GoldenKeysScreen> {
       BridgeLocalRuntimeCommand.stopServer => await service.stopServer(),
       BridgeLocalRuntimeCommand.deleteModel => await service.inspectBridgeRuntime(),
       BridgeLocalRuntimeCommand.testModel => await service.inspectBridgeRuntime(),
+      BridgeLocalRuntimeCommand.startLabServer => await service.inspectBridgeRuntime(),
+      BridgeLocalRuntimeCommand.stopLabServer => await service.inspectBridgeRuntime(),
       BridgeLocalRuntimeCommand.status => await service.inspectBridgeRuntime(),
     };
     if (!mounted) return;

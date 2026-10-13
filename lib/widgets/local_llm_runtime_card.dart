@@ -4,6 +4,7 @@
 // 設計：BridgeDS 深色主題 + 硬體檢測 + 模型適配度標籤
 
 import 'dart:async';
+import '../services/brain_revival_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../services/macos_desktop_shell_channel.dart';
 import '../theme/bridge_design_system.dart';
 import '../theme/tier.dart';
 import '../theme/tier_style.dart';
+import '../services/local_model_scheduler.dart'; // [小葵 2026-10-01] 離合器角色槽
 import 'bridge_desktop_widgets.dart';
 
 class LocalLlmRuntimeCard extends StatefulWidget {
@@ -33,6 +35,7 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   LocalModelPlan? _modelPlan;
   bool _isLoading = true;
   Timer? _pollTimer;
+  bool _autoRestoreAttempted = false; // [小葵 2026-09-29] 自動恢復只做一次（防輪詢無限循環）
   int _selectedModelIndex = 0; // 使用者選中的模型索引
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
@@ -47,11 +50,26 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   String? _downloadingModelId; // 正在下載的模型 ID
   List<Map<String, dynamic>> _trendingModels = []; // HuggingFace 動態熱門模型
   bool _isLoadingTrending = false;
+  // [小葵 2026-09-28] 模型切換狀態（Blue 指令：換模型必須走 App 按鈕）
+  String? _isSwitchingModel; // 正在切換中的模型 ID
+  // [小葵 2026-10-01 離合器步驟2] 角色槽狀態——夥伴/辨識雙選型
+  String? _companionRoleModel; // 夥伴模型（聊天＋簡單任務）
+  String? _visionRoleModel; // 辨識模型（照片嵌入＋視覺分析）
 
   @override
   void initState() {
     super.initState();
     _loadState();
+    // [小葵 2026-10-01 離合器步驟2] 載入已存角色設定
+    LocalModelScheduler.instance.loadRoles().then((_) {
+      final s = LocalModelScheduler.instance.snapshot;
+      if (mounted) {
+        setState(() {
+          _companionRoleModel = s.companionModelId;
+          _visionRoleModel = s.visionModelId;
+        });
+      }
+    });
   }
 
   @override
@@ -72,6 +90,22 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
       // [教練 Agent 2026-07-20] 引擎未安裝時自動下載，使用者零摩擦
       if (runtimeState.phase == BridgeLocalRuntimePhase.notInstalled) {
         runtimeState = await _runtimeService.prepareBridgeRuntime();
+      }
+
+      // [小葵 2026-09-29] 生產線自動恢復：App 啟動/頁面載入時，若有現役 modelId
+      // 但 server 沒跑（phase=installed），自動啟動——重開機後無腦恢復，
+      // 不再需要手動點「啟動本地 server」。（Blue 拍板：現役模型 = 開機即用）
+      // ⚠️ [小葵 2026-09-29 慘案根修] 只嘗試一次！
+      //   原 bug：_loadState 被 3s 輪詢反覆呼叫，startServer 失敗（GPU 忙/載入慢）
+      //   → phase 回 installed → 又觸發自動恢復 → 無限重啟循環 = CPU 168%、
+      //   系統遲鈍、llama 反覆生死、快測被連坐。失敗一次就罷手，回復手動按鈕。
+      if (!_autoRestoreAttempted &&
+          runtimeState.phase == BridgeLocalRuntimePhase.installed &&
+          runtimeState.modelId != null &&
+          runtimeState.modelId!.isNotEmpty) {
+        _autoRestoreAttempted = true;
+        debugPrint('[LocalLlm] 自動恢復生產線（僅此一次）：startServer(${runtimeState.modelId})');
+        runtimeState = await _runtimeService.startServer(modelId: runtimeState.modelId);
       }
 
       if (mounted) {
@@ -151,6 +185,11 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
         case BridgeLocalRuntimeCommand.deleteModel:
         case BridgeLocalRuntimeCommand.testModel:
           newState = await _runtimeService.stopServer();
+          break;
+        case BridgeLocalRuntimeCommand.startLabServer:
+        case BridgeLocalRuntimeCommand.stopLabServer:
+          // [小葵 2026-09-29] lab server 由 ModelLabCard 自己控制，不走 primary action
+          newState = await _runtimeService.inspectBridgeRuntime();
           break;
         case BridgeLocalRuntimeCommand.status:
           newState = await _runtimeService.inspectBridgeRuntime();
@@ -404,6 +443,8 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
       case BridgeLocalRuntimeCommand.stopServer:
       case BridgeLocalRuntimeCommand.deleteModel:
       case BridgeLocalRuntimeCommand.testModel:
+      case BridgeLocalRuntimeCommand.startLabServer:
+      case BridgeLocalRuntimeCommand.stopLabServer:
         return Icons.stop;
       case BridgeLocalRuntimeCommand.status:
         return Icons.refresh;
@@ -415,6 +456,8 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
       case BridgeLocalRuntimeCommand.stopServer:
       case BridgeLocalRuntimeCommand.deleteModel:
       case BridgeLocalRuntimeCommand.testModel:
+      case BridgeLocalRuntimeCommand.startLabServer:
+      case BridgeLocalRuntimeCommand.stopLabServer:
         return BridgeDSColors.of(context).accentRed;
       case BridgeLocalRuntimeCommand.prepareRuntime:
       case BridgeLocalRuntimeCommand.downloadModel:
@@ -531,6 +574,9 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // [小葵 2026-10-01 離合器步驟2] 角色槽——夥伴/辨識雙選型
+        _buildRoleSlots(),
+        const SizedBox(height: BridgeDS.spaceMD),
         Text(
           '選擇模型',
           style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(fontWeight: FontWeight.w600,
@@ -541,7 +587,9 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
         ...recommendations.asMap().entries.map((entry) {
           final index = entry.key;
           final recommendation = entry.value;
-          final isSelected = index == _selectedModelIndex;
+          // [小葵 2026-09-29 Blue 指令] 紫色框鎖定「現役模型」（runtime state 的 modelId），
+          // 不再跟隨使用者點選的候選 index——紫色=確定感=現在正在跑的那個。
+          final isSelected = _runtimeState?.modelId == recommendation.model.id;
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: GestureDetector(
@@ -568,6 +616,100 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
         const SizedBox(height: BridgeDS.spaceMD),
         // 搜尋框
         _buildSearchSection(),
+      ],
+    );
+  }
+
+  Widget _buildRoleSlots() {
+    final installed = _installedModels.toList()..sort();
+    if (installed.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '角色配置',
+          style: TierStyle.of(context, Tier.cardTitle).toTextStyle(),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '夥伴＝聊天＋簡單任務；辨識＝照片嵌入與視覺分析。兩個角色設好後，系統會自動在閒置時輪替（自動離合器）。',
+          style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(
+                color: BridgeDSColors.of(context).textSecondary,
+                height: 1.4,
+              ),
+        ),
+        const SizedBox(height: 8),
+        _buildRoleSlotRow(
+          icon: Icons.forum_outlined,
+          label: '夥伴模型',
+          hint: '聊天＋簡單任務',
+          value: _companionRoleModel,
+          onChanged: (v) async {
+            setState(() => _companionRoleModel = v);
+            await LocalModelScheduler.instance
+                .setRoles(companionModelId: v, visionModelId: _visionRoleModel);
+          },
+        ),
+        const SizedBox(height: 6),
+        _buildRoleSlotRow(
+          icon: Icons.image_search,
+          label: '辨識模型',
+          hint: _companionRoleModel == null ? '未設定（用夥伴模型代替）' : '未設定（用夥伴模型代替）',
+          value: _visionRoleModel,
+          onChanged: (v) async {
+            setState(() => _visionRoleModel = v);
+            await LocalModelScheduler.instance
+                .setRoles(companionModelId: _companionRoleModel, visionModelId: v);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoleSlotRow({
+    required IconData icon,
+    required String label,
+    required String hint,
+    required String? value,
+    required ValueChanged<String?> onChanged,
+  }) {
+    final installed = _installedModels.toList()..sort();
+    final colors = BridgeDSColors.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: colors.accentBlue),
+        const SizedBox(width: 6),
+        Text(label,
+            style: TierStyle.of(context, Tier.cardBody)
+                .toTextStyle()
+                .copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: colors.surface,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: colors.borderDefault),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String?>(
+                value: (value == null || !installed.contains(value)) ? null : value,
+                isExpanded: true,
+                hint: Text(hint,
+                    style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(
+                        color: colors.textMuted, fontSize: 12)),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('未設定')),
+                  ...installed.map((m) =>
+                      DropdownMenuItem<String?>(value: m, child: Text(m, overflow: TextOverflow.ellipsis))),
+                ],
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -602,10 +744,46 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
                       color: BridgeDSColors.of(context).accentPurple, size: 18),
                 ),
               Expanded(
-                child: Text(
-                  recommendation.model.name,
-                  style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                    color: BridgeDSColors.of(context).textPrimary,),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        recommendation.model.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: BridgeDSColors.of(context).textPrimary,),
+                      ),
+                    ),
+                    // [小葵 2026-10-01 離合器步驟4] 角色徽章——夥伴/辨識
+                    // 角色教育：使用者不需懂模型，只需懂角色
+                    if (_companionRoleModel == modelId) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: BridgeDSColors.of(context).accentBlue.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('💬 夥伴',
+                            style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(
+                                color: BridgeDSColors.of(context).accentBlue, fontSize: 10)),
+                      ),
+                    ],
+                    if (_visionRoleModel == modelId) ...[
+                      const SizedBox(width: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: BridgeDSColors.of(context).accentPurple.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text('📷 辨識',
+                            style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(
+                                color: BridgeDSColors.of(context).accentPurple, fontSize: 10)),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               _buildFitBadge(recommendation.fit),
@@ -636,6 +814,41 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
                   const SizedBox(width: 4),
                   Text(_formatFileSize(_installedModelSizes[modelId]!),
                       style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textMuted)),
+                ],
+                const SizedBox(width: 8),
+                // [小葵 2026-09-28] 一鍵切換現役模型（Blue 指令：換模型必須走 App 按鈕）
+                // _switchToModel 走 Swift startServer(modelId) 鏈：自動停舊載新
+                if (_isActiveModel(modelId)) ...[
+                  Icon(Icons.play_circle_fill, color: BridgeDSColors.of(context).accentPurple, size: 14),
+                  const SizedBox(width: 4),
+                  Text('現役模型',
+                      style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).accentPurple, fontWeight: FontWeight.w700)),
+                ] else ...[
+                  GestureDetector(
+                    onTap: (_isLoading || _isSwitchingModel != null) ? null : () => _switchToModelWithConfirm(modelId, recommendation.model.name),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: BridgeDSColors.of(context).accentPurple.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: BridgeDSColors.of(context).accentPurple.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_isSwitchingModel == modelId)
+                            const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                          else
+                            // [Blue 2026-10-01] 非現役按鈕改白字——紫色專屬現役項，消除識別混淆
+                            Icon(Icons.swap_horiz, size: 12, color: BridgeDSColors.of(context).textPrimary),
+                          const SizedBox(width: 3),
+                          Text('設為現役',
+                              style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textPrimary,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
                 const SizedBox(width: 8),
                 // 測試按鈕 / 測試結果
@@ -770,9 +983,10 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.download, size: 14, color: BridgeDSColors.of(context).accentPurple),
+                        // [Blue 2026-10-01] 下載鈕改白字——紫色專屬現役項
+                        Icon(Icons.download, size: 14, color: BridgeDSColors.of(context).textPrimary),
                         const SizedBox(width: 4),
-                        Text('下載', style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).accentPurple, fontWeight: FontWeight.w600)),
+                        Text('下載', style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textPrimary, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -1186,6 +1400,28 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
       }
 
       // [教練 Agent 2026-07-25] 測試通過自動加入候選列表
+      // [小葵 2026-10-01 離合器步驟5 防線B] 快測成功 → 角色判定提示
+      // 病例：使用者只下載 12B → 掛載成功快測成功 → 但聊天/任務極慢甚至
+      // 空 → 「系統壞掉了」。藥方：快測成功當下教育角色——資訊感非推銷感。
+      if (mounted && _modelTestResults[modelId] == true) {
+        final isBigModel = modelId.contains('12b') || modelId.contains('14b');
+        final alreadyCompanion = _companionRoleModel != null;
+        if (isBigModel && !alreadyCompanion) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 12),
+              backgroundColor: BridgeDSColors.of(context).surface,
+              content: Text(
+                '這個模型跑得很穩！它當辨識引擎很優秀，但當聊天夥伴會比較吃力'
+                '（速度較慢、記憶較短）。建議在上方「角色配置」把它設為辨識模型，'
+                '再挑一個小一點的模型當夥伴？',
+                style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(
+                    color: BridgeDSColors.of(context).textPrimary),
+              ),
+            ),
+          );
+        }
+      }
       if (mounted) {
         setState(() {
           _testingModels.remove(modelId);
@@ -1373,6 +1609,59 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
     }
   }
 
+  // ══════════════════════════════════════════════════════
+  // [小葵 2026-09-28] 一鍵切換現役模型（Blue 指令 #2：換模型必須走 App 按鈕）
+  // ══════════════════════════════════════════════════════
+
+  /// 該模型是否為現役（server 正在跑且載入的就是它）
+  bool _isActiveModel(String modelId) {
+    return _runtimeState?.phase == BridgeLocalRuntimePhase.running &&
+        _runtimeState?.modelId == modelId;
+  }
+
+  /// 切換前確認（模型載入需 10-60 秒，期間本地功能暫停）
+  Future<void> _switchToModelWithConfirm(String modelId, String modelName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: BridgeDSColors.of(ctx).surface,
+        title: Text('切換現役模型',
+            style: TierStyle.of(ctx, Tier.cardHeroTitle).toTextStyle()),
+        content: Text(
+          '要把本地模型切換為「$modelName」嗎？\n\n'
+          '· 切換時會先停掉目前的模型再載入新的（約 10-60 秒）\n'
+          '· 期間本地推理功能暫停服務\n'
+          '· 下載過的模型都會保留，隨時可以切回來',
+          style: TierStyle.of(ctx, Tier.cardBody).toTextStyle().copyWith(height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('取消',
+                style: TierStyle.of(ctx, Tier.cardBody).toTextStyle()),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: BridgeDSColors.of(ctx).accentPurple,
+            ),
+            child: Text('切換',
+                style: TierStyle.of(ctx, Tier.cardBody).toTextStyle()),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isSwitchingModel = modelId);
+    await _switchToModel(modelId);
+    if (mounted) {
+      setState(() => _isSwitchingModel = null);
+      // 切換後立即刷新狀態（modelId 由 Swift 端寫入 runtime state）
+      _loadState();
+    }
+  }
+
   /// [教練 Agent 2026-07-20] 刪除已下載的模型
   Future<void> _deleteModel(String modelId) async {
     setState(() => _isLoading = true);
@@ -1521,6 +1810,65 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   }
 
   Widget _buildRunningInfo() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // [U2/F5] 生命週期真話條——訂閱 BrainRevival 單一真相源（alive 靜音）
+        StreamBuilder<BrainLifecycle>(
+          stream: BrainRevivalService.instance.stream,
+          builder: (context, snap) {
+            final lc = snap.data ?? BrainRevivalService.instance.lifecycle;
+            if (lc.phase == BrainPhase.alive) return const SizedBox.shrink();
+            final restarting = lc.phase == BrainPhase.restarting;
+            final off = lc.phase == BrainPhase.off; // [Blue 令] 手動關/閒置卸載——資訊色
+            final c = BridgeDSColors.of(context);
+            final color = off
+                ? c.textMuted
+                : (restarting ? c.accentYellow : c.accentRed);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withValues(alpha: 0.35)),
+              ),
+              child: Row(children: [
+                Icon(off
+                    ? Icons.bedtime_outlined
+                    : (restarting ? Icons.restart_alt : Icons.heart_broken),
+                    size: 16,
+                    color: color),
+                const SizedBox(width: 8),
+                Text(
+                  off
+                      ? '本地模型休眠中'
+                      : (restarting ? '重啟大腦中…' : '大腦無回應'),
+                  style: TierStyle.of(context, Tier.cardBody)
+                      .toTextStyle()
+                      .copyWith(color: color, fontWeight: FontWeight.w600),
+                ),
+                if (lc.detail != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(lc.detail!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TierStyle.of(context, Tier.cardBody)
+                            .toTextStyle()
+                            .copyWith(color: c.textMuted, fontSize: 12)),
+                  ),
+                ],
+              ]),
+            );
+          },
+        ),
+        _buildRunningInfoBody(),
+      ],
+    );
+  }
+
+  Widget _buildRunningInfoBody() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

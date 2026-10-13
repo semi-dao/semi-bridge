@@ -4,7 +4,7 @@
 **Version:** 1.0  
 **Last Updated:** 2026-07-18  
 **Target:** BridgeDS Flutter macOS Desktop App  
-**Current Palette:** Canvas #07080A, Surface #101111, Accent #5B76FE, Fonts: Geist Mono + Inter
+**Current Palette:** Canvas #07080A, Surface #101111, Accent Miro #5B76FE, Fonts: Geist Mono + Inter
 
 ---
 

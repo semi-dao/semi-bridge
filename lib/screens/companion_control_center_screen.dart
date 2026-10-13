@@ -9,6 +9,8 @@ import '../services/companion_store.dart';
 import '../widgets/trust/agent_glyph.dart'; // [刀 2] 指紋縮圖
 import '../services/budget_ledger.dart'; // [刀 2] 工作實績
 import '../theme/bridge_design_system.dart';
+import '../theme/tier.dart';
+import '../theme/tier_style.dart';
 import '../widgets/adaptive_scaffold.dart';
 import '../widgets/companion_rig.dart';
 import '../widgets/companion_rig_animator.dart';
@@ -547,6 +549,70 @@ class _CompanionControlCenterScreenState
             ds,
           ),
         const SizedBox(height: 12),
+        // [H3 2026-10-08] 靈魂文檔（SOUL）——人格的最深處，可共視編輯
+        if (companion.soulMd.trim().isNotEmpty) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: ds.surfaceElevated,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: ds.accentPurple.withValues(alpha: 0.35),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.auto_awesome, size: 14, color: ds.accentPurple),
+                    const SizedBox(width: 6),
+                    Text('靈魂文檔 SOUL',
+                        style: TierStyle.of(context, Tier.cardCaption)
+                            .toTextStyle()
+                            .copyWith(
+                              color: ds.accentPurple,
+                              fontWeight: FontWeight.w700,
+                            )),
+                    const Spacer(),
+                    // 共視編輯——Blue 能看能改（人格透明化）
+                    GestureDetector(
+                      onTap: () => _editSoulMd(companion),
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined,
+                              size: 13, color: ds.textMuted),
+                          const SizedBox(width: 4),
+                          Text('共視編輯',
+                              style: TierStyle.of(context, Tier.cardCaption)
+                                  .toTextStyle()
+                                  .copyWith(color: ds.textMuted)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  // 預覽：前 6 行
+                  companion.soulMd.trim().split('\n').take(6).join('\n'),
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                  style: TierStyle.of(context, Tier.cardBody).toTextStyle()
+                      .copyWith(
+                    color: ds.textSecondary,
+                    height: 1.5,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
         Align(
           alignment: Alignment.centerRight,
           child: TextButton.icon(
@@ -565,6 +631,73 @@ class _CompanionControlCenterScreenState
           ),
         ),
       ],
+    );
+  }
+
+  /// [H3] 共視編輯靈魂文檔——人格透明化（Blue 能看、能改）
+  void _editSoulMd(Companion companion) {
+    final ctl = TextEditingController(text: companion.soulMd);
+    final ds = BridgeDSColors.of(context);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ds.surfaceElevated,
+        title: Text('靈魂文檔 SOUL——${companion.name}',
+            style: TierStyle.of(ctx, Tier.cardHeroTitle).toTextStyle()),
+        content: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '這是夥伴的核心身份層，注入於 system prompt 最頂層——先於角色與風格設定。',
+                style: TierStyle.of(ctx, Tier.cardCaption)
+                    .toTextStyle()
+                    .copyWith(color: ds.textMuted),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctl,
+                maxLines: 16,
+                style: TierStyle.of(ctx, Tier.cardBody)
+                    .toTextStyle()
+                    .copyWith(fontFamily: 'monospace', fontSize: 12.5, height: 1.6),
+                decoration: InputDecoration(
+                  border: OutlineInputBorder(
+                      borderSide: BorderSide(color: ds.borderSubtle)),
+                  hintText: '（空 = 沒有靈魂文檔）',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('取消',
+                style: TierStyle.of(ctx, Tier.cardBody).toTextStyle()),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: ds.accentPurple),
+            onPressed: () async {
+              final updated =
+                  companion.copyWith(soulMd: ctl.text.trim());
+              await CompanionStore().update(updated);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                setState(() {
+                  _companion = updated;
+                });
+              }
+            },
+            child: Text('儲存靈魂',
+                style: TierStyle.of(ctx, Tier.cardBody)
+                    .toTextStyle()
+                    .copyWith(
+                        color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
     );
   }
 

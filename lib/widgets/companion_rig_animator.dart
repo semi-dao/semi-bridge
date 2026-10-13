@@ -6,7 +6,7 @@
 // 狀態切換時參數用 lerp 平滑過渡（0.6s），畫面永遠連續。
 // 成本恆定：無論幾個狀態，每幀就是 4 個 Transform.rotate，遠低於 GPU 5% 紀律。
 //
-// 素材源：內部 rig 測試素材目錄（Godot 版同源切層）。
+// 素材源：Blue資料區/電腦代操測試/xiaoqiao_rig（Godot 版同源切層）。
 
 import 'dart:math' as math;
 

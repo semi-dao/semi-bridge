@@ -1,6 +1,6 @@
 // dedup_service.dart
-// [2026-09-09] 實體去重——同一張照片在多個授權根有副本
-// （人名根/01_現況紀錄），分類層已合併但磁碟上占空間。
+// [小葵 2026-09-09 Blue 令] 實體去重——同一張照片在多個授權根有副本
+// （人名資料區/01_現況紀錄），分類層已合併但磁碟上占空間。
 //
 // 鐵則（Blue）：
 // - 檔案重複有它的意義——不主動刪除
@@ -28,7 +28,9 @@ class DedupService {
   /// dry-run：掃描重複檔案，回傳候選清單（不刪任何東西）。
   /// 只掃圖片與影片（大檔才值得去重）。
   Future<List<DedupCandidate>> scan() async {
-    final dbRoots = <String>[]; // 授權根一律從 sandbox_roots.json 動態讀取
+    final dbRoots = [
+      '/Volumes',
+    ]; // TODO: 從授權根清單動態讀
     // 先從 brain_container 讀實際根——掃描 asset_index 的 folder_root
     final roots = <String>{};
     try {

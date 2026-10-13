@@ -103,7 +103,9 @@ class LocalVisionAnalyzeTool extends AgentTool {
             ],
           },
         ],
-        'max_tokens': 1024,
+        // [小葵 2026-09-28] 1024 → 1500：12B thinking 模型會先把 token 燒在
+        // 推理段，1024 不足時 content 為空（bench 09-28 實測：800 全空、1500 穩定）
+        'max_tokens': 1500,
         'temperature': 0.4,
       };
 

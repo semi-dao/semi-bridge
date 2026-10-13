@@ -77,6 +77,7 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
   final _artStyleController = TextEditingController();
   final _speciesController = TextEditingController();
   final _freeformController = TextEditingController();
+  final _soulMdController = TextEditingController(); // [H3] 靈魂文檔
   final _summoningService = CompanionSummoningService();
   final _primaryVisualReviewService = const SemiDaoVisualReviewService();
   final _defaultBridgeActionExecutor = BridgeActionExecutor();
@@ -185,6 +186,7 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
     _artStyleController.dispose();
     _speciesController.dispose();
     _freeformController.dispose();
+    _soulMdController.dispose();
     _stepperScrollController.dispose();
     // [Kokoro TTS 2026-07-28] 釋放 TTS 服務資源
     // [小葵 2026-08-30] 注意：不 stopServer——server 採「port 被佔即重用」，
@@ -256,6 +258,7 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
     _artStyleController.text = companion.artStyle;
     _speciesController.text = companion.species;
     _freeformController.text = companion.freeform;
+    _soulMdController.text = companion.soulMd; // [H3]
 
     if (!mounted) return;
     setState(() {
@@ -358,6 +361,8 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
         'artStyle': _artStyleController.text,
         'species': _speciesController.text,
         'freeform': _freeformController.text,
+        if (_soulMdController.text.trim().isNotEmpty)
+          'soulMd': _soulMdController.text, // [H3]
         'savedAt': DateTime.now().toIso8601String(),
       };
       if (_candidate != null) {
@@ -434,6 +439,7 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
       _artStyleController.text = draft['artStyle'] as String? ?? '';
       _speciesController.text = draft['species'] as String? ?? '';
       _freeformController.text = draft['freeform'] as String? ?? '';
+      _soulMdController.text = draft['soulMd'] as String? ?? ''; // [H3]
 
       // 恢復參考圖
       final refImages = draft['referenceImages'] as List<dynamic>?;
@@ -1689,6 +1695,13 @@ class _CompanionCreateScreenState extends State<CompanionCreateScreen>
           _freeformController,
           '建議 20 字左右，例如：需要嚴謹時找我，會提醒風險',
           maxLines: 3,
+        ),
+        // [H3 2026-10-08] 靈魂文檔——人格最深處，注入 system prompt 最頂層
+        _buildTextField(
+          '靈魂文檔 SOUL',
+          _soulMdController,
+          'Markdown。核心身份層（先於角色與風格）。Hermes 移民用：貼上 SOUL.md',
+          maxLines: 8,
         ),
       ],
     );
@@ -5612,6 +5625,7 @@ Future<void> _pickReferenceImages() async {
         artStyle: _artStyleController.text.trim(),
         species: _speciesController.text.trim(),
         freeform: _freeformController.text.trim(),
+        soulMd: _soulMdController.text.trim(), // [H3]
         rightsPassport:
             _primaryRightsPassport ?? editingCompanion.rightsPassport,
       );
@@ -5656,6 +5670,11 @@ Future<void> _pickReferenceImages() async {
       id: editingCompanion?.id ?? CompanionStore.generateId(),
       baseCompanion: editingCompanion,
     );
+    // [H3] 表單靈魂文檔寫入（空=沿用 baseCompanion 預設）
+    final soulText = _soulMdController.text.trim();
+    if (soulText.isNotEmpty) {
+      companion = companion.copyWith(soulMd: soulText);
+    }
     // [Blue UX 2026-09-17] 存檔鎖定——圖像收進 App 容器保管庫，使用者
     // 誤刪 bridge_media 也不影響 App 顯示（Blue：存檔後圖的資料要鎖定）
     try {
@@ -5862,6 +5881,8 @@ Future<void> _pickReferenceImages() async {
           '圖組 ${entry.key}：${entry.value}',
       ],
       modelEndpoint: 'default',
+      // [H3] 靈魂文檔沿襲——編輯夥伴不得失魂
+      soulMd: baseCompanion?.soulMd ?? '',
       rightsPassport: _primaryRightsPassport ?? baseCompanion?.rightsPassport,
       // [Kokoro TTS 2026-07-28] 語音設定
       voiceName: _voiceName,

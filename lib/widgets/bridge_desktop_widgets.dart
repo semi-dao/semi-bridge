@@ -1,6 +1,6 @@
 // Bridge Desktop Widgets — 設計系統元件庫
 // 依據 DESIGN.md component spec 實作
-// 五質地融合：暗色科技 × 色彩質感 × 向量粒子 × 動態活潑 × 無限畫布
+// 五套融合：xAI 氛圍 × Raycast 色彩 × Stripe 粒子 × Figma 動態 × Miro 無限畫布
 
 import 'package:flutter/material.dart';
 import '../theme/bridge_design_system.dart';
@@ -8,7 +8,7 @@ import '../theme/tier.dart';
 import '../theme/tier_style.dart';
 
 // ═══════════════════════════════════════════════════
-// Pill Button — pill 50px + opacity hover + mono uppercase
+// Pill Button — Figma pill 50px + Raycast opacity hover + xAI mono uppercase
 // ═══════════════════════════════════════════════════
 
 enum BridgeButtonType { primary, accent, ghost, brain }
@@ -67,7 +67,7 @@ class _BridgePillButtonState extends State<BridgePillButton> {
         break;
     }
 
-    // hover opacity transition（簽名互動）
+    // hover opacity transition (Raycast 簽名互動)
     final hoverOpacity = _hovering && !isDisabled
         ? (widget.type == BridgeButtonType.primary ? 0.6 : 0.8)
         : 1.0;
@@ -114,7 +114,7 @@ class _BridgePillButtonState extends State<BridgePillButton> {
 }
 
 // ═══════════════════════════════════════════════════
-// Bridge Card — 雙環陰影 + 透明邊框
+// Bridge Card — Raycast 雙環陰影 + xAI 透明邊框
 // ═══════════════════════════════════════════════════
 
 class BridgeCard extends StatefulWidget {
@@ -180,7 +180,7 @@ class _BridgeCardState extends State<BridgeCard> {
 }
 
 // ═══════════════════════════════════════════════════
-// Status Tag — mono 字體 + 語意色
+// Status Tag — xAI mono + Raycast 語意色
 // ═══════════════════════════════════════════════════
 
 enum BridgeTagType { success, error, info, brain, warn }
@@ -371,7 +371,7 @@ class _BridgeActiveGlowState extends State<BridgeActiveGlow>
 }
 
 // ═══════════════════════════════════════════════════
-// Bridge Input — 暗色輸入框 + focus ring
+// Bridge Input — Raycast dark input + xAI focus ring
 // ═══════════════════════════════════════════════════
 
 class BridgeInput extends StatefulWidget {

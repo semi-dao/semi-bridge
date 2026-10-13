@@ -81,6 +81,32 @@ class AgentSafetyConstraints {
     'restart_app', // 重啟會中斷所有工作
   ];
 
+  /// [Pi Durable 借鑑 2026-10-03] 中斷安全工具——跑兩次 = 跑一次的唯讀操作。
+  ///
+  /// 判準：這個工具執行兩次，結果跟執行一次一樣嗎？
+  /// - 是（唯讀、無副作用）→ interrupt-safe：崩潰/中斷後可自動重跑，不構成傷害
+  /// - 否（有副作用）→ 不在此列：中斷後只回報「被中斷」，交給模型決策
+  ///
+  /// 用途：Agent Loop 崩潰恢復時的重跑決策；D002 確認框可據此降低打擾。
+  /// 詳見 skill: pi-durable-borrowing-guide §①
+  static const Set<String> interruptSafeTools = {
+    'read_source_file', // 唯讀：讀原始碼
+    'read_app_log', // 唯讀：讀 App 日誌
+    'ui_get_state', // 唯讀：查 UI 狀態
+    'ui_inspect', // 唯讀：檢視元件
+    'memory_search', // 唯讀：搜記憶
+    'compass_seek', // 唯讀：查羅盤
+    'compass_read', // 唯讀：讀羅盤卡
+    'web_search', // 唯讀：網搜（冪等）
+    'image_recognition', // 唯讀：辨識（不改變被辨識物）
+    'canvas_capture', // 唯讀：截圖畫布狀態
+  };
+
+  /// [Pi Durable 借鑑 2026-10-03] 判斷工具是否中斷安全（重跑無害）
+  static bool isInterruptSafe(String toolName) {
+    return interruptSafeTools.contains(toolName);
+  }
+
   /// run_terminal 裡需要確認的危險命令模式
   ///
   /// 當 Agent 透過 run_terminal 執行包含這些模式的命令時，

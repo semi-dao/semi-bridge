@@ -10,11 +10,11 @@
 // helper 依賴：python3 + pymupdf（開源使用者文檔需註明）。
 
 import 'dart:async';
-import '../../core/dev_paths.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
+import '../../core/dev_paths.dart';
 
 import 'brain_database.dart';
 import 'embedding/embedding_service.dart';

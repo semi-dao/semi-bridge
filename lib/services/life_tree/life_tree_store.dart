@@ -30,6 +30,9 @@ class LifeTreeDream {
   final String? modelUsed;
   final DateTime createdAt;
   final int? linkedLedgerId;
+  // [小葵 2026-10-05 Blue 令] 裁決——propose 卡使用者直接在卡上回覆
+  final DateTime? adjudicatedAt;
+  final String? adjudication;
 
   const LifeTreeDream({
     this.id,
@@ -42,6 +45,8 @@ class LifeTreeDream {
     this.modelUsed,
     required this.createdAt,
     this.linkedLedgerId,
+    this.adjudicatedAt,
+    this.adjudication,
   });
 }
 
@@ -128,6 +133,14 @@ class LifeTreeStore {
         'CREATE INDEX IF NOT EXISTS idx_dream_trunk ON life_tree_dreams(trunk, branch_type)');
     db.execute(
         'CREATE INDEX IF NOT EXISTS idx_tb_ledger ON life_tree_thought_branches(ledger_id)');
+    // [小葵 2026-10-05 Blue 令] 裁決欄——propose 卡讓使用者直接在卡上回覆。
+    // ALTER 失敗=欄位已存在，靜默忽略（冪等遷移）。
+    try {
+      db.execute(
+          'ALTER TABLE life_tree_dreams ADD COLUMN adjudicated_at TEXT');
+      db.execute(
+          'ALTER TABLE life_tree_dreams ADD COLUMN adjudication TEXT');
+    } catch (_) {}
   }
 
   // ── 夢境主幹 ──────────────────────────────
@@ -182,6 +195,10 @@ class LifeTreeStore {
         createdAt: DateTime.tryParse(row['created_at'] as String? ?? '') ??
             DateTime.fromMillisecondsSinceEpoch(0),
         linkedLedgerId: row['linked_ledger_id'] as int?,
+        adjudicatedAt: row['adjudicated_at'] == null
+            ? null
+            : DateTime.tryParse(row['adjudicated_at'] as String),
+        adjudication: row['adjudication'] as String?,
       );
 
   // ── 歷史主幹：未走分支 ──────────────────────
@@ -272,6 +289,91 @@ class LifeTreeStore {
     } catch (e) {
       debugPrint('[LifeTree] snapshot 失敗: $e');
       return {'dreams': -1, 'thoughtBranches': -1, 'unrevisited': -1};
+    }
+  }
+
+  // ── 夢的藥回灌（2026-10-05 生命樹代謝）──────────────
+  //
+  // 洞二的修法：夢卡不再是只寫不讀的日記。她每次開工（AgentLoop
+  // 組 prompt）時帶上「最近的、夠新的夢結論」——昨晚學到的教訓，
+  // 白天就帶在身上。設計原則（生命樹自己長）：
+  //   - 不欽點內容：按 decision 種類+新鮮度檢索，不是我們挑過的 SOP
+  //   - 藥有效期限：7 天——過期的教訓會變迷信，自動退成純歷史
+  //   - 上限 3 張：養分是提神不是灌爆 prompt
+
+  /// 最近 N 天內、仍有效的夢結論卡（回灌候選）。
+  /// 排除：安睡卡（無資訊量）、propose 卡還沒人裁決（不是藥是議題）。
+  List<LifeTreeDream> activeLessons({int days = 7, int limit = 3}) {
+    try {
+      final cutoff =
+          DateTime.now().subtract(Duration(days: days)).toIso8601String();
+      final rows = _open().select(
+        'SELECT * FROM life_tree_dreams '
+        'WHERE created_at > ? '
+        "AND conclusion NOT LIKE '這場夢沒有發現問題%' "
+        "AND (decision IN ('maintain','escalate_to_user','agent_consensus') "
+        "     OR (decision = 'propose' AND adjudicated_at IS NOT NULL)) "
+        // 同結論去重——傷口銷案卡常常連發，留最新一張
+        'GROUP BY substr(conclusion, 1, 40) '
+        'ORDER BY created_at DESC LIMIT ?',
+        [cutoff, limit],
+      );
+      return rows.map(_dreamFromRow).toList();
+    } catch (e) {
+      debugPrint('[LifeTree] activeLessons 失敗: $e');
+      return const [];
+    }
+  }
+
+  /// [小葵 2026-10-05 Blue 令] 裁決 propose 卡——使用者直接在卡上回覆。
+  /// 寫入裁決文字＋時間戳；回傳成功與否。
+  /// 訊息送達 Agent 夥伴由 UI 層負責（本方法只管樹的帳）。
+  bool adjudicate(int dreamId, String verdict) {
+    try {
+      final db = _open();
+      db.execute(
+        'UPDATE life_tree_dreams SET adjudicated_at = ?, adjudication = ? '
+        'WHERE id = ?',
+        [DateTime.now().toIso8601String(), verdict, dreamId],
+      );
+      final row = db.select(
+          'SELECT adjudication FROM life_tree_dreams WHERE id = ?', [dreamId]);
+      return row.isNotEmpty && row.first['adjudication'] == verdict;
+    } catch (e) {
+      debugPrint('[LifeTree] adjudicate 失敗: $e');
+      return false;
+    }
+  }
+
+  /// [代謝·洞三] 草稿卡升級：被回灌引用過的 agent_draft 升級
+  /// agent_consensus——「夢裡悟的藥，白天真的用了」就是複驗通過。
+  /// 純 SQL 零 token；升級留痕在結論前綴（不覆寫原文）。
+  int promoteDraftsReferenced(List<int> dreamIds) {
+    if (dreamIds.isEmpty) return 0;
+    var n = 0;
+    try {
+      final db = _open();
+      for (final id in dreamIds) {
+        // 先查現況——已是 consensus 的冪等跳過（不算新升級）
+        final cur = db.select(
+            'SELECT branch_type FROM life_tree_dreams WHERE id = ?', [id]);
+        if (cur.isEmpty || cur.first['branch_type'] != 'agent_draft') continue;
+        db.execute(
+          "UPDATE life_tree_dreams SET branch_type = 'agent_consensus', "
+          "conclusion = '[已用於白天·升級] ' || conclusion, "
+          "model_used = COALESCE(model_used, '') || '+reused' "
+          'WHERE id = ? AND branch_type = ?',
+          [id, 'agent_draft'],
+        );
+        final ok = db.select(
+            "SELECT COUNT(*) c FROM life_tree_dreams WHERE id = ? AND branch_type = 'agent_consensus'",
+            [id]);
+        if ((ok.first['c'] as int) > 0) n++;
+      }
+      return n;
+    } catch (e) {
+      debugPrint('[LifeTree] promoteDraftsReferenced 失敗: $e');
+      return n;
     }
   }
 

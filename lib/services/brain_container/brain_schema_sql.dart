@@ -17,7 +17,7 @@
 // superseded_by：矛盾消解——新事實取代舊事實（舊記憶指向新記憶，留審計不刪）。
 // expires_at 已存在但零使用：本版起寫入端可標記臨時事實到期日，
 // 讀取端一律過濾（temporal filtering——supermemory 借鏡）。
-const String kBrainSchemaVersion = '18';
+const String kBrainSchemaVersion = '19';
 
 /// 所有 CREATE TABLE 語句。
 ///
@@ -211,7 +211,8 @@ const List<String> brainCreateTableStatements = [
     memory_type   TEXT,
     embedding     BLOB,
     created_at    TEXT DEFAULT (datetime('now')),
-    is_archived   INTEGER DEFAULT 0
+    is_archived   INTEGER DEFAULT 0,
+    layer         TEXT
   )
   ''',
 
@@ -504,6 +505,29 @@ const Map<String, List<String>> brainMigrations = {
   'from_v16_to_v17': [
     "ALTER TABLE memories ADD COLUMN speaker TEXT",
   ],
+  // [小葵 2026-10-07 Blue 贈禮拍板] v18 → v19：記憶 2域10層（H2）。
+  // agent_memories.layer——記憶的溫度座標：
+  //   L1 鐵則/L2 身分/L3 專案熱（工作域，注入）
+  //   L4 環境/L5 決策/L6 教訓/L7 專案冷/L8 對話精華/L9 原始/L10 反思（長期域，檢索）
+  // 既有 1,931 條自動歸屬（零丟失——記憶鐵律）：
+  //   hermes_conversation → L8；hermes_migration → 按內容特徵；
+  //   persona_card/identity → L2；lesson → L6；milestone → L5；
+  //   pattern → L6；skill → L6；import_marker → L4
+  'from_v18_to_v19': [
+    "ALTER TABLE agent_memories ADD COLUMN layer TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_agent_memories_layer ON agent_memories(layer)",
+    // 既有資料歸屬（冪等——layer 為 NULL 才寫）
+    "UPDATE agent_memories SET layer='L8' WHERE layer IS NULL AND memory_type='hermes_conversation'",
+    "UPDATE agent_memories SET layer='L2' WHERE layer IS NULL AND memory_type IN ('persona_card','identity')",
+    "UPDATE agent_memories SET layer='L6' WHERE layer IS NULL AND memory_type IN ('lesson','pattern','skill')",
+    "UPDATE agent_memories SET layer='L5' WHERE layer IS NULL AND memory_type='milestone'",
+    "UPDATE agent_memories SET layer='L4' WHERE layer IS NULL AND memory_type='import_marker'",
+    // hermes_migration：帶鐵則/決策/環境關鍵字的進對應層，其餘 L8
+    "UPDATE agent_memories SET layer='L1' WHERE layer IS NULL AND memory_type='hermes_migration' AND (content LIKE '%鐵則%' OR content LIKE '%禁%' OR tags LIKE '%鐵則%')",
+    "UPDATE agent_memories SET layer='L5' WHERE layer IS NULL AND memory_type='hermes_migration' AND (content LIKE '%拍板%' OR content LIKE '%決策%' OR tags LIKE '%拍板%')",
+    "UPDATE agent_memories SET layer='L4' WHERE layer IS NULL AND memory_type='hermes_migration' AND (content LIKE '%路徑%' OR content LIKE '%埠%' OR tags LIKE '%環境%')",
+    "UPDATE agent_memories SET layer='L8' WHERE layer IS NULL",  // 兜底：其餘全進 L8
+  ],
   // [小葵 2026-09-22 Blue 偷學令] v17 → v18：矛盾消解 superseded_by。
   // 「我搬去台北了」寫入時，語意相近且字面衝突的舊記憶標 superseded（留審計不刪）。
   // 讀取端一律過濾 superseded_by IS NOT NULL——檢索永遠走在現行事實上。
@@ -685,7 +709,8 @@ const Map<String, List<String>> brainMigrations = {
       memory_type   TEXT,
       embedding     BLOB,
       created_at    TEXT DEFAULT (datetime('now')),
-      is_archived   INTEGER DEFAULT 0
+      is_archived   INTEGER DEFAULT 0,
+      layer         TEXT
     )
     ''',
     '''

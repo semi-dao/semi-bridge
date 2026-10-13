@@ -80,6 +80,7 @@ class VoiceLiveController {
     required ChatController chatController,
     this.onExternalTurn,
     this.onExternalBargeIn,
+    this.isExternalAgentSpeaking,
   })  : _speechHandler = speechHandler,
         _voiceEngine = voiceEngine,
         _chatController = chatController {
@@ -94,6 +95,13 @@ class VoiceLiveController {
 
   /// [小葵 2026-08-30] 外部插嘴 hook——orchestrator 需要 flush 自己的 TTS 佇列
   final void Function()? onExternalBargeIn;
+
+  /// [小葵 2026-09-24 Blue 插嘴令] 外部「agent 正在講話」判定——
+  /// orchestrator 的 TTS 走自己的 player 不經過 VoiceEngine，
+  /// _isAgentSpeaking（VoiceEngine 狀態驅動）在 orchestrator 模式永遠 false
+  /// → 插嘴偵測從未生效（Blue 實測：她像問答機把話全部吐完才理人）。
+  /// 此 hook 非 null 時，插嘴判定以它為真相源。
+  final bool Function()? isExternalAgentSpeaking;
 
   /// 開始雙向溝通模式
   Future<void> start() async {
@@ -182,10 +190,15 @@ class VoiceLiveController {
     debugPrint('[VoiceLive] 雙向溝通模式已停止');
   }
 
+  /// 有效「agent 正在講話」判定——orchestrator 模式用外部真相源。
+  /// [小葵 2026-09-24 Blue 插嘴令] 見 isExternalAgentSpeaking 文檔。
+  bool get _effectiveAgentSpeaking =>
+      (isExternalAgentSpeaking?.call() ?? false) || _isAgentSpeaking;
+
   /// 處理使用者插嘴
   void _onUserInterruption() {
     if (!_isLiveMode) return;
-    if (!_isAgentSpeaking) return;
+    if (!_effectiveAgentSpeaking) return;
 
     debugPrint('[VoiceLive] 偵測到使用者插嘴');
 
@@ -215,7 +228,10 @@ class VoiceLiveController {
         debugPrint('[VoiceLive] VAD 偵測到使用者開口');
 
         // 如果 agent 在講話 → 觸發插嘴
-        if (_isAgentSpeaking) {
+        // [小葵 2026-09-24 Blue 插嘴令] 用 _effectiveAgentSpeaking——
+        // orchestrator 模式下 VoiceEngine 狀態不是真相源（orchestrator
+        // 的 TTS 走自己 player）。不插嘴＝她把話全部吐完才理人（Blue 抓包）。
+        if (_effectiveAgentSpeaking) {
           _interruptionDetector?.onInterrupt?.call();
         } else {
           _voiceEngine.onUserStartedSpeaking();
@@ -231,7 +247,7 @@ class VoiceLiveController {
       if (_isUserSpeaking && _silenceTimer == null) {
         // [小葵 2026-08-31] 語意自適應 VAD——沉默時長由句尾完整度決定：
         // Campione & Veronis 多語言停頓研究：人類子句邊界停頓峰在 ~426ms。
-        // 若句子看起來已完整（問句/句號/語氣詞尾）→ 300ms 快切（逼近
+        // 若句子看起來已完整（問號/句號/語氣詞尾）→ 300ms 快切（逼近
         // Stivers 2009 跨文化 200ms 通用值）；未完整 → 800ms 保護，
         // 不在使用者子句間呼吸時搶答。
         final silence = _adaptiveSilenceFor(_speechHandler.lastPartialText);
@@ -244,7 +260,7 @@ class VoiceLiveController {
     // 如果 agent 在講話，把音量傳給插嘴偵測
     // VoiceInterruptionDetector 預期用 startMonitoring(stream)
     // 我們簡化：直接呼叫 onInterrupt 觸發停 TTS
-    if (_isAgentSpeaking && _isUserSpeaking) {
+    if (_effectiveAgentSpeaking && _isUserSpeaking) {
       // [教練 Agent 2026-08-03] 簡化：音量 VAD 觸發 + agent 在講話 = 插嘴
       _interruptionDetector?.onInterrupt?.call();
     }
@@ -289,11 +305,13 @@ class VoiceLiveController {
     // 等待 STT 給出 final result
     _waitingForFinalResult = true;
 
-    // [小葵 2026-08-30] fallback 計時器：1200ms 內等不到 final result
-    // 就用 lastPartialText 送出——修復舊版「500ms 後放棄、句子整個丟掉」。
+    // [小葵 2026-08-30] fallback 計時器：等不到 final result
+    // 就用 lastPartialText 送出，不丟句。
+    // [小葵 2026-09-24 業界對齊] 1200→500ms：speculative prefill 上線後
+    // partial 本來就在跑，final 只是 commit——等太久純浪費延遲。
     // （舊版註解自承「實際上我們還沒有文字」→ 就是不送。）
     _finalWaitTimer?.cancel();
-    _finalWaitTimer = Timer(const Duration(milliseconds: 1200), () {
+    _finalWaitTimer = Timer(const Duration(milliseconds: 500), () {
       if (!_waitingForFinalResult) return;
       final fallback = _speechHandler.lastPartialText.trim();
       // [小葵 2026-09-24 Blue 抓包④] 裱除已送出前綴——fallback 文字

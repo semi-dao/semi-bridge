@@ -87,8 +87,24 @@ class ScheduleEngine {
     _scanAndFire();
   }
 
+  /// [W1 2026-10-08 小葵] 手動重掃 — App 層宿主（AppScheduleEngine）在
+  /// 前景畫布註冊/切換後呼叫，立即恢復正確的執行路由。
+  /// 不清 _lastFiredMap（同 updateCanvasId 慣例，不會二次開槍）。
+  void rescan() => _scanAndFire();
+
+  /// [W1] 引擎當下正在觸發的畫布 id（_fire 期間有效；掃描間隙為 null）。
+  /// AppScheduleEngine 用它分派節點執行：== 前景畫布 → workspace executor。
+  String? get firingCanvasId => _firingCanvasId;
+  String? _firingCanvasId;
+
   /// 取得指定節點下次預計觸發時間（給 UI 顯示用）
   DateTime? getNextFireTime(String nodeId) => _nextFireMap[nodeId];
+
+  /// [W3 2026-10-08] 靜態版下次觸發計算——UI（排隊卡）不持引擎實例也能算。
+  /// 與實例方法 calculateNextFire 同邏輯（純函數，無狀態）。
+  static DateTime? calcNextFirePublic(
+          Map<String, dynamic> params, DateTime now) =>
+      _calcNextFire(params, now);
 
   /// 啟動排程引擎
   void start() {
@@ -151,7 +167,18 @@ class ScheduleEngine {
         debugPrint(
             '[ScheduleEngine] 觸發排程: ${entry.entity.title} ($nodeId) at $now');
 
-        await _fire(nodeId, entry.entity.title);
+        // [W1] 觸發期間回填該節點所屬畫布——宿主以此分派執行路徑，
+        // _fire 內的 DagEngine 也用同值（絕不 null——超級 DAG 是
+        // 2026-08-26 28 幽靈圖事件根因，DagEngine 註釋明載）。
+        final nodeCanvasId = props.canvasId ?? canvasId;
+        if (nodeCanvasId == null) {
+          debugPrint('[ScheduleEngine] 節點 $nodeId 無所屬畫布——跳過（'
+              '排程節點必須活在某張畫布上）');
+          continue;
+        }
+        _firingCanvasId = nodeCanvasId;
+        await _fire(nodeId, entry.entity.title, canvasId: nodeCanvasId);
+        _firingCanvasId = null;
       }
     } catch (e, stack) {
       debugPrint('[ScheduleEngine] 掃描錯誤: $e\n$stack');
@@ -219,7 +246,11 @@ class ScheduleEngine {
 
   /// 計算下次觸發時間（給 UI 顯示用）
   @visibleForTesting
-  DateTime? calculateNextFire(Map<String, dynamic> params, DateTime now) {
+  DateTime? calculateNextFire(Map<String, dynamic> params, DateTime now) =>
+      _calcNextFire(params, now);
+
+  /// 純函數實作——實例方法與靜態公開版共用
+  static DateTime? _calcNextFire(Map<String, dynamic> params, DateTime now) {
     final scheduleType = params['scheduleType']?.toString() ?? 'daily';
     final timeStr = params['time']?.toString() ?? '09:00';
 
@@ -281,7 +312,24 @@ class ScheduleEngine {
   }
 
   /// 觸發排程 — 執行該節點的下游 DAG
-  Future<void> _fire(String nodeId, String nodeTitle) async {
+  ///
+  /// [W1] canvasId 由 _scanAndFire 回填（節點所屬畫布）——掃全庫模式下
+  /// 不能用 this.canvasId（null）建 DagEngine（超級 DAG 危險）。
+  /// [W4.5 Blue 令 2026-10-09] 手動立即執行——▶ 鈕用。
+  /// 走與排程觸發完全相同的 _fire 管線（DagEngine 限該畫布、自律保險絲、
+  /// onFired 回呼）——唯一差別是不看 shouldFire。
+  Future<void> fireNow(String nodeId, String nodeTitle, String canvasId) async {
+    _lastFiredMap[nodeId] = DateTime.now();
+    _firingCanvasId = canvasId;
+    try {
+      await _fire(nodeId, nodeTitle, canvasId: canvasId);
+    } finally {
+      _firingCanvasId = null;
+    }
+  }
+
+  Future<void> _fire(String nodeId, String nodeTitle,
+      {String? canvasId}) async {
     try {
       // [教練 Agent 2026-08-26 跨畫布洩漏修復] 排程也只跑自己畫布
       final dagEngine = DagEngine(entityGraph: entityGraph, canvasId: canvasId);

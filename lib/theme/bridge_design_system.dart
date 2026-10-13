@@ -1,5 +1,5 @@
 // Bridge Design System — 五套融合設計 token
-// 設計質地：暗色科技氛圍 × 色彩質感 × 向量粒子 × 動態活潑 × 無限畫布
+// 來源：xAI 氛圍 × Raycast 色彩 × Stripe 粒子 × Figma 動態 × Miro 無限畫布
 // 正本：bridge_app/DESIGN.md
 //
 // 此檔案是桌面端設計系統的唯一 token 來源。
@@ -353,21 +353,21 @@ class BridgeDSColors extends ThemeExtension<BridgeDSColors> {
 class BridgeDS {
   BridgeDS._();
 
-  // ── Canvas & Surface（暗色基底 → 質感層）──────────
+  // ── Canvas & Surface (xAI 氛圍 → Raycast 質感) ──────
   // 舊的 static const 保持暗色值，漸進遷移到 ThemeExtension
-  static const Color canvas = Color(0xFF07080A);          // 近黑藍
+  static const Color canvas = Color(0xFF07080A);          // Raycast 近黑藍
   static const Color surface = Color(0xFF101111);          // 卡片面板底色
   static const Color surfaceElevated = Color(0xFF1B1C1E);  // badge、標籤
   static const Color surfaceHover = Color(0xFF252829);     // hover 提升
 
-  // ── 文字層級（白階 + 灰階）───────────────────────
+  // ── 文字層級 (xAI 白階 + Raycast 灰階) ──────────────
   static const Color textPrimary = Color(0xFFF9F9F9);
   static const Color textSecondary = Color(0xFFCECECE);
   static const Color textTertiary = Color(0xFF9C9C9D);
   static const Color textMuted = Color(0xFF6A6B6C);
   static const Color textQuaternary = Color(0xFF434345);
 
-  // ── 互動色（語意色 + 數據色）─────────────────────
+  // ── 互動色 (Raycast 語意 + Stripe 數據) ─────────────
   static const Color accentRed = Color(0xFFFF6363);
   static const Color accentBlue = Color(0xFF55B3FF);
   static const Color accentGreen = Color(0xFF5FC992);
@@ -835,7 +835,7 @@ class BridgeDS {
   // Rounding (混合系統)
   // ════════════════════════════════════════════════════════════════════
 
-  static const double roundSharp = 0;       // 銳角 — 技術標籤
+  static const double roundSharp = 0;       // xAI — 技術標籤
   static const double roundSubtle = 4;      // badge
   static const double roundStandard = 8;    // 輸入框
   static const double roundComfortable = 12;// 標準卡片
@@ -855,10 +855,10 @@ class BridgeDS {
   static const double spaceXXL = 48;
 
   // ═══════════════════════════════════════════════════
-  // Shadows（雙環陰影 + 藍調陰影）
+  // Shadows (Raycast 雙環 + Stripe 藍調)
   // ═══════════════════════════════════════════════════
 
-  // 雙環陰影 — 卡片、面板
+  // Raycast 雙環陰影 — 卡片、面板
   static List<BoxShadow> get ringShadow => [
     BoxShadow(
       color: const Color(0xFF1B1C1E).withValues(alpha: 1),
@@ -895,7 +895,7 @@ class BridgeDS {
     ),
   ];
 
-  // 藍調陰影 — 大腦/數據可視化
+  // Stripe 藍調陰影 — 大腦/數據可視化
   static List<BoxShadow> get dataElevated => [
     BoxShadow(
       color: const Color(0xFF32325D).withValues(alpha: 0.25),
@@ -928,7 +928,7 @@ class BridgeDS {
   ];
 
   // ═══════════════════════════════════════════════════
-  // Motion（活潑節奏 + 無限畫布連續感）
+  // Motion (Figma 活潑 + Miro 無限畫布)
   // ═══════════════════════════════════════════════════
 
   // ease-out-expo — 畫布平移

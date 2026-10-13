@@ -141,12 +141,19 @@ class MediaIngestHook {
     };
 
     db.execute(
-      '''INSERT OR REPLACE INTO asset_index
+      '''INSERT INTO asset_index
          (id, file_path, folder_root, file_name, file_ext, file_size,
           file_modified, index_status, indexed_at, title, asset_kind,
           tags, source, created_at, room, project_id,
           classification_confidence, source_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(file_path) DO UPDATE SET
+          title = excluded.title,
+          asset_kind = excluded.asset_kind,
+          file_size = excluded.file_size,
+          file_modified = excluded.file_modified,
+          indexed_at = excluded.indexed_at
+         -- [小葵 2026-09-30 狀態機] 不碰嵌入成果欄位（第七金礦）''',
       [
         'gen_${now}_${absolutePath.hashCode.toRadixString(16)}',
         absolutePath,

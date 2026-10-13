@@ -29,6 +29,7 @@ void main() {
     int escalated = 0,
     int heals = 0,
     int pending = 0,
+    int cognitive = 0,
   }) =>
       CompassSelfMetrics(
         k1Judgments: judgments,
@@ -38,6 +39,7 @@ void main() {
         k1RuleShare: 0,
         selfHeals: heals,
         pendingWounds: pending,
+        cognitiveWounds: cognitive,
         medicines: 78,
         pitfalls: 40,
         coverage: 1.0,

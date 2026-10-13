@@ -44,6 +44,7 @@ import 'agent_loop_tools/run_terminal_tool.dart';
 import 'agent_loop_tools/read_app_log_tool.dart';
 import 'agent_loop_tools/restart_app_tool.dart';
 import 'agent_loop_tools/ui_automation_tool.dart';
+import 'agent_loop_tools/app_senses_tools.dart'; // [開光 v0.4] 內建感官
 import 'mcp_canvas_tools.dart'; // [Phase 0 Track A 2026-07-17] — 不衝突，MCP 版已改名 Mcp 前綴
 import 'vault_agent_tools.dart'; // [教練 Agent 2026-07-22] Phase 4 Agent Vault 工具
 import 'agent_knowledge_tools.dart'; // [教練 Agent 2026-07-22] Phase E Agent 本地知識庫工具
@@ -52,6 +53,9 @@ import 'agent_workflow_tools.dart'; // [教練 Agent 2026-07-22] Phase F 控制�
 import '../causal/causal_fork_tool.dart'; // [因果引擎 L4 2026-09-12] 狀態分叉工具
 import '../collab/intel_tools.dart'; // [TRIO M2 2026-09-22] 共享情報池工具
 import '../collab/swarm_tools.dart'; // [TRIO M4 2026-09-22] 蜂群作戰六關工具
+import '../skills/skill_catalog.dart'; // [插槽輕量化 T4 2026-10-13] skill 搜尋/載入工具
+import '../skills/skill_tools.dart';
+import '../slots/slot_registry.dart'; // [插槽輕量化 T4] 停用卡名單
 
 class AgentToolRegistry {
   final Map<String, AgentTool> _tools = {};
@@ -194,6 +198,11 @@ class AgentToolRegistry {
     tools.add(UiInspectTool(uiExecutor));
     tools.add(UiNavigateTool(uiExecutor));
     tools.add(UiTapTool(uiExecutor));
+    // [開光 v0.4 最後一哩 2026-10-01] 內建 loop 直掛開光感官——
+    // 同進程直呼 MCP callbacks（app_scroll/語意 app_tap/app_look）
+    tools.add(AppScrollSenseTool());
+    tools.add(AppTapSenseTool());
+    tools.add(AppLookSenseTool());
 
     // [Phase 0 Track A 2026-07-17] MCP 畫布工具 — 12 端點直接註冊
     // [教練 Agent 2026-07-19] 暫時移除 CanvasGetStateTool——GLM-5.2 在收到其回傳後穩定 hang
@@ -249,6 +258,17 @@ class AgentToolRegistry {
     // [教練 Agent 2026-07-22] Phase F — 控制面板整合工具
     tools.add(AgentApplyWorkflowTool());
     tools.add(CanvasListTemplatesTool());
+
+    // [插槽輕量化 Task 4 2026-10-13] skill_search/skill_load——
+    // 「需要時會想起」本體：metadata 目錄常駐、body 磁碟懶載入。
+    // 停用接線：SlotRegistry 非 running 的 skill 卡 → 搜尋/載入一律排除。
+    final skillCatalog = SkillCatalog.instance;
+    Set<String> disabledSkillNames() =>
+        SkillTools.disabledSkillNames(SlotRegistry.instance);
+    tools.add(SkillSearchTool(skillCatalog,
+        disabledNamesProvider: disabledSkillNames));
+    tools.add(SkillLoadTool(skillCatalog,
+        disabledNamesProvider: disabledSkillNames));
 
     // [教練 Agent 2026-08-17 Token 樹精簡] tool_help 隨需查詢——註冊後自引用
     final registry = AgentToolRegistry(tools: tools);

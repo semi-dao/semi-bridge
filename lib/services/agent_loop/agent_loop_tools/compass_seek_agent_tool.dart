@@ -143,8 +143,8 @@ class CompassSeekTool extends AgentTool {
   @override
   String get description =>
       '目的導向羅盤檢索——告訴羅盤你要做什麼，它回傳你需要的規則'
-      '與檔案位置。任何 App 修改任務的第一步。\\n'
-      '參數：intent=你的目的（如「加一個按鈕」「改字級」）；\\n'
+      '與檔案位置。任何 App 修改任務的第一步。\n'
+      '參數：intent=你的目的（如「加一個按鈕」「改字級」）；\n'
       'missing=（選填）回報剛才結果缺了什麼——會滾動升級索引，'
       '下次同類目的直接命中。';
 

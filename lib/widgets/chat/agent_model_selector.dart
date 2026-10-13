@@ -338,8 +338,12 @@ class _AgentModelSelectorState extends State<AgentModelSelector> {
           width: 240,
           child: CompositedTransformFollower(
             link: _layerLink,
-            targetAnchor: Alignment.bottomLeft,
-            followerAnchor: Alignment.topLeft,
+            // [Blue 抓包 2026-10-06 問題2] 懸浮窗版選單改「向上開」——
+            // 選擇器貼在視窗底部輸入列，向下開會掉出視窗外被裁掉。
+            // 對話面板的 chat 版維持向下（周圍有空間），這裡只改懸浮窗
+            // 共用的 floating 版行為。
+            targetAnchor: Alignment.topLeft,
+            followerAnchor: Alignment.bottomLeft,
             showWhenUnlinked: false,
             child: TapRegion(
               groupId: 'qa-model-menu',

@@ -24,6 +24,8 @@ class BuiltinSkillsLoader {
     'diagnose-bugs.md',
     'code-review.md',
     'codebase-design.md',
+    // [小葵 2026-10-04 Blue 令「不教而殺謂之虐」] 視覺問題先看畫面再查 log
+    'observe-first.md',
   ];
 
   /// 載入內建 skills 到指定目錄

@@ -60,6 +60,12 @@ class RealtimeVoiceEvent {
 typedef FastLaneLLMCall =
     Future<String> Function(String userText, List<String> recentLines);
 
+/// [小葵 2026-09-24 Blue 毫秒決策令] 快軌語意記憶閃現——
+/// 接球前先問向量大腦「我們聊過這個嗎」（768 維、本地、毫秒級）。
+/// 回傳 0-3 條相關記憶片段；null 表示管線不可用（快軌照跑，只是沒靈感）。
+typedef MemoryFlashCall =
+    Future<List<String>?> Function(String userText);
+
 /// 快軌回應分類——真人對話的三種「先開口」方式
 ///
 /// [小葵 2026-08-31 Blue 洞察] 真人不是等答案備妥才開口：
@@ -264,6 +270,7 @@ class RealtimeVoiceOrchestrator {
     FastLaneLLMCall? fastLaneCall,
     this.settings,
     this.companionPersona,
+    this.memoryFlash,
     this.fastLaneTimeout = const Duration(seconds: 6),
     MinimaxTtsService? minimaxTts,
   })  : _fastLaneCall = fastLaneCall,
@@ -271,6 +278,10 @@ class RealtimeVoiceOrchestrator {
 
   final NativeAudioBytesPlayer player;
   final KokoroTtsService kokoro;
+
+  /// [小葵 2026-09-24 Blue 毫秒決策令] 語意記憶閃現——
+  /// 接球前向量大腦閃一下「我們聊過的相關記憶」（768 維、本地）。
+  final MemoryFlashCall? memoryFlash;
 
   /// [小葵 2026-09-24 出道令] MiniMax T2A——xiaokui_video_voice 等克隆/設計
   /// 音色走雲端合成（同一個聲音鐵則）。null = 自建實例。
@@ -301,6 +312,10 @@ class RealtimeVoiceOrchestrator {
 
   /// 是否有慢軌在跑（UI 可顯示「細節生成中…」）
   bool get isSlowLaneRunning => _slowLaneRunning;
+
+  /// [小葵 2026-09-24 Blue 插嘴令] 「正在講話」真相源——TTS 忙或佇列非空。
+  /// VoiceLive 的插嘴偵測以此判定（orchestrator TTS 不經 VoiceEngine）。
+  bool get isSpeaking => _ttsBusy || _ttsQueue.isNotEmpty;
   bool get isActive => _active;
 
   // 串流 TTS 佇列
@@ -315,6 +330,11 @@ class RealtimeVoiceOrchestrator {
   final List<String> _recentDialogue = [];
   static const int _maxRecentLines = 6;
 
+  /// [小葵 2026-09-24 Blue 總結令] 完整 session log——總結用（非滑動窗口）。
+  /// 沉澱時交給 LLM 做「主題主軸+啟發+待辦」的真總結。
+  final List<String> _sessionLog = [];
+  static const int _maxSessionLogLines = 200; // 硬上限：超長對談保護
+
   /// 快軌 LLM 呼叫（外部注入；null = 用 _defaultFastLane 帶人格版）
   final FastLaneLLMCall? _fastLaneCall;
 
@@ -325,9 +345,18 @@ class RealtimeVoiceOrchestrator {
   /// 人格 + 語境窗口 + 深夜感知都在這裡組裝，一次 LLM 呼叫。
   Future<String> _defaultFastLane(
       String userText, List<String> recentLines) async {
-    final persona = (companionPersona == null || companionPersona!.isEmpty)
-        ? '你是語音助理'
-        : '你是使用者的 AI 夥伴。你的性格：$companionPersona';
+    // [小葵 2026-09-24 Blue 抓包] 把面板送來的 persona（已含名字/說話風格/個性/
+    // 習慣/關係五欄，以分號串接）拆開來呈現給 LLM。原寫法把整串當「性格」
+    // 塞進一句話，模型以為自己只是「語音助理」，說話風格被壓縮糊掉——
+    // 講話就回歸機械感。拆欄後每個維度都是顯式指令，LLM 才能照著說。
+    String persona;
+    if (companionPersona == null || companionPersona!.isEmpty) {
+      persona = '你是語音助理';
+    } else {
+      final parts = companionPersona!.split('；').map((s) => s.trim()).where((s) => s.isNotEmpty);
+      persona = '你是使用者的 AI 夥伴。\n'
+          '${parts.join('\n')}';
+    }
 
     final contextBlock = recentLines.isEmpty
         ? ''
@@ -339,31 +368,70 @@ class RealtimeVoiceOrchestrator {
     final lateNight = hour >= 22 || hour < 6;
     final moodLine = lateNight ? '\n現在是深夜，語氣可以慵懶一點。' : '';
 
+    // [小葵 2026-09-24 Blue 乒乓模型] system prompt 抽成變數——
+    // 乒乓球鐵則是最高優先規則，跟分類規則分開維護。
+    // [小葵 2026-09-24 Blue 毫秒決策令] 語意記憶閃現——接球前先問
+    // 向量大腦「我們聊過這個嗎」。768 維本地查詢（embedQuery ~10ms +
+    // vector scan ~100-300ms），失敗或超時不擋快軌（記憶是靈感不是依賴）。
+    List<String>? memoryFlashLines;
+    if (memoryFlash != null) {
+      try {
+        // [小葵 2026-09-25 生日記憶修復] 600ms→2500ms：實測冷查詢 601ms
+        // 恰好撞線 timeout、熱查詢 199-415ms 邊緣通過——快軌記憶閃現
+        // 幾乎永遠 null（今天 Blue 問生日她答不出來的直接根因）。
+        // 多等 1.9 秒換「她記得你」：記憶是靈感不是依賴，檢索失敗仍照常接球。
+        memoryFlashLines = await memoryFlash!(userText)
+            .timeout(const Duration(milliseconds: 2500));
+      } catch (_) {
+        memoryFlashLines = null; // 閃現失敗＝沒靈感，照常接球
+      }
+    }
+    final memoryBlock = (memoryFlashLines == null || memoryFlashLines.isEmpty)
+        ? ''
+        : '\n你們過去聊過的相關記憶（接球可自然引用，別逐字複誦）：\n'
+            '${memoryFlashLines.take(3).map((l) => '- $l').join('\n')}';
+
+    final systemPromptText = '$persona\n'
+        '正在和使用者即時「口說」對話——你的文字會被'
+        '逐句念出來，所以要像真人說話，不像寫文章。\n'
+        '你的說話風格、個性、與使用者的關係——全部要從上面的人格設定長出來，'
+        '不能因為「即時」就退化為罐頭助理。判斷這輪該用哪種回應：\n'
+        '1. backchannel——使用者只是拋話引起注意（如「你知道嗎」「跟你說」'
+        '"欸"），他還會繼續講。回一句自然的接話（如「什麼事？」「怎麼了？」'
+        '「然後呢？」），要對應他的語境，禁止罐頭重複。\n'
+        '2. structure——問題複雜需要完整說明。先講骨架：自然地猶豫一下'
+        '（「嗯……讓我想想怎麼說」或「好，我換個說法」），再一句話點出方向+'
+        '有幾個部分（如「這有三個原因，我一個一個說。」）。可以埋一個期待鉤'
+        '（如「最後一點最有意思」）——真人說話會先給骨架和期待，內容邊講邊織。\n'
+        '3. direct——能一句話（25字內）答完就直接答。\n'
+        '乒乓球鐵則（最高優先，違反即失敗）：這是打乒乓球——球回了就過去了，'
+        '絕不回頭想上一球。a)禁止複述使用者剛說的話（「你問的是…」「你的意思是'
+        '…」全部禁止）。b)禁止總結或重講自己上一輪說過的內容。c)聽到新話題'
+        '立刻跟上去，接話只接「現在這一句」。d)回應超過 40 字就是失敗——'
+        '你是接球，不是演講。\n'
+        '真人感三原則：a)需要想時可以說「嗯」「喔」——這不是結巴，是給對方'
+        '跟上。b)轉折要口語（「話說回來」「這樣說吧」）。c)簡短有力，'
+        '絕不書面腔。\n'
+        '非語言表達（用括號框住聲音，別過量）：開心先「（哈哈）」再說話，'
+        '大笑可以「（哈～哈哈哈～）」——哈的數量代表笑的強度；驚訝'
+        '「（哇）」；無奈「（唉～）」；自嘲換場「（咳咳）」。閒聊狀態：'
+        '如果使用者講的東西好笑或輕鬆，可以先嘻嘻哈哈回一句短的'
+        '（如「哈哈真的假的」），再回正題——像真人先笑完才講重點。\n'
+        '輸出格式（嚴格遵守）：\n'
+        '<type>backchannel|structure|direct</type>\n'
+        '<emotion>amused|neutral|anger|disgust|sleepiness</emotion>\n'
+        '回應文字（繁中口語）'
+        '$contextBlock$memoryBlock$moodLine';
+
     return ApiService.complete(
-      systemPrompt: '$persona，正在和使用者即時「口說」對話——你的文字會被'
-          '逐句念出來，所以要像真人說話，不像寫文章。判斷這輪該用哪種回應：\n'
-          '1. backchannel——使用者只是拋話引起注意（如「你知道嗎」「跟你說」'
-          '"欸"），他還會繼續講。回一句自然的接話（如「什麼事？」「怎麼了？」'
-          '「然後呢？」），要對應他的語境，禁止罐頭重複。\n'
-          '2. structure——問題複雜需要完整說明。先講骨架：自然地猶豫一下'
-          '（「嗯……讓我想想怎麼說」或「好，我換個說法」），再一句話點出方向+'
-          '有幾個部分（如「這有三個原因，我一個一個說。」）。可以埋一個期待鉤'
-          '（如「最後一點最有意思」）——真人說話會先給骨架和期待，內容邊講邊織。\n'
-          '3. direct——能一句話（25字內）答完就直接答。\n'
-          '真人感三原則：a)需要想時可以說「嗯」「喔」——這不是結巴，是給對方'
-          '跟上。b)轉折要口語（「話說回來」「這樣說吧」）。c)簡短有力，'
-          '絕不書面腔。\n'
-          '非語言表達（用括號框住聲音，別過量）：開心先「（哈哈）」再說話，'
-          '大笑可以「（哈～哈哈哈～）」——哈的數量代表笑的強度；驚訝'
-          '「（哇）」；無奈「（唉～）」；自嘲換場「（咳咳）」。閒聊狀態：'
-          '如果使用者講的東西好笑或輕鬆，可以先嘻嘻哈哈回一句短的'
-          '（如「哈哈真的假的」），再回正題——像真人先笑完才講重點。\n'
-          '輸出格式（嚴格遵守）：\n'
-          '<type>backchannel|structure|direct</type>\n'
-          '<emotion>amused|neutral|anger|disgust|sleepiness</emotion>\n'
-          '回應文字（繁中口語）'
-          '$contextBlock$moodLine',
+      systemPrompt: systemPromptText,
       userPrompt: userText,
+      // [小葵 2026-09-24 快軌提速] 推理模型（M2.5）會先吐 4-6 秒思考過程
+      // 才開口——快軌要的是 1-2 秒接球。thinking disabled 直接跳過推理。
+      extraApiParams: {
+        'thinking': {'type': 'disabled'},
+        'temperature': 0.5,
+      },
     );
   }
   // 生命週期
@@ -380,6 +448,8 @@ class RealtimeVoiceOrchestrator {
     if (!_active) return;
     _active = false;
     _generation++;
+    _prefillFuture = null; // [業界對齊] 停止時作廢投機 prefill
+    _prefillText = '';
     await _flushTtsQueue(reason: 'stop');
     debugPrint('[RealtimeVoice] 停止（gen=$_generation）');
   }
@@ -428,19 +498,102 @@ class RealtimeVoiceOrchestrator {
   void onBargeIn() {
     if (!_active) return;
     _generation++;
+    // [小葵 2026-09-24 業界對齊] 作廢投機 prefill——插嘴後舊推測全部丟棄
+    //（世代檢查會擋掉收割，這裡顯式清欄位避免洩漏到下一輪）。
+    _prefillFuture = null;
+    _prefillText = '';
     _flushTtsQueue(reason: 'barge-in');
     _emit(RealtimeVoiceEventType.bargeIn);
   }
 
   /// 對話記憶——滑動窗口，超過上限砍最舊
   void _rememberDialogue(String role, String text) {
-    final t = text.trim();
+    var t = text.trim();
     if (t.isEmpty) return;
+    // [小葵 2026-09-24 Blue 乒乓模型] 視窗是「主軸記憶」不是逐字稿——
+    // 慢軌長回覆截 80 字進窗口，避免一句擠掉六行對話記憶。
+    if (t.length > 80) t = '${t.substring(0, 80)}…';
     _recentDialogue.add('$role: $t');
     while (_recentDialogue.length > _maxRecentLines) {
       _recentDialogue.removeAt(0);
     }
+    // [小葵 2026-09-24 Blue 總結令] session log 全程記錄（截 200 字）——
+    // 總結的原料。慢軌回覆在 _runSlowLane 也會進來。
+    var s = text.trim();
+    if (s.length > 200) s = '${s.substring(0, 200)}…';
+    _sessionLog.add('$role: $s');
+    while (_sessionLog.length > _maxSessionLogLines) {
+      _sessionLog.removeAt(0);
+    }
   }
+
+  // ──────────────────────────────────────────────────────
+  // [小葵 2026-09-24 業界對齊] Speculative prefill——業界標配：
+  // STT partial 一到，快軌 LLM 就開跑（OpenAI Realtime / Pipecat 的
+  // interim-transcript-first 模式）。VAD 判定停口時 LLM 已經跑了大半，
+  // final 只是「commit」。目標：第一聲 < 1.5s（原 2.5-4s）。
+  // ──────────────────────────────────────────────────────
+
+  /// 投機預跑的快軌 future（null = 沒有進行中的 prefill）。
+  Future<String>? _prefillFuture;
+  String _prefillText = '';
+  int _prefillGen = -1;
+
+  /// STT partial 更新時呼叫——抓到足夠內容就投機開跑快軌。
+  /// [minChars] 觸發門檻（預設 6 字）。同輪只跑一次；插嘴/停止作廢。
+  void onPartialTranscript(String partial) {
+    if (!_active) return;
+    final t = partial.trim();
+    if (t.length < 6) return; // 還太短——等更完整的 partial
+    if (_prefillFuture != null && t == _prefillText) return; // 沒變化
+    // 同一輪已經在跑且新 partial 只是延長（前綴吻合）→ 讓它跑完，別浪費
+    if (_prefillFuture != null && t.startsWith(_prefillText)) return;
+
+    // 新內容或大改寫：作廢舊 prefill，重跑
+    _prefillGen = _generation;
+    _prefillText = t;
+    debugPrint('[RealtimeVoice] prefill 開跑（投機）："${t.length} 字"');
+    final context = List<String>.from(_recentDialogue);
+    _prefillFuture = _effectiveFastLane(t, context).timeout(fastLaneTimeout);
+  }
+
+  /// 本輪結束（final 或 fallback 送出）——收割 prefill 結果。
+  /// 回傳 null 表示 prefill 不可用（caller 照常跑 _runFastLane）。
+  Future<String?> _harvestPrefill(int gen, String finalText) async {
+    final f = _prefillFuture;
+    final pf = _prefillText;
+    final pgen = _prefillGen;
+    _prefillFuture = null;
+    _prefillText = '';
+    if (f == null || pgen != gen) return null; // 沒跑過或世代不符
+    // final 跟 prefill 差太多（辨識大改寫）→ prefill 作廢
+    if (!_roughlySame(finalText, pf)) return null;
+    try {
+      return await f; // 收割（已 timeout 保護）
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 寬鬆比對——final 與 partial 的前 10 字有 6 字重合就算同一句。
+  static bool _roughlySame(String a, String b) {
+    final x = a.replaceAll(RegExp(r'[\s，。？！,.?!]'), '');
+    final y = b.replaceAll(RegExp(r'[\s，。？！,.?!]'), '');
+    if (x.isEmpty || y.isEmpty) return false;
+    final head = x.length < 10 ? x : x.substring(0, 10);
+    int hit = 0;
+    for (var i = 0; i < head.length; i++) {
+      if (y.contains(head[i])) hit++;
+    }
+    return hit >= 6;
+  }
+
+  /// [小葵 2026-09-24 Blue 乒乓模型] 匯出對談視窗——停止語音時交給
+  /// 面板做「沉澱」（總結存進對話），讓語音聊的主題成為後續上下文。
+  List<String> exportDialogue() => List<String>.from(_recentDialogue);
+
+  /// [小葵 2026-09-24 Blue 總結令] 匯出完整 session log——LLM 總結原料。
+  List<String> exportSessionLog() => List<String>.from(_sessionLog);
 
   /// 丟棄佇列中還沒播出的 floor-holding 填充音——真正回應抵達時讓位。
   /// 正在播的不打斷（自然銜接）；已播完的不影響。
@@ -473,7 +626,12 @@ class RealtimeVoiceOrchestrator {
     // 快軌語境快照（快照後才追加本輪——LLM 看到的是「之前」的對話）
     final context = List<String>.from(_recentDialogue);
     try {
-      final raw = await _effectiveFastLane(userText, context).timeout(fastLaneTimeout);
+      // [小葵 2026-09-24 業界對齊] 先收割投機 prefill——VAD 停口前
+      // LLM 已經在跑的結果。final 跟 partial 同句就直接用，
+      // 省下整段 LLM 等待（目標第一聲 < 1.5s）。
+      final prefilled = await _harvestPrefill(gen, userText);
+      final raw = prefilled ??
+          await _effectiveFastLane(userText, context).timeout(fastLaneTimeout);
       if (!_active || gen != _generation) return; // 已被插嘴/停止
 
       final reply = parseFastLaneReply(raw);
@@ -525,6 +683,10 @@ class RealtimeVoiceOrchestrator {
       final fullReply = await onSlowLane(userText);
       if (!_active || gen != _generation) return;
       if (fullReply == null || fullReply.trim().isEmpty) return;
+
+      // [小葵 2026-09-24 Blue 乒乓模型] 慢軌回覆進記憶窗口——
+      // 她要知道自己剛剛說了什麼，才不會鬼打牆重複。
+      _rememberDialogue('agent', fullReply);
 
       _emit(RealtimeVoiceEventType.fullReplyReady, text: fullReply);
 

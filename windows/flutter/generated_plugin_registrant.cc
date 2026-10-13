@@ -8,10 +8,12 @@
 
 #include <connectivity_plus/connectivity_plus_windows_plugin.h>
 #include <desktop_drop/desktop_drop_plugin.h>
+#include <desktop_multi_window/desktop_multi_window_plugin.h>
 #include <flutter_gemma/flutter_gemma_plugin.h>
 #include <flutter_inappwebview_windows/flutter_inappwebview_windows_plugin_c_api.h>
 #include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
 #include <flutter_tts/flutter_tts_plugin.h>
+#include <hotkey_manager_windows/hotkey_manager_windows_plugin_c_api.h>
 #include <local_auth_windows/local_auth_plugin.h>
 #include <media_kit_video/media_kit_video_plugin_c_api.h>
 #include <screen_retriever_windows/screen_retriever_windows_plugin_c_api.h>
@@ -26,6 +28,8 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("ConnectivityPlusWindowsPlugin"));
   DesktopDropPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("DesktopDropPlugin"));
+  DesktopMultiWindowPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("DesktopMultiWindowPlugin"));
   FlutterGemmaPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterGemmaPlugin"));
   FlutterInappwebviewWindowsPluginCApiRegisterWithRegistrar(
@@ -34,6 +38,8 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
   FlutterTtsPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FlutterTtsPlugin"));
+  HotkeyManagerWindowsPluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("HotkeyManagerWindowsPluginCApi"));
   LocalAuthPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("LocalAuthPlugin"));
   MediaKitVideoPluginCApiRegisterWithRegistrar(

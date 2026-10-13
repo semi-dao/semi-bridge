@@ -201,7 +201,7 @@ class ComputerUseAgent {
 規則：
 - 座標使用 AX_TREE 內 bounds 的全域座標（螢幕絕對座標）
 - 任務完成就回 done；無法完成就回 fail 並給 reason
-- 不確定時寧可再觀察一步（action 用 click 點無害處），不要亂點
+- 不確定時先回觀察步驟。**不可**亂點。
 ''';
 
   Future<Map<String, dynamic>> _think(List<Map<String, String>> history) async {

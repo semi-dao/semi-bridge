@@ -102,9 +102,12 @@ class AgentToolCallParser {
   }
 
   /// 提取 tool call 之外的文字（LLM 可能同時輸出文字 + tool call）
+  /// [小葵 2026-10-01 Blue 抓包] `<think>` 思考過程不得洩漏給使用者——
+  /// 病例：閒聊對話 assistant 訊息開頭整段 `<think>` 直接顯示。
+  /// 完整區塊移除；未閉合（截斷）則 `<think>` 之後全砍（後面都是思考）。
   static String extractText(String llmOutput) {
     // 移除所有 tool call 區塊，保留其餘文字
-    String result = llmOutput;
+    String result = _stripThink(llmOutput);
     while (true) {
       final startMatch = _startPattern.firstMatch(result);
       if (startMatch == null) break;
@@ -119,6 +122,19 @@ class AgentToolCallParser {
           result.substring(afterStart + endMatch.end);
     }
     return result.trim();
+  }
+
+  /// [小葵 2026-10-01] 剝除思考區塊——`<think>`…`</think>` 是模型的推理過程，
+  /// 不是給使用者的回覆。未閉合視為截斷，從 `<think>` 起全部丟棄。
+  static final RegExp _thinkBlock =
+      RegExp(r'<think>[\s\S]*?</think>', caseSensitive: false);
+  static final RegExp _thinkOpen = RegExp(r'<think>', caseSensitive: false);
+
+  static String _stripThink(String s) {
+    var out = s.replaceAll(_thinkBlock, '');
+    final open = _thinkOpen.firstMatch(out);
+    if (open != null) out = out.substring(0, open.start);
+    return out;
   }
 
   /// 轉義使用者訊息中的分隔符（防注入）

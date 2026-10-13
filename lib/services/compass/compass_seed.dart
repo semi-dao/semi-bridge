@@ -58,9 +58,18 @@ const seedOrgans = <CompassOrgan>[
   CompassOrgan(id: 'collab.room', systemGroup: '協作系統', name: '房間共居（任務卡四象限）'),
   CompassOrgan(id: 'collab.ledger', systemGroup: '協作系統', name: '戰果共享（工作真相帳本）'),
   CompassOrgan(id: 'agent.budget', systemGroup: '服務群', name: '預算帳本與付費閘門'),
+  CompassOrgan(id: 'system.activity', systemGroup: '服務群', name: '系統活動中心'),
+  CompassOrgan(id: 'system.fingerprint', systemGroup: '服務群', name: '樹指紋快取（重啟不重掃）'),
+  CompassOrgan(id: 'runtime.autorevive', systemGroup: '服務群', name: '大腦自動復活（引擎級看門狗）'),
+  CompassOrgan(id: 'scan.fastfingerprint', systemGroup: '服務群', name: '快指紋嵌入過濾（hash 前零讀檔）'),
+  CompassOrgan(id: 'oss.harvest', systemGroup: '服務群', name: '七金礦開源收穫（semi-bridge 上傳）'),
   CompassOrgan(id: 'local.engine', systemGroup: '服務群', name: '本地模型引擎 (18789)'),
   CompassOrgan(id: 'local.kokoro', systemGroup: '服務群', name: 'Kokoro TTS (18900)'),
+  // [小葵 2026-09-29] 新器官：模型實驗室（Blue 願景——選型閉環產品化）
+  CompassOrgan(id: 'model.lab', systemGroup: '服務群', name: '模型實驗室（選型閉環）'),
   CompassOrgan(id: 'memory', systemGroup: '服務群', name: '長期記憶系統'),
+  // [小葵 2026-10-05 Blue 令] 生命樹入羅盤器官地圖——夢境/歷史樹/反思樹的家
+  CompassOrgan(id: 'life_tree', systemGroup: '服務群', name: '生命樹（夢·戰役·遺憾）'),
   CompassOrgan(id: 'schedule', systemGroup: '服務群', name: '排程引擎'),
   // ── 系統/外觀 ──
   CompassOrgan(id: 'theme', systemGroup: '外觀', name: '設計系統與主題'),
@@ -372,6 +381,31 @@ final distilledRules = <CompassRule>[
     updatedAt: DateTime(2026, 9, 12),
   ),
 
+  // [小葵 2026-10-05 Blue 令] 生命樹全貌——觀景窗在羅盤列表頂部入口卡
+  CompassRule(
+    id: 'life_tree.architecture',
+    organId: 'life_tree',
+    description: '生命樹=兩主幹+一夜一夢：反思樹（life_tree_dreams，'
+        '02:00–05:00 夢境結論卡）+ 歷史樹（agent_causal_ledger，每次'
+        '工具呼叫的戰役紀錄）+ 遺憾清單（life_tree_thought_branches，'
+        '沒走的路）。觀景窗入口=羅盤頁頂部「生命樹」卡（夢/戰役/遺憾三 tab）。',
+    why: 'Blue 2026-10-05：「生命樹是長在羅盤裡的，也跟羅盤有最大的關係，'
+        '所以這個 UI 要長在羅盤頁面裡。」代謝環（2026-10-05 手術）：白天'
+        '受傷→夜晚進夢→夢卡 7 天效期回灌她白天 prompt（上限 3 張）→被引用'
+        '的草稿升級 consensus→遺憾進夢即結案。',
+    params: {
+      'dreams': 'life_tree_dreams（dream_session_id 同晚分組）',
+      'ledger': 'agent_causal_ledger（環形緩衝上限 2000 筆）',
+      'regrets': 'life_tree_thought_branches（revisited_at IS NULL=未重評）',
+      '回灌': 'activeLessons()：7天效期+上限3張+安睡卡排除',
+      '升級': 'promoteDraftsReferenced()：agent_draft→consensus（冪等）',
+      'scheduler': 'DreamScheduler.tick（CompassHeartbeat 60s，重入鎖）',
+    },
+    kind: CompassRuleKind.behavioral,
+    updatedBy: 'xiaokui:life-tree-viewer',
+    updatedAt: DateTime(2026, 10, 5),
+  ),
+
   // [Blue 命令 2026-09-12] 協作系統運作總覽——新器官/肢體動工前必讀
   CompassRule(
     id: 'collab.operatingModel',
@@ -634,8 +668,14 @@ const kSeedMeanings = <String, String>{
   'vault': '向量資料庫——檔案索引與語意搜尋',
   'agent.loop': 'Agent Loop——夥伴自主工作的引擎',
   'agent.mcp': 'MCP Server——App 對外的服務窗口（8420 埠）',
-  'local.engine': '本地模型引擎（18789）——不花雲端錢的算力',
+  'scan.fastfingerprint': '快指紋嵌入過濾（已實現 2026-10-01 F3）——generateEmbeddings 對 pending 檔先 stat 比對 DB 的 size:mtime，一致即跳過（零讀檔），不符才讀檔算 SHA256。掃描管線三層完成：F1 指紋（重啟不重掃）→F1b 批次化→F3 快指紋。',
+  'oss.harvest': '七金礦開源收穫（已上傳 2026-10-01）——semi-dao/semi-bridge：docs/benchmarks/（12B 盲測包+可重演腳本）、docs/MODEL_LAB.md（一鍵 A/B 實驗室）、docs/MODDING_GUIDE.md（掛牌/三鐵律/換模型/懸浮窗之鑒）。兩天七礦（活動中心→互踩→CVDisplayLink→B方案快測→掃描架構→懸浮窗復活→狀態機）全數冶煉為產品+開源文件。',
+  'runtime.autorevive': '大腦自動復活 v2（已實現+六輪實測 2026-10-01 F5a-d）——BrainRevivalService App 級 30s health poll（進程層、模型無關，任何 GGUF 通用）；2 miss 判死→startServer 復活；冷卻=嘗試節流（10 分鐘一試，非死亡鎖）；BrainLifecycle stream 單一真相源。教訓碑：URL 真相源=local_model_endpoint 非 gateway_url；看門狗不得掛 UI 依賴；冷卻節流≠見死不救。',
+  'system.fingerprint': '樹指紋快取（已實現 2026-09-30 F1/F1b/F1c）——fullScan 指紋落盤 brain_meta（FNV-1a 穩定 key），重啟先比對再掃。實測：重啟掃描 80分→秒級；_persistRecords 批次化（7000 逐筆 SELECT→一次全撈）。教訓：String.hashCode 每啟動隨機化不可做持久 key。',
+  'system.activity': '系統活動中心（已實現 2026-09-30）——BackgroundTaskRegistry 單一真相源+系統頁頂部卡。所有長時背景任務必須掛牌：名稱/進度/當前檔案；無任務時隱形（安靜=綠燈）。新任務接入：Registry.instance.update(BackgroundTask(...)) → finish(id)。',
+  'local.engine': '本地模型引擎（18789）——不花雲端錢的算力。現役模型由 App 按鈕切換（模型頁「設為現役」），紫色框鎖定現役；安全閘：磁碟檢查→RAM 預算→OOM 回滾（Blue 2026-09-28 定案）',
   'local.kokoro': 'Kokoro TTS（18900）——語音合成服務',
+  'model.lab': '模型實驗室——新模型出現→用你的照片快測(5張)→自主報告→一鍵採用。安全閘：磁碟→RAM→OOM回滾（2026-09-28 12B 選型之戰的產品化）',
   'theme': '設計系統——整個 App 的視覺語言',
   'goldenkeys': '金鑰匙系統——鑰匙鎖定後四處通行',
   'computeruse': 'Computer Use 接管閘門——安全先於功能',

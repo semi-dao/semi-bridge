@@ -24,9 +24,9 @@ class PathHintExtractor {
 
   /// 從絕對路徑萃取提示詞。回傳空字串 = 無提示（直接用原 prompt）。
   ///
-  /// 範例：/media/farm/01_現況紀錄/照片紀錄/營本部/2026-04-07/
-  ///       北側陽台/象耳鹿角蕨母株/IMG_1781.jpeg
-  ///  → 「象耳鹿角蕨」「母株」「北側陽台」（數字段/日期段/流水段自動剔除）
+  /// 範例：外接授權根/農場資料庫/01_現況紀錄/照片紀錄/營本部/2026-04-07/
+  ///       Blue陽台/象耳鹿角蕨母株/IMG_1781.jpeg
+  ///  → 「象耳鹿角蕨」「母株」「Blue陽台」（數字段/日期段/流水段自動剔除）
   String extractHint(String absolutePath) {
     final segs = absolutePath.split(Platform.pathSeparator)
         .where((s) => s.isNotEmpty)
@@ -55,7 +55,7 @@ class PathHintExtractor {
     final hint = extractHint(absolutePath);
     if (hint.isEmpty) return basePrompt;
     return '$basePrompt\n\n'
-        '[路徑提示（僅供比對畫面，畫面沒有的不要寫）: $hint]';
+        '[路徑提示（僅供比對畫面。僅描述畫面可見內容。**不可**寫畫面外項目。）: $hint]';
   }
 
   /// 一段資料夾名 → 有意義詞清單。

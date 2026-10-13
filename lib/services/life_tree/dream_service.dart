@@ -158,6 +158,10 @@ class DreamService {
     }
 
     // ── 議程 3：遺憾清單 → escalate_to_user（MVP：重評交給人）──
+    // [小葵 2026-10-05 生命樹代謝] 同時自動結案「已在夢裡重看過」的遺憾：
+    // 夢把遺憾端上議程=重看完成。verdict 記「夢中重看」——
+    // 不假裝有判斷力（LLM 深夢版未上），但清單會縮短，不再天天重複。
+    var revisited = 0;
     for (final r in regrets.take(5)) {
       final id = store.addDream(LifeTreeDream(
         dreamSessionId: sessionId,
@@ -170,6 +174,10 @@ class DreamService {
         createdAt: DateTime.now(),
       ));
       if (id > 0) conclusions++;
+      // 代謝：這條遺憾已進夢重看 → 結案，明晚不再重複夢它
+      if (r.id != null && store.markRevisited(r.id!, '夢中重看（rule-engine）：已端上議題請主人裁決') > 0) {
+        revisited++;
+      }
       summary.add('想請你看看一條舊分支：${_plain(r.thought)}');
       // [Blue 2026-09-21 拍板] escalate 卡走全域對話——使用者可反問討論
       GlobalNoticeChannel.instance.push(
@@ -200,7 +208,7 @@ class DreamService {
     return DreamResult(
       sessionId: sessionId,
       conclusions: conclusions,
-      revisited: 0, // MVP 不自動重評——重評需判斷力，留給 LLM 版
+      revisited: revisited, // [2026-10-05 代謝] 進夢即結案——清單會縮短
       summary: summary,
     );
   }

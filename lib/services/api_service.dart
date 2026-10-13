@@ -1,8 +1,13 @@
 import 'dart:convert';
+import 'dart:io' as io;
 import 'dart:math' as math;
+// [小葵 2026-10-05 4-AED] unawaited + BrainRevival（需求驅動復活）
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'storage_service.dart';
+import 'brain_revival_service.dart';
+import 'local_model_runtime_service.dart';
 import 'provider_router.dart'; // [教練 Agent 2026-07-29] 读取路由结果
 import 'provider_registry.dart'; // [教練 Agent 2026-07-30] 動態 provider/模型探測
 import 'api_usage_tracker.dart'; // [教練 Agent 2026-07-29] API 額度追蹤
@@ -442,6 +447,15 @@ $bridgeCapabilities''';
           return ChatResponse.fromJson(retryResponse.data);
         }
       }
+      // [小葵 2026-10-05 Blue 令 4-AED] 本地引擎連線失敗 → 需求驅動復活。
+      // 她「需要腦」的訊號要在這裡被聽見——不能只靠看門狗輪詢
+      // （會被閒置卸載/冷卻擋住）。fire-and-forget：喚醒不擋原本的
+      // 錯誤路徑，loop 的重試機制會在引擎回來後接手。
+      if (isLocalModel && e is DioException && e.response == null) {
+        debugPrint('[ApiService] 本地引擎無回應（AED 觸發）: ${e.type}');
+        unawaited(BrainRevivalService.instance
+            .demandRevive(LocalModelRuntimeService()));
+      }
       rethrow;
     }
   }
@@ -774,10 +788,12 @@ $bridgeCapabilities''';
     required String systemPrompt,
     required String userPrompt,
     String? model,
+    Map<String, dynamic>? extraApiParams,
   }) async => (await completeWithReceipt(
     systemPrompt: systemPrompt,
     userPrompt: userPrompt,
     model: model,
+    extraApiParams: extraApiParams,
   )).text;
 
   /// 與 [complete] 相同，但保留這一輪實際執行的 provider / model。
@@ -786,6 +802,7 @@ $bridgeCapabilities''';
     required String systemPrompt,
     required String userPrompt,
     String? model,
+    Map<String, dynamic>? extraApiParams,
   }) async {
     final baseUrl = await _getBaseUrl();
     final token = await _getToken();
@@ -841,6 +858,19 @@ $bridgeCapabilities''';
     // [教練 Agent 2026-07-30 v2] 注入 apiParams（已過濾掉 max_tokens / max_completion_tokens）
     // 保留：temperature、chat_template_kwargs 等技術／性格參數。
     apiData.addAll(profile.apiParamsForHttp);
+    // [小葵 2026-09-24 快軌提速] 呼叫端指定額外參數（如 thinking disabled）
+    // 覆寫在 profile 之後——快軌要的是「秒回」不是「深思」。
+    if (extraApiParams != null) {
+      apiData.addAll(extraApiParams);
+    }
+    // [小葵 2026-09-25 OpenAI 400 修復] 'thinking' 是 GLM/MiniMax 家族參數，
+    // OpenAI 不認識會整包 400（Unknown parameter: 'thinking'）。
+    // 按 provider 白名單過濾——模型完全跟隨使用者所選，選誰都能用。
+    const thinkingAwareProviders = {'glm', 'minimax'};
+    if (apiData.containsKey('thinking') &&
+        !thinkingAwareProviders.contains(apiData['_provider'])) {
+      apiData.remove('thinking');
+    }
 
     debugPrint(
       '[ApiService] complete: model=$selectedModel, stream=true, '
@@ -1222,8 +1252,19 @@ $bridgeCapabilities''';
 
     if (content.isNotEmpty) return content;
 
+    // [小葵 2026-10-01 Blue 令] 本地 reasoning fallback——content 空但
+    // reasoning 有料時，退回 reasoning 文字（寧可給思考過程也不給空）。
+    // 適用：enable_thinking 未生效的本地模型／模板不支援 kwargs 的引擎。
+    // reasoning 裡通常已含完整回答，剝 <think> 標籤後即為可用文字。
+    final reasoning = reasoningBuf.toString();
+    if (reasoning.isNotEmpty) {
+      final cleaned = reasoning
+          .replaceAll(RegExp(r'<think>|</think>', caseSensitive: false), '')
+          .trim();
+      if (cleaned.isNotEmpty) return cleaned;
+    }
+
     if (profile.supportsReasoningContent) {
-      final reasoning = reasoningBuf.toString();
       if (reasoning.isNotEmpty) return reasoning;
     }
 
@@ -1312,6 +1353,12 @@ $bridgeCapabilities''';
       'messages': messages,
       'stream': true, // [教練 Agent 2026-07-19] 對齊 Hermes：永遠走 streaming
       '_provider': provider, // [教練 Agent 2026-07-29] 記錄用於 ApiUsageTracker
+      // [小葵 2026-10-01 Blue 令] 本地模型關思考——AgentLoop 路徑漏了這刀。
+      // 病例：本地 gemma 生成 345 tokens 全進 reasoning_content、content 空
+      // → AgentLoop 收到空字串 → 誠實報錯（但明明模型有想有講）。
+      // sendMessage 路徑早有此修復（07-22），completeWithMessages 漏接。
+      if (isLocalModel)
+        'chat_template_kwargs': {'enable_thinking': false},
     };
     // [教練 Agent 2026-07-30 v2] 注入 apiParams（已過濾掉 max_tokens / max_completion_tokens）
     apiData.addAll(profile.apiParamsForHttp);
@@ -1412,6 +1459,24 @@ $bridgeCapabilities''';
         profile: profile,
       );
     } catch (e) {
+      // [小葵 2026-10-05 修] MiniMax-M3 1210 暫態——「该模型始终思考，
+      // 不支持关闭思考」。服務端偶發拒絕 thinking:disabled（同參數下一分鐘
+      // 又收，實測重現不了=服務端灰度）。modelFollowUser 原則：參數只減法——
+      // 去掉 thinking 同模型重試，絕不換模型。
+      if (apiData.containsKey('thinking') && _isThinkingParamError(e)) {
+        debugPrint('[ApiService] thinking 參數被拒（1210 類）→ 移除 thinking 同模型重試');
+        final retryData = Map<String, dynamic>.from(apiData)..remove('thinking');
+        try {
+          return await _streamChatCompletion(
+            resolvedUrl: resolvedUrl,
+            token: effectiveToken,
+            apiData: retryData,
+            profile: profile,
+          );
+        } catch (_) {
+          // 重試也失敗——走原本錯誤處理（不吞錯）
+        }
+      }
       final category = classifyApiError(e);
       if (!isLocalModel && _isTransientFallbackWorthy(e)) {
         final localResult = await _callLocalModelWithFallback(
@@ -1422,6 +1487,22 @@ $bridgeCapabilities''';
       }
       throw await _wrapApiError(e, category);
     }
+  }
+
+  /// [小葵 2026-10-05 修] 偵測「thinking 參數不被模型接受」的錯誤
+  /// （MiniMax 1210「该模型始终思考」、GLM/Kimi 類似語意）
+  static bool _isThinkingParamError(Object e) {
+    final msg = e.toString();
+    final body = e is DioException ? (e.response?.data?.toString() ?? '') : '';
+    final hay = '$msg $body'.toLowerCase();
+    if (hay.contains('1210') ||
+        hay.contains('始终思考') ||
+        hay.contains('不支持关闭思考') ||
+        hay.contains('不支持关闭') ||
+        hay.contains('invalid thinking.type')) {
+      return true;
+    }
+    return hay.contains('thinking') && hay.contains('not supported');
   }
 
   /// [教練 Agent 2026-07-30] 公開版預設模型查詢——同步版本，只有 fallback
@@ -1435,8 +1516,7 @@ $bridgeCapabilities''';
   ///
   /// 只有在 ProviderRegistry 動態探測失敗時才會用到。
   static String _legacyFallbackModel(String provider) {
-    // [教練 Agent 2026-07-18] 更新預設模型——依基準測試結果選各 provider 最佳模型
-    // 測試報告見 docs/provider_benchmark_report.md
+    // 測試基準報告見 docs/provider_benchmark_report.md
     switch (provider) {
       case 'openai':
         return 'gpt-5.4'; // Tier 1：完整多步驟工具使用（07-18 升級，表現天差地別）
@@ -1447,12 +1527,43 @@ $bridgeCapabilities''';
       case 'minimax':
         return 'MiniMax-M2.5';
       case 'local':
-        return 'llama3.1:8b';
+        // [小葵 2026-10-01 模型鐵則正名] 機器上沒有 llama3.1:8b——舊值是
+        // 謊報（llama-server 不看 model 名，服務當前載入的模型，但 meta
+        // 帳本全記錯人）。本地 fallback 一律回報「實際載入」的模型。
+        return activeLocalModelName();
       case 'glm':
         return 'glm-5.2'; // Tier 1：reasoning 模型，農場任務驗證OK（07-18）
       case 'kimi':
       default:
         return 'kimi-k3'; // Tier 2：需拆分小任務
+    }
+  }
+
+  /// [小葵 2026-10-01] 本地實際載入模型名——真相源 LocalRuntime/runtime-state.json
+  /// （activeModelName，如 "gemma-4-12b-it-Q4_K_M"）。讀不到退 'local-model'。
+  /// 同步讀檔（小 JSON）＋ 10 秒記憶體快取——避免每輪 LLM 呼叫都打磁碟。
+  static String? _activeLocalModelCache;
+  static DateTime _activeLocalModelCacheAt = DateTime(2000);
+  static String activeLocalModelName() {
+    try {
+      final now = DateTime.now();
+      if (_activeLocalModelCache != null &&
+          now.difference(_activeLocalModelCacheAt).inSeconds < 10) {
+        return _activeLocalModelCache!;
+      }
+      final home = io.Platform.environment['HOME'] ?? '';
+      if (home.isEmpty) return 'local-model';
+      final f = io.File(
+          '$home/Library/Application Support/Bridge/LocalRuntime/runtime-state.json');
+      if (!f.existsSync()) return 'local-model';
+      final json = jsonDecode(f.readAsStringSync());
+      final name = (json['activeModelName'] ?? '').toString();
+      final result = name.isNotEmpty ? name : 'local-model';
+      _activeLocalModelCache = result;
+      _activeLocalModelCacheAt = now;
+      return result;
+    } catch (_) {
+      return 'local-model';
     }
   }
 

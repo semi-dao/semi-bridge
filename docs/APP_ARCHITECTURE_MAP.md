@@ -34,6 +34,7 @@
 | 2D 大腦圖譜 | **已退役（2026-09-07 Blue 令）** | `brain_canvas.dart`/`infinite_canvas.dart` 已刪除；羅盤 2D 規則標 retired；3D 星系不受影響 |
 | 羅盤系統（人機共視） | `screens/compass_screen.dart` + `services/compass/` | 器官地圖 + 規則中心（雙層所有權 + 白名單制） |
 | 規則層（顯示規則） | `services/compass/compass_store.dart` | 唯一真相源；visual 即時生效/behavioral 需人 apply |
+| 軍醫（傷口系統） | `services/agent_loop/compass_medic.dart` | 工具失敗→【pending·傷口立案】→自癒藥方；**認知傷口（2026-10-05 開案）**：糾正訊號（`agent_loop.dart` `_maybeFileCognitiveWound`）→【pending·認知傷口】→紅燈（`compass_self_gauge.dart` cognitiveWounds）→夢境議程；痊癒=誠實邊界（她主動說看不見） |
 | 模型選擇器 | `widgets/chat/agent_model_selector.dart` | top bar 裡的 provider 切換 |
 | 懸浮夥伴視窗 | `MainFlutterWindow.swift` `configure(panel:state:)` + `floating_companion.dart` | NSPanel，Swift 原生視窗 |
 | 懸浮窗縮放被重置 | `MainFlutterWindow.swift` `syncRuntime` handler → 用 `applyRuntimeOnly()` | 不要用 `apply()` 會重設 size |
@@ -251,6 +252,33 @@ APP 啟動
 ~/Library/Application Support/Bridge/LocalRuntime/runtime-state.json
 ```
 
+**自動離合器（2026-10-01 新增，Blue 拍板）：**
+```
+雙角色槽：夥伴模型（聊天+任務）/ 辨識模型（照片嵌入）
+  ├─ 設定處：模型下載頁「角色配置」（local_llm_runtime_card.dart）
+  ├─ 持久化：StorageService local_companion_model / local_vision_model
+  └─ 未設辨識槽 → 行為退回現狀（零強迫）
+
+狀態機（runChat → switching → runVision，faulted 罷手）：
+  ├─ 核心：lib/services/local_model_scheduler.dart（LocalModelScheduler 單例）
+  ├─ App 啟動掛載：main.dart → LocalModelScheduler.instance.start()
+  ├─ 聊天優先權：AgentLoop.run() 開跑 → markUserActivity()
+  │   └─ 辨識模式中 → 等安全點（嵌入 item 邊界）切回夥伴
+  ├─ 安全點標記：vision_embedding_pipeline.processPendingVisionAssets()
+  │   進場 set visionJobActive=true / 完工 set false
+  ├─ pending 計數：_fetchPendingVisionAssets() → updatePendingVisionCount()
+  └─ 失敗一次罷手回手動（09-29 鐵律）——UI 故障區塊可手動重試
+
+UI 顯示：
+  ├─ 系統活動中心（system_activity_card.dart）「照片辨識」常駐區塊
+  │   └─ 待辨識 N 張 + 〔現在辨識〕手動按鈕（不等閒置直接切）
+  └─ 模型卡角色徽章：💬 夥伴 / 📷 辨識（角色教育）
+```
+
+進程拓撲註記：EmbeddingGemma 走 flutter_gemma 在 App 進程內（不搶
+18789）；18789 只有照片描述生成（local_vision_analyze）在搶——離合器
+只調度這個。
+
 ### 4.3 Agent Loop（自主循環）
 
 | 檔案 | 職責 |
@@ -274,6 +302,25 @@ APP 啟動
 **[小葵 2026-09-22] 記憶衰減已接線**：`BrainContainerService._scheduleDecayCycle()`（初始化後 130s 首跑 + 每 24h 週期）喚起 `MemoryDecayService.runDecayCycle()`——此前該服務寫好但全 repo 零呼叫點。軟刪（archived=1）不物理刪；user_marked 連結免疫休眠；md 副本永久留存。
 
 **[小葵 2026-09-22 v18] 矛盾消解 + temporal filtering**（schema 17→18，借鏡 supermemory）：`memories.superseded_by`——寫入後同主題舊事實（語意近+字面 token 重疊<0.5）被新事實取代（軟標記留審計）；`expires_at` 啟用——過期臨時事實自然退場。所有檢索入口（findSimilarMemories/HybridSearch FTS+語意/MemoryStore.search）一律過濾 `superseded_by IS NULL AND (expires_at IS NULL OR > now)`。回歸測試：`test/brain_container/contradiction_resolution_test.dart`（6 條）。
+
+**[小葵 2026-10-10 M0 記憶注入管線 + EventLedger]**（commit `1910c958`，測試 10/10）：
+- `brain_container/embedding/embedding_service.dart` — 768 維向量化入口（flutter_gemma 載 300M EmbeddingGemma tflite，in-process 不搶 18789）
+- `brain_container/inject/inject_pipeline.dart` — 注入主漏斗：`enrichWith(query, extraCandidates)` 回傳 `InjectResult(ids, content, droppedCount)`
+  - `mergeCandidates(m0, extra)` 靜態方法：同 id 撞號保留 K1 版（靜態可測試）
+  - 結果欄：`ids[]` / `content` / `similarities[]` / `droppedCount` / `k1KeptN`
+- `brain_container/inject/slot_filter.dart` — 四槽位分類（recent/fact/habit/skill）。**K1 獨立通道**：`MemoryCandidate.source=='k1'` 不進四槽分類，依 hybrid 名次取前 `k1Quota=3` 獨立上限
+- `brain_container/inject/budget_controller.dart` — 400 token 預算組裝。**K1 全列保證項排 M0 之前**；超預算淘汰序：M0 非保證→M0 保證→K1 尾端（kept[3]、kept[2]）；K1 kept[0] 由 length<=1 防護永不丟
+- `brain_container/injection_preparer.dart` — 線上注入漏斗：digest→K1 守門→候選合併→四槽+預算→`InjectResult`+`InjectionOutcome`（含 `failureReason` 四態：embedding_model_unavailable/all_filtered/embedding_probe_zero_vector/no_candidates + `k1KeptN`）
+- `brain_container/event_ledger.dart` — v4 schema：每輪對話 `turn_id` + `meta TEXT`（k1_hits_n/k1_kept_n/latency_ms/dropped_count/embedding_ok/failure_reason），`rebind()` 重置 `_ensuredV4` 旗標
+- `services/bridge_mcp_server.dart` — 新增 `POST /inject/enrich` REST + MCP tool `inject_enrich`（線上注入條件＝評測條件，InjectPipeline 單一漏斗）
+- `services/vector_db/hybrid_search_service.dart` — `search` 加 `bool expand=true` 參數，預設線上不變；K1 通道傳 `expand:false` 跳過 `_expandGraph`/`_expandContext`（Fable 🟡1 排序閘：圖譜展開命中 0.2~0.5 vs RRF 上限 0.033＝噪音壓真命中）
+
+**[小葵 2026-10-10 M1 三道閘驗收（commit `66c66b1a`，19/19 全綠）]**
+- 排序閘：K1 `_k1Candidates` 走 `expand:false` + 名次分數 1.0/0.9/0.8 + `take(3)` 硬上限 + `floorExempt=true` 免地板
+- 槽位閘：`slot_filter` K1 不佔 M0 四槽、獨立上限 3 條；M0 四槽規則一字不動
+- 預算閘：`budget_controller` K1 全列保證項排 M0 之前、K1 kept[0] 永不丟
+- 預期效果：`k1_kept_n` 從 0~1 變 0~3；非記憶題行為完全不變
+- **誠實揭露**：App 評測條件＝線上條件（單一漏斗 InjectionPreparer），過去 63% precision 是訓練集數字、M1 評測用 held-out `eval_m1_v1.jsonl`；雲端 ≤25% 不可達，採 ≤40% 暫行線（route_policy.json P1）
 
 ### 4.5 Bridge Adapters（能力介面卡）
 
@@ -354,6 +401,22 @@ Channel：`bridge.computer_use.macos.v1`（在 MainFlutterWindow.swift awakeFrom
 | `removeQuarantineFromBin()` | 1934 | 移除 quarantine 屬性 |
 
 ### 5.3 視窗大小 — 兩端都要改
+> ⚠️ [Blue 令 2026-10-05 · 以終為始] 現在有了第三層：**WindowAutoFitService**（`lib/services/window_autofit_service.dart`）
+> 頂列內容（`_TopBarAutoFit` 影子量尺，`bridge_desktop_screen.dart` 檔尾）實測自然寬 → 上報 →
+> **動態 minimumSize + 自動撐大視窗**。未來加按鈕視窗自動長大，不寫死尺寸。
+> 寫死的 `Size(1440, 900)` / `Size(1280, 720)` 只是初始值，真正的下限由內容決定。
+> log 前綴 `[WindowAutoFit]`。
+>
+> 🔬 [小葵 2026-10-05 影子量尺演進] 量「自然寬」的三個死巷（實測鐵證）：
+> ① 直接量本體 RenderBox → 拿到約束寬（視窗寬），非需求寬
+> ② OverflowBox(maxWidth: double.infinity) → `mainAxisSize.max` 在 unbounded
+>    約束下 NEEDS-LAYOUT 永凍，量不到 size（run21）
+> ③ IntrinsicWidth / left→right 跨距 → 頂列有 `Spacer`，在超大寬約束下
+>    撐到 100000，量出 100024 假值（run24/run28）
+> ✅ 正解：**連續群組法**——影子 Row 以有限超大寬（100000）layout，
+> 走 RenderFlex children：非 flex children 依 offset 分群（間距 <300 同群），
+> Σ 各群寬 + 群間 spaceLG + 外層 Container padding。Spacer 群組切開歸零。
+> 實測：1440 視窗爆 7.1px → 量得 1447 → 視窗自動撐到 1496 → 警示條絕跡。
 
 ```
 Dart 端：main.dart L21
@@ -531,3 +594,79 @@ grep -rn "方法名(" lib/
 | 2026-08-14 | 初版建立 | 教練 Agent |
 | 2026-08-14 | 補完夥伴設定頁面 + 全部 screens/ 頁面到快速導航 | 教練 Agent |
 | 2026-08-14 | 新增陷阱：編輯夥伴改文字→形象圖消失 | 教練 Agent |
+
+
+## 系統活動中心（2026-09-30 金礦1）
+- 想看背景任務狀態 → `lib/services/activity/background_task_registry.dart`（Registry 單例）
+- 新任務接入：`BackgroundTaskRegistry.instance.update(BackgroundTask(...))` + 結束 `finish(id)`
+- UI 卡 → `lib/widgets/system_activity_card.dart`（系統頁頂部，無任務隱形）
+- 已掛牌：IdentityReembed（identity_reembed）、模型實驗室快測（model_lab_quicktest）
+- 教訓源起：2026-09-29 IdentityReembed 隱形燒 200% CPU 懸案
+
+
+## embed_source 狀態機（2026-09-30 第七金礦）
+- **identity = 終態，DB trigger 強制不可逆**（trg_identity_guard：identity→其他一律 ABORT）
+- trg_embed_watch：所有 embed_source 變化自動留痕 embed_audit 表（誰/從哪/到哪）
+- 寫 asset_index 的規則：
+  - UPDATE 帶 `AND COALESCE(embed_source,'') != 'identity'`（四處已示範）
+  - **禁 INSERT OR REPLACE**（整 row 重建丟失嵌入成果）→ 用 ON CONFLICT(file_path) DO UPDATE 且不碰 embed_source/embedding/content_text
+  - 想把檔案升級到 identity → 只走 IdentityReembedService（唯一合法入口）
+- 歷史案卷：2026-09-29/30 兩次互踩慘案（content 嵌入翻掉 identity，每天重做 3000 筆）
+
+## 大腦看門狗（2026-10-01 F5）
+- 想改「引擎死了沒人救」→ `lib/services/brain_revival_service.dart`（App 級，掛在 bridge_desktop_screen initState）
+- URL 真相源 = `StorageService.getLocalModelEndpoint()`（**不是** gateway_url——那是雲端主腦的）
+- 生命週期真相源 = `BrainLifecycle` stream（U2 徽章只訂閱不自行判斷）
+- 冷卻語意：嘗試節流（成敗都計時 10 分鐘），不是死亡鎖
+- ⚠️ 陷阱：看門狗不得掛任何 UI 依賴（card initState 教訓：沒逛頁=沒保母）
+
+## 掃描管線（2026-09-30 F1）
+- 指紋快取：brain_meta `tree_fp:<FNV-1a>`（String.hashCode 每啟動隨機化，禁用於持久 key）
+- _persistRecords 已批次化（禁逐筆 SELECT+debugPrint 的寫法）
+- embed_source 狀態機：identity=終態（DB trigger ABORT 強制；應用層 UPDATE 必帶 !=identity；禁 INSERT OR REPLACE）
+
+## 開光 P1（2026-10-01 隱藏門收編）
+- MCP tools 34→41：app_scroll（新感官：頁面捲動）+ galaxy_view/identity_reembed/vector_sketch/import_progress/global_notice/rescan schemas
+- app_scroll 鏈路：tools/call → _handleAppScrollCore → onAppScroll callback（bridge_desktop_screen 注入）→ extent 擇大法找主內容 Scrollable
+- ⚠️ tools/list 的 _meta 格式：`{"io.modelcontextprotocol/clientCapabilities": {}}`（key 即能力名）
+- 隱藏門剩餘：galaxy_* 系列多為 HTTP 直連（schema 用 galaxy_view 聚合）；health/mcp/state/fps_probe 內部用不收編
+
+## 開光 v0.4.0 眼與手（2026-10-01）
+- **app.look**：target=app→AppRetina.capture；target=screen→架構預留（誠實回 notSupported，Blue 拍板介面不鎖死）
+- **app.tap**：onAppTap callback（bridge_desktop_screen）→ selector 全域收集 Text/SelectableText → 找最近可點祖先（GestureDetector/InkWell/Button×8 層）→ 視野內優先+文字最短=最佳候選。v1=定位回報制（不真點），x/y 座標後門同規
+- ⚠️ 陷阱：visitChildElements 閉包內 return 只跳單層——全域收集後再擇優，不要 early-return
+- 隱藏門收編 P1.5：_proxyGet 同進程直呼 shelf router（_router 欄位化）；tools 43；galaxy_view 聚合 galaxy_* 家族
+
+## tools_health（開光 #7，2026-10-01）
+- 工具級自檢：_dispatchedTools 活性 Set（dispatch 入口記錄）→ neverDispatched = 從未被叫過的工具
+- callback 接線彙總 + get_canvas_state 活性探針（ok/nodes 數/null 異常/callback 未接線 分流）
+- healthy=false 帶明確 message——設計鐵則：任何工具要嘛正常要嘛明確報錯，禁優雅回 null
+
+
+## 開光 v0.4.x 完全體（2026-10-01 下午）
+- app_tap confirm=true 真點：**handlePointerEvent** 完整 lifecycle（hitTest→pointer router→gesture arena）。
+  ⚠️ 陷阱：直接 handleEvent 給 hit path 繞過 arena——42 層收到事件但 GestureDetector.onTap 不響
+- app_look target=screen：Swift captureScreen（CGWindowListCreateImage CGRect.null 全螢幕）
+  → 暫存 → Dart base64 → 即刪。⚠️ sandbox 內 screencapture 子進程被 TCC 擋（app_permissions 可查）
+- 實測：真點 nav「畫布」tab → page home→canvas ✓；screen 3440x1440 ✓
+
+## app_scroll 擇靶八代史（2026-10-01 benchmark 淬鍊——重要陷阱）
+- 頁面快取層用 **Offstage**：離屏頁的 scrollable pixels 會動、layout 會變、**但不渲染**
+- 任何「幾何/像素」擇靶法都會被騙；v8 兩輪制（先非 Offstage→fallback 全收+實證）為當前解
+- args vs params：MCP dispatch 傳參要傳 `params['arguments']`（傳錯層=direction 丟失被當 down）
+- jumpTo 後需等一幀（120ms）再拍照，否則拍到捲動前畫面
+
+## 開光最後一哩——內建 agent loop 感官（2026-10-01 傍晚）
+- app_senses_tools.dart：內建 loop 工具直呼 `BridgeMcpServer.instance` 的
+  onAppScroll/onAppTap callbacks + AppRetina.capture（同進程，不走 8420）
+- 註冊點：AgentToolRegistry.withDefaults 一處改，chat_controller（1435）與
+  bridge_desktop（1697）兩個 loop 全覆盖
+- Quick Assistant system prompt §3.5：口語「你看畫面中的 X」→ look→scroll→tap 循環
+- get_agent_debug 顯示 hasAgentLoop=false 屬正常——對話 tab 走 desktopController
+  （工具同樣由 withDefaults 提供）
+
+## 幽靈進度條案（2026-10-01 傍晚，Blue 通報）
+- BackgroundTaskRegistry sweeper 只清 done——running 任務若異常路徑沒走到
+  finish 就永生（UI 進度條永凍）。修：progressAt 戳+30min 殭屍清理
+- 診斷三板斧：import_progress（後台真相）+ DB 直查（index_status 分佈）
+  + app_look（UI 現場）——三邊對照即知「UI 謊報 vs 工作真掛」

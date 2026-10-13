@@ -131,8 +131,8 @@ class PaidActionGate {
     }
     if (waste > 0) {
       final pct = (waste * 100).round();
-      buf.write('\n[覆盤] 近期失敗率 $pct%'
-          '${pct >= 30 ? '（偏高——同一 prompt 連續失敗請換策略，別重試）' : ''}');
+      buf.write('\n[覆盤] 近期失敗率 $pct%（來源：BudgetLedger）'
+          '${pct >= 30 ? '（偏高——同一 prompt 連續失敗**不可**直接重試，先換策略）' : ''}');
     }
     buf.write('\n[自律原則] 額度是使用者的信任。批量生成前先規劃用途；'
         '失敗 2 次必須換 prompt 或換服務；重複內容優先重用既有產出。');

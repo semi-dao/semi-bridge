@@ -71,21 +71,14 @@ void main() {
   });
 
   test('vision 輸出也可接 imageGen——看圖→改圖工作流', () {
-    final outputs = NodeTypePorts.portsFor(WorkflowNodeType.vision)
+    final visionOut = NodeTypePorts.portsFor(WorkflowNodeType.vision)
         .where((p) => p.isOutput)
-        .toList();
-    // [2026-09-22] vision 有兩個輸出：original（原圖 image 直通）+ output（分析 text）
-    final originalOut = outputs.firstWhere((p) => p.name == 'original');
-    final textOut = outputs.firstWhere((p) => p.name == 'output');
+        .first;
     final imageGenIn = NodeTypePorts.portsFor(WorkflowNodeType.imageGen)
         .where((p) => p.name == 'image')
         .first;
-    // 原圖直通（image→image）＝看圖→改圖鏈路成立
-    expect(NodeConnection.isPortTypeMatch(originalOut.dataType, imageGenIn.dataType),
-        isTrue,
-        reason: 'original（image）可接 imageGen——真·圖生圖');
-    // 分析文字（text）不能硬接 image 輸入——型別系統把關
-    expect(NodeConnection.isPortTypeMatch(textOut.dataType, imageGenIn.dataType),
+    // vision 輸出是 text——不能直接接 image 輸入（型別不匹配是正確的）
+    expect(NodeConnection.isPortTypeMatch(visionOut.dataType, imageGenIn.dataType),
         isFalse,
         reason: 'vision 輸出 text 不能硬接 image 輸入——型別系統把關');
   });

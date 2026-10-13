@@ -173,13 +173,40 @@ class CompassProposeTool extends AgentTool {
       newParams = jsonDecode(args['params'].toString())
           as Map<String, dynamic>;
     } catch (e) {
-      return AgentToolResult.failure('params 不是合法 JSON：$e');
+      // [小葵 2026-10-05 Blue 開案] 她 8 次撞牆都是無引號假 JSON——
+      // 給她「正確的路」：錯誤訊息直接附正確格式範例，照抄就會過。
+      return AgentToolResult.failure(
+          'params 不是合法 JSON：$e\n'
+          '常見錯誤：鍵與字串值沒有用雙引號包起來。\n'
+          '正確範例（照抄這個格式）：{"threshold": 0.55, "mode": "rolling"}\n'
+          '錯誤範例（不要這樣寫）：{threshold: 0.55, mode: rolling}');
     }
 
     try {
       final existing = store.rule(ruleId);
       if (existing == null) {
-        return AgentToolResult.failure('規則 $ruleId 不存在。先 compass_read 查看現有規則。');
+        // [小葵 2026-10-05 Blue 開案] 立新規則的門——
+        // 舊行為：規則不存在直接擋（她的方案需要新規則，無路可走）。
+        // 新行為：不存在的 rule_id 走「立案提案」——建一條 pendingApply
+        // 的 behavioral 規則（一律待套用，等使用者在羅盤 UI 裁決），
+        // 署名 agent 提案、附原因、可回滾。立新規則比改舊規則更敏感，
+        // 所以永遠不即時生效。
+        final organId = ruleId.contains('.')
+            ? ruleId.substring(0, ruleId.indexOf('.'))
+            : 'agent.loop';
+        store.createRule(
+          ruleId,
+          organId: organId,
+          description: '（agent 提案立項，待使用者審核）$reason',
+          why: reason,
+          params: newParams,
+          kind: CompassRuleKind.behavioral,
+          author: 'agent:小橋',
+        );
+        return AgentToolResult.success(
+            '已立案新規則 $ruleId（進入待套用——等使用者在羅盤 UI 按「套用」才生效）\n'
+            '原因：$reason\n'
+            '下一步建議：compass_read $ruleId 回讀驗證立案內容。');
       }
       store.updateRuleParams(
         ruleId,
@@ -191,7 +218,9 @@ class CompassProposeTool extends AgentTool {
           ? '（visual 規則：已即時生效）'
           : '（behavioral 規則：進入待套用，等使用者按「套用」）';
       return AgentToolResult.success(
-          '已提議 $ruleId → ${jsonEncode(newParams)}$statusNote\n原因：$reason');
+          '已提議 $ruleId → ${jsonEncode(newParams)}$statusNote\n'
+          '原因：$reason\n'
+          '下一步建議：compass_read $ruleId 回讀驗證參數已更新。');
     } catch (e) {
       return AgentToolResult.failure('提議失敗：$e');
     }

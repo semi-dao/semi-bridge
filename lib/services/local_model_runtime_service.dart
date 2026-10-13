@@ -53,6 +53,8 @@ enum BridgeLocalRuntimeCommand {
   testModel,
   startServer,
   stopServer,
+  startLabServer, // [小葵 2026-09-29 A案] 模型實驗室專用（18799），不動主生產線
+  stopLabServer,
 }
 
 extension BridgeLocalRuntimePhaseX on BridgeLocalRuntimePhase {
@@ -423,11 +425,26 @@ class LocalModelRuntimeService {
     }
     return const BridgeLocalRuntimeState(
       phase: BridgeLocalRuntimePhase.installed,
-      title: 'Bridge Local Runtime',
-      detail: '測試命令無法送達桌面端。',
+      title: '本地 LLM 引擎',
+      detail: '測試指令失敗（native 無回應）',
       primaryCommand: BridgeLocalRuntimeCommand.status,
-      primaryActionLabel: '等待桌面端支援',
-      primaryActionEnabled: false,
+      primaryActionLabel: '重新檢查',
+      primaryActionEnabled: true,
+    );
+  }
+
+  /// [小葵 2026-09-29 A案] 模型實驗室 lab server（18799）——快測專用引擎，
+  /// 與 18789 主生產線完全獨立。回傳 native state（含 labServer 狀態）。
+  Future<BridgeLocalRuntimeState?> startLabServer(String modelId) async {
+    return _invokeBridgeRuntime(
+      BridgeLocalRuntimeCommand.startLabServer,
+      payload: {'modelId': modelId},
+    );
+  }
+
+  Future<BridgeLocalRuntimeState?> stopLabServer() async {
+    return _invokeBridgeRuntime(
+      BridgeLocalRuntimeCommand.stopLabServer,
     );
   }
 

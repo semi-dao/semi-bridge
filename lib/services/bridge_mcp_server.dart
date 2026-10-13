@@ -9,21 +9,22 @@
 // - 支援讀取（get_canvas_state）和操作（add_node, connect, execute）
 
 import 'dart:async';
-import '../core/dev_paths.dart';
 import 'dart:convert';
-import 'app_retina.dart'; // [教練 Agent 2026-08-22] 全域視網膜
+import 'package:bridge_app/services/app_retina.dart'; // [教練 Agent 2026-08-22] 全域視網膜
+import '../core/dev_paths.dart'; // [開源整備] 開發機路徑泛化
+import 'package:bridge_app/services/macos_desktop_shell_channel.dart'; // [開光 P1] window_map 懸浮窗狀態
 import 'dart:io';
 import 'dart:math';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'life_tree/global_notice_channel.dart'; // [小葵 2026-09-21] 全域對話佇列
 import '../widgets/canvas/v2/canvas_mcp_registry.dart'; // [教練 Agent 2026-07-20] 渲染感應器
+import 'canvas_store.dart'; // [W4.5] create_canvas 用
 import 'package:shelf_router/shelf_router.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/rendering.dart' show Offset, Size; // [v0.4.0 開光] canvas_zoom focal + window_control
-import 'package:window_manager/window_manager.dart'; // [v0.4.0 開光] window_map/window_control 主視窗幾何
-import 'macos_desktop_shell_channel.dart'; // [v0.4.0 開光] window_map 懸浮窗快照
+import 'package:flutter/rendering.dart' show Offset, Size; // [開光 P2/P3] canvas_zoom focal + window_control restore
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:window_manager/window_manager.dart'; // [開光 P1] window_map 主視窗幾何
 import 'package:path_provider/path_provider.dart';
 import 'package:bridge_app/models/entity_graph/entity.dart';
 import 'package:bridge_app/services/brain_container/brain_container_service.dart';
@@ -33,10 +34,16 @@ import 'package:bridge_app/services/vector_db/vector_sketch_service.dart';
 import 'package:bridge_app/services/vector_db/incremental_ingest_service.dart';
 import 'package:bridge_app/services/vector_db/asset_chunk_backfill_service.dart';
 import 'package:bridge_app/services/brain_container/brain_database.dart';
+import 'package:bridge_app/services/brain_container/injection_preparer.dart'; // [M1] 注入單一入口
 import 'package:bridge_app/services/brain_container/galaxy_data_service.dart'; // [小葵 2026-08-27] 3D 星系模式
+import 'package:bridge_app/services/schedule_registry.dart'; // [H5 2026-10-08] 戰爭模式任務面板
+import 'package:bridge_app/services/project_door_store.dart'; // [H5]
 import 'package:bridge_app/services/collab/swarm_recorder.dart' show SwarmCampaignAssets, swarmEventBus; // [TRIO M5b] 戰役資產+LIVE 匯流排
 import 'package:bridge_app/services/brain_container/design_file_thumbnail_service.dart'; // [小葵 2026-08-28] 設計檔縮圖嵌入
 import 'package:bridge_app/services/vector_db/agent_memory_backfill_service.dart';
+// [小葵 2026-10-13 K1 修復線] K1 頭訓練引導 + 守門員
+import 'package:bridge_app/services/decision/k1_bootstrapper.dart';
+import 'package:bridge_app/services/decision/k1_gatekeeper.dart';
 
 /// 畫布 MCP Server — 暴露畫布狀態和操作給 Agent。
 ///
@@ -49,6 +56,8 @@ import 'package:bridge_app/services/vector_db/agent_memory_backfill_service.dart
 /// - POST /execute      — 執行工作流
 /// - GET  /health       — 健康檢查
 class BridgeMcpServer {
+  late final Router _router; // [開光 P1.5]
+  final Set<String> _dispatchedTools = {}; // [tools_health] 已 dispatch 過的工具
   static const int defaultPort = 8420;
 
   /// [教練 Agent 2026-08-05] Server 版本——/health 跟 _meta.serverInfo 共用這個常數，
@@ -73,17 +82,21 @@ class BridgeMcpServer {
 
   /// [教練 Agent 2026-08-05] 測試專用 — 建立不污染 singleton 的獨立 instance
   /// 給 unit test 用，避免撞到執行中的 Flutter App 佔用的 8420 port
+  ///
+  /// [開光 P0 · 小葵 2026-09-26] 補 _skipTokenInit——9/24 開源安全域引入
+  /// fail-close 後，token 初始化（getApplicationSupportDirectory）在無
+  /// platform binding 的測試環境必失敗 → server 靜默不啟動 → 這組 L1 測試
+  /// 整組 Connection refused 變紅。測試 instance 跳過 token init：
+  /// _authToken 維持 null（門禁 middleware 對 null 放行），走隨機 port，
+  /// 不影響正式 8420 的 fail-close 安全語意。
   @visibleForTesting
   static BridgeMcpServer createForTesting({required int port}) {
     final s = BridgeMcpServer._(port: port);
-    // 測試實例跳過 token 初始化：測試環境無 Flutter binding / path_provider，
-    // token 初始化必炸。跳過後 _authToken 保持 null——_tokenGate 對 null
-    // 本來就放行，測試照常打端點。生產實例（預設建構子）fail-close 不變。
     s._skipTokenInit = true;
     return s;
   }
 
-  /// [2026-09-25 開源整備] 測試實例跳過 token fail-close 判定
+  /// [開光 P0] 測試專用旗標——見 createForTesting 註解
   bool _skipTokenInit = false;
 
   HttpServer? _server;
@@ -188,6 +201,9 @@ class BridgeMcpServer {
 
   // [教練 Agent 2026-08-01] 新增 callback — 節點參數控制 + 畫布管理
   Future<Map<String, dynamic>> Function(String nodeId, Map<String, dynamic> params)? onSetNodeParams;
+  Future<Map<String, dynamic>> Function(String direction, double? pixels)? onAppScroll; // [開光 P1] 頁面捲動
+  Future<Map<String, dynamic>> Function({String? selector, double? x, double? y, bool confirm})? onAppTap; // [開光 v0.4.0] 語意點擊
+  Future<String?> Function()? onScreenCapture; // [開光 v0.4.x] OS 層視網膜（Swift CGWindowList）
   Future<Map<String, dynamic>> Function(String nodeId)? onGetNodeParams;
   Future<void> Function()? onClearCanvas;
   Future<void> Function(String templateId)? onLoadTemplate;
@@ -203,6 +219,9 @@ class BridgeMcpServer {
 
   /// 取得塗鴉標注
   List<Map<String, dynamic>> Function()? onGetAnnotations;
+  // ── [開光 P2 · 小葵 2026-09-26] app_tap：語意點擊 callback ──────
+  /// 回傳 null=未接線（-32603）；Map{success, message}=結果
+  Map<String, dynamic>? Function(String target)? onTap;
 
   /// [教練 Agent 2026-07-19] 模擬使用者在聊天框打字——觸發完整 sendMessage 流程
   /// 跟 onSendChat 不同：onSendChat 只顯示訊息，這個觸發 IntentSpine → 反問/AgentLoop
@@ -219,9 +238,6 @@ class BridgeMcpServer {
   /// target: home | companion | chat | canvas | brain | system
   /// sub: model | pairing | files | settings (僅 system tab 有子頁面)
   void Function(String target, String? sub)? onNavigate;
-  // ── [v0.4.0 開光 · 2026-09-26] app_tap：語意點擊 callback ──────
-  /// 回傳 null=未接線（-32603）；Map{success, message}=結果
-  Map<String, dynamic>? Function(String target)? onTap;
 
   /// [教練 Agent 2026-07-19] 取得當前 App 狀態
   /// 回傳：{page, systemSub, canvasIndex, isHomepage, isCompanionHall}
@@ -245,6 +261,7 @@ class BridgeMcpServer {
     if (_server != null) return;
 
     final router = Router();
+    _router = router; // [開光 P1.5] 保存供 _proxyGet 同進程分派
 
     router.get('/health', _handleHealth);
     router.get('/state', _handleGetState);
@@ -265,8 +282,13 @@ class BridgeMcpServer {
     router.post('/send_canvas_message', _handleSendCanvasMessage); // [教練 Agent 2026-07-19] 派任務到畫布對話框
     router.post('/inject_message', _handleInjectMessage); // [教練 Agent 2026-07-19] 原生 Agent工作時插嘴
     router.post('/navigate', _handleNavigate); // [教練 Agent 2026-07-19] 統一導航
+    router.post('/app_scroll', _handleAppScroll); // [開光 P1 2026-10-01] 頁面捲動（隱藏門收編）
     router.post('/brain_search_focus', _handleBrainSearchFocus); // [教練 Agent 2026-08-20] 搜尋放大對焦
     router.get('/vector_search', _handleVectorSearch); // [教練 Agent 2026-08-21] 檢索鏈實測端點
+    router.post('/inject/enrich', _handleInjectEnrich); // [小葵 2026-10-10 M1] 注入管線單一入口（評測+線上同路徑）
+    // [小葵 2026-10-13 K1 修復線] K1 頭訓練引導：POST /k1/train（body=標註 JSONL）
+    router.post('/k1/train', _handleK1Train);
+    router.get('/k1/head', _handleK1Head); // 查詢頭掛載狀態
   router.get('/identity_reembed', _handleIdentityReembed); // [小葵 2026-09-09] 身份重嵌進度/觸發
   router.get('/vector_sketch', _handleVectorSketch); // [小葵 2026-09-09] 向量資料素描
   router.get('/rescan', _handleRescan); // [小葵 2026-09-09] 手動重掃（重匯入模擬）
@@ -281,6 +303,8 @@ class BridgeMcpServer {
     router.post('/load_template', _handleLoadTemplate);
     router.get('/list_canvases', _handleListCanvases);
     router.post('/load_canvas', _handleLoadCanvas);
+    // [W4.5 小葵 2026-10-09] 建新畫布——排程測試專案用（H6 移轉也要用）
+    router.post('/create_canvas', _handleCreateCanvas);
     router.get('/annotations', _handleGetAnnotations);
     router.get('/get_latest_messages', _handleGetLatestMessages); // [教練 Agent 2026-07-20] 渲染感應器
     router.get('/get_agent_debug', _handleGetAgentDebug); // [教練 Agent 2026-08-08] 教練模式
@@ -293,6 +317,7 @@ class BridgeMcpServer {
     router.get('/galaxy_swarm_campaigns', _handleGetSwarmCampaigns); // [TRIO M5b] 戰役列表
     router.get('/galaxy_swarm_events', _handleGetSwarmEvents); // [TRIO M5b] 事件流（重播）
     router.get('/galaxy_swarm_live', _handleSwarmLiveSse); // [M5b LIVE] 事件驅動推送（SSE）
+    router.get('/galaxy_missions', _handleGetGalaxyMissions); // [H5 2026-10-08] 戰爭模式任務面板（排程卡＋專案門）
     router.get('/galaxy_open', _handleGetGalaxyOpen); // [小葵 2026-08-28] 雙擊星點開檔
     router.get('/galaxy_thumb', _handleGetGalaxyThumb); // [小葵 2026-08-28 v28] 資料框縮圖預覽
     router.post('/galaxy_oplog', _handlePostGalaxyOplog); // [小葵 2026-08-29 v32] 行車記錄器上傳
@@ -315,25 +340,20 @@ class BridgeMcpServer {
     router.post('/mcp', _handleJsonRpc);
     router.get('/mcp/discover', _handleMcpDiscover);
 
-    final handler = const Pipeline()
-        .addMiddleware(logRequests(logger: (msg, isError) => debugPrint('[MCP] $msg')))
-        .addMiddleware(_tokenGate())
-        .addHandler(router.call);
-
-    if (_skipTokenInit) {
-      // 測試實例：跳過 token 初始化（見 createForTesting 註解）
-      debugPrint('[MCP] 測試實例：跳過 token 門禁初始化');
-      _server = await shelf_io.serve(handler, InternetAddress.loopbackIPv4, port);
-      debugPrint('[MCP] Canvas MCP Server（測試）啟動於 http://localhost:$port');
-      return;
+    // [開光 P0 · 小葵 2026-09-26] 測試 instance 跳過 token init（見 createForTesting）
+    if (!_skipTokenInit) {
+      await _ensureAuthToken();
     }
-
-    await _ensureAuthToken();
-    if (_tokenInitFailed) {
+    if (!_skipTokenInit && _tokenInitFailed) {
       // [小葵 2026-09-24 開源安全域] fail-close：token 不存在 = 不 serve。
       debugPrint('[MCP] fail-close：門禁 token 未就緒，MCP 服務不啟動');
       return;
     }
+
+    final handler = const Pipeline()
+        .addMiddleware(logRequests(logger: (msg, isError) => debugPrint('[MCP] $msg')))
+        .addMiddleware(_tokenGate())
+        .addHandler(router.call);
 
     try {
       _server = await shelf_io.serve(handler, InternetAddress.loopbackIPv4, port);
@@ -728,6 +748,85 @@ class BridgeMcpServer {
         headers: _jsonHeaders);
   }
 
+  /// [小葵 2026-10-10 M1] 注入管線單一入口——評測與線上同路徑。
+  /// Fable delta：評測條件必須等於線上條件（digest/K1 合併/embedding 觀測）。
+  /// logSample 恆為 false：評測 600 題不得灌爆 CausalLedger。
+  /// [小葵 2026-10-13 K1 修復線] POST /k1/train——標註 JSONL → 嵌入 → LOO-CV → 訓練 → 落盤 → 掛載
+Future<Response> _handleK1Train(Request request) async {
+  try {
+    final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final labelsJson = body['labels'] as String? ?? '';
+    if (labelsJson.isEmpty) {
+      return Response(400,
+          body: jsonEncode({'error': 'labels required (JSONL)'}),
+          headers: _jsonHeaders);
+    }
+    final report =
+        await K1Bootstrapper.instance.bootstrapFromLabels(labelsJson);
+    return Response.ok(jsonEncode(report), headers: _jsonHeaders);
+  } catch (e) {
+    return Response(500,
+        body: jsonEncode({'error': e.toString()}), headers: _jsonHeaders);
+  }
+}
+
+/// [小葵 2026-10-13 K1 修復線] GET /k1/head——頭掛載狀態查詢
+Future<Response> _handleK1Head(Request request) async {
+  final head = K1Gatekeeper.instance.head;
+  return Response.ok(
+    jsonEncode({
+      'mounted': head != null,
+      'sample_count': head?.sampleCount,
+      'holdout_acc': head?.holdoutAcc,
+      'trained_at_ms': head?.trainedAtMs,
+    }),
+    headers: _jsonHeaders,
+  );
+}
+
+Future<Response> _handleInjectEnrich(Request request) async {
+    try {
+      final body =
+          jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+      final q = body['q'] as String? ?? '';
+      if (q.isEmpty) {
+        return Response(400,
+            body: jsonEncode({'error': 'q required'}),
+            headers: _jsonHeaders);
+      }
+      final useK1 = body['k1'] as bool? ?? true;
+      final outcome = await InjectionPreparer.instance.prepare(
+        q,
+        k1: useK1,
+        logSample: false,
+      );
+      return Response.ok(
+        jsonEncode({
+          'q': q,
+          'input_digest': outcome.inputDigest,
+          'input_hash': outcome.inputHash,
+          'block': outcome.block,
+          'injected_ids': outcome.ids,
+          'latency_ms': outcome.latencyMs,
+          'dropped_count': outcome.droppedCount,
+          'k1_hits_n': outcome.k1MergedN,
+          'k1_kept_n': outcome.k1KeptN,
+          'embedding_ok': outcome.embeddingOk,
+          'k1_label': outcome.k1Label,
+          'k1_confidence': outcome.k1Confidence,
+          'k1_escalated': outcome.k1Escalated,
+          'k1_source': outcome.k1Source,
+          if (outcome.failureReason != null)
+            'failure_reason': outcome.failureReason,
+        }),
+        headers: _jsonHeaders,
+      );
+    } catch (e) {
+      return Response(500,
+          body: jsonEncode({'error': e.toString()}), headers: _jsonHeaders);
+    }
+  }
+
   Future<Response> _handleSendChat(Request request) async {
     try {
       final body = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
@@ -902,6 +1001,28 @@ class BridgeMcpServer {
         headers: _jsonHeaders);
   }
 
+  /// [W4.5] 建新畫布——CanvasStore.create 持久化 + onLoadCanvas 切換前景
+  Future<Response> _handleCreateCanvas(Request request) async {
+    if (onLoadCanvas == null) {
+      return Response(503,
+          body: jsonEncode({'error': 'Load not available'}),
+          headers: _jsonHeaders);
+    }
+    try {
+      final body =
+          jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+      final title = (body['title'] as String?) ?? '未命名畫布';
+      final canvas = await CanvasStore.create(title: title);
+      onLoadCanvas!(canvas.id);
+      return Response.ok(
+          jsonEncode({'success': true, 'canvasId': canvas.id, 'title': title}),
+          headers: _jsonHeaders);
+    } catch (e) {
+      return Response(500,
+          body: jsonEncode({'error': e.toString()}), headers: _jsonHeaders);
+    }
+  }
+
   Future<Response> _handleLoadCanvas(Request request) async {
     if (onLoadCanvas == null) {
       return Response(503, body: jsonEncode({'error': 'Load not available'}),
@@ -924,137 +1045,18 @@ class BridgeMcpServer {
   /// - 每個 tool 帶 `inputSchema`（JSON Schema 2020-12）
   /// - result 帶 `ttlMs` + `cacheScope`（CacheableResult 介面，SEP-2549）
   /// - 推薦 `_meta.serverInfo` 在 result._meta
+  // ── [開光 P0 · 小葵 2026-09-26] 單一真相源手術 ─────────────
+  // 三份清單各自漂移（GET /mcp/tools 14 個殘留子集 / tools/list 22 /
+  // dispatch 24+ case）是「隱藏門」根因。手術後：
+  //   - GET /mcp/tools 與 tools/list 同源（_toolSchemas）
+  //   - dispatch 補 get_agent_debug case（get_last_response 9/23 同款 bug 的姐妹案）
+  //   - dispatch 新增眼/腦工具：app_view / render_layer / vector_search
   Response _handleMcpToolsList(Request request) {
-    return Response.ok(jsonEncode({
-      'resultType': 'complete', // MCP 2026-07-28 必填
-      'ttlMs': 60000,           // 60 秒快取提示（畫布狀態可能在秒級變動，保守值）
-      'cacheScope': 'private',  // localhost 個人用，不走共享中介層
-      '_meta': {
-        'io.modelcontextprotocol/serverInfo': {
-          'name': 'bridge-mcp',
-          'version': serverVersion,
-          'title': 'Bridge App Canvas MCP Server',
-        },
-      },
-      'tools': [
-        {
-          'name': 'get_canvas_state',
-          'description': '取得完整畫布狀態：所有節點、連線、viewport、選取狀態。讓 Agent 看見畫布上的一切。',
-          'method': 'GET',
-          'path': '/state',
-          'parameters': {},
-        },
-        {
-          'name': 'screenshot',
-          'description': '截取畫布目前畫面（base64 PNG）。用於視覺理解。',
-          'method': 'GET',
-          'path': '/screenshot',
-          'parameters': {},
-        },
-        {
-          'name': 'add_node',
-          'description': '在畫布上新增一個工作流節點。',
-          'method': 'POST',
-          'path': '/add_node',
-          'parameters': {
-            'type': '節點類型（input/llm/tool/imageGen/videoGen/musicGen/tts/condition/merge/output/subWorkflow）',
-            'x': '世界座標 X',
-            'y': '世界座標 Y',
-          },
-        },
-        {
-          'name': 'connect',
-          'description': '建立兩個節點之間的連線（output port → input port）。',
-          'method': 'POST',
-          'path': '/connect',
-          'parameters': {
-            'fromNodeId': '來源節點 ID',
-            'fromPort': '來源 port 名稱（如 output）',
-            'toNodeId': '目標節點 ID',
-            'toPort': '目標 port 名稱（如 input）',
-          },
-        },
-        {
-          'name': 'auto_layout',
-          'description': '一鍵自動排版：依連線拓撲分層排開所有節點，消除重疊。人看的故事線=左到右。',
-          'method': 'POST',
-          'path': '/auto_layout',
-          'parameters': {},
-        },
-        {
-          'name': 'remove_node',
-          'description': '刪除畫布上的一個節點（含相關連線）。',
-          'method': 'POST',
-          'path': '/remove_node',
-          'parameters': {
-            'nodeId': '要刪除的節點 ID',
-          },
-        },
-        {
-          'name': 'execute',
-          'description': '執行畫布上的工作流。',
-          'method': 'POST',
-          'path': '/execute',
-          'parameters': {},
-        },
-        {
-          'name': 'navigate_to_canvas',
-          'description': 'Agent 主動打開畫布 tab，讓使用者看到畫布。這是「共視」的核心——Agent 不再是盲人摸象，而是跟使用者看同一個畫面。',
-          'method': 'POST',
-          'path': '/navigate_to_canvas',
-          'parameters': {},
-        },
-        {
-          'name': 'send_chat',
-          'description': 'Agent 在畫布對話框發送訊息，主動跟使用者互動。',
-          'method': 'POST',
-          'path': '/send_chat',
-          'parameters': {
-            'message': '訊息內容',
-            'role': '角色（assistant/user，預設 assistant）',
-          },
-        },
-        {
-          'name': 'list_canvases',
-          'description': '列出所有可用畫布。',
-          'method': 'GET',
-          'path': '/list_canvases',
-          'parameters': {},
-        },
-        {
-          'name': 'load_canvas',
-          'description': '載入指定畫布並顯示給使用者。',
-          'method': 'POST',
-          'path': '/load_canvas',
-          'parameters': {
-            'canvasId': '畫布 ID',
-          },
-        },
-        {
-          'name': 'get_annotations',
-          'description': '取得使用者塗鴉標注（手繪圈、箭頭、文字）。每個標注有座標、bounds、顏色。Agent 據此理解使用者圈了哪些節點、畫了什麼。',
-          'method': 'GET',
-          'path': '/annotations',
-          'parameters': {},
-        },
-        {
-          'name': 'get_last_response',
-          'description': '教練模式：取得 App Agent Loop 最後一條回覆內容。讓外部 Agent 能看見 App 內 Agent 的回答。',
-          'method': 'GET',
-          'path': '/get_last_response',
-          'parameters': {},
-        },
-        {
-          'name': 'get_agent_debug',
-          'description': '教練模式：取得 Agent Loop 偵錯資訊——目前 provider、model、第幾輪、是否本地。用於觀察雞尾酒配方路由行為。',
-          'method': 'GET',
-          'path': '/get_agent_debug',
-          'parameters': {},
-        },
-      ],
-    }), headers: _jsonHeaders);
+    return Response.ok(
+      jsonEncode(_buildToolsListResult()),
+      headers: _jsonHeaders,
+    );
   }
-
   static const _jsonHeaders = {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
@@ -1063,6 +1065,61 @@ class BridgeMcpServer {
   // ═══════════════════════════════════════════════════════
   //  [教練 Agent 2026-08-01] 新增 4 個 MCP 端點 handler
   // ═══════════════════════════════════════════════════════
+
+  /// [開光 v0.4.0] 語意點擊核心：找「文字符合 selector 的可點元件」回報座標；
+  /// confirm=true 才執行真正的 tap（GestureBinding）——兩段式安全設計。
+  Future<Map<String, dynamic>> _handleAppTapCore(Map<String, dynamic> params) async {
+    final selector = params['selector'] as String?;
+    final x = (params['x'] as num?)?.toDouble();
+    final y = (params['y'] as num?)?.toDouble();
+    if (onAppTap == null) {
+      return {'success': false, 'message': '點擊控制未連接（App 層未掛 callback）'};
+    }
+    return await onAppTap!(
+        selector: selector, x: x, y: y,
+        confirm: (params['confirm'] as bool?) ?? false);
+  }
+
+  /// [tools_health] canvas state 活性探針（#7 慘案：回 null 讓 agent 猜）
+  Future<Map<String, dynamic>?> _getCanvasStateSafe() async {
+    if (onGetState == null) return null;
+    try {
+      final state = await onGetState!();
+      return (state as Map?)?.cast<String, dynamic>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [開光 P1.5] 隱藏門代理——同進程直呼 handler（不走 loopback HTTP）
+  Future<Map<String, dynamic>> _proxyGet(String route) async {
+    final req = Request('GET', Uri.parse('http://127.0.0.1:8420$route'));
+    final res = await _router(req); // shelf router 直接分派
+    final body = await res.readAsString();
+    try {
+      return (jsonDecode(body) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return {'raw': body};
+    }
+  }
+
+  /// [開光 P1 2026-10-01] 頁面捲動核心——隱藏門收編（截圖驗證頁面深處的基礎感官）
+  Future<Map<String, dynamic>> _handleAppScrollCore(Map<String, dynamic> params) async {
+    final direction = (params['direction'] as String?) ?? 'down';
+    final pixels = (params['pixels'] as num?)?.toDouble();
+    if (onAppScroll == null) {
+      return {'success': false, 'message': '捲動控制未連接（App 層未掛 callback）'};
+    }
+    return await onAppScroll!(direction, pixels);
+  }
+
+  Future<Response> _handleAppScroll(Request request) async {
+    final body = jsonDecode(await request.readAsString());
+    return Response.ok(
+        jsonEncode(await _handleAppScrollCore(
+            (body as Map).cast<String, dynamic>())),
+        headers: _jsonHeaders);
+  }
 
   Future<Response> _handleSetNodeParams(Request request) async {
     if (onSetNodeParams == null) {
@@ -1223,6 +1280,7 @@ class BridgeMcpServer {
           return _jsonRpcResult(id, _buildToolsListResult());
         case 'tools/call':
           final name = (params['name'] as String?) ?? '';
+          _dispatchedTools.add(name); // [tools_health] 活性記錄
           // Mcp-Name header 必填且等於 params.name
           if (headerName != null && headerName != name) {
             return _jsonRpcError(
@@ -1301,6 +1359,7 @@ class BridgeMcpServer {
         'io.modelcontextprotocol/serverInfo': {
           'name': 'bridge-mcp',
           'version': serverVersion,
+          'title': 'Bridge App Canvas MCP Server', // [開光 P0 2026-09-26] 對齊 discover——舊版 GET /mcp/tools 有 title，RPC 版漏了
         },
       },
       'tools': _toolSchemas,
@@ -1325,7 +1384,7 @@ class BridgeMcpServer {
     },
     {
       'name': 'screenshot',
-      'description': '截取畫布目前畫面（base64 PNG）。用於視覺理解。',
+      'description': '拍照：畫布目前畫面（畫布 RepaintBoundary 層，base64 PNG）。用於視覺理解。',
       'inputSchema': {
         'type': 'object',
         'properties': <String, dynamic>{},
@@ -1410,7 +1469,7 @@ class BridgeMcpServer {
     },
     {
       'name': 'send_user_message',
-      'description': '模擬使用者在聊天框打字——觸發完整 sendMessage 流程（IntentSpine → 反問 or AgentLoop）。用 sendDirectMessage 不依賴 UI text field。',
+      'description': '模擬使用者在聊天框打字——觸發完整 sendMessage 流程（IntentSpine → 反問 or AgentLoop）。此工具經 sendDirectMessage 送出，不經 UI 輸入框。',
       'inputSchema': {
         'type': 'object',
         'properties': {
@@ -1568,81 +1627,286 @@ class BridgeMcpServer {
         'additionalProperties': false,
       },
     },
-    // ── [v0.4.0 開光] Agent-as-User 心手眼——2026-09-26 ──────────
-    // 設計輸入：docs/V040_AGENT_AS_USER_DESIGN_INPUTS.md（8 撞牆點 → API）
+    // ── [開光 P0 · 小葵 2026-09-26] 補齊三份清單漂移 ─────────────
+    // auto_layout：dispatch 有 case（1601 行舊址）但 tools/list 從未收錄
+    {
+      'name': 'auto_layout',
+      'description': '一鍵自動排版：依連線拓撲分層排開所有節點，消除重疊。人看的故事線=左到右。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': <String, dynamic>{},
+        'additionalProperties': false,
+      },
+    },
+    // get_last_response：dispatch 有 case（2026-09-23 修）但 tools/list 未收錄
+    {
+      'name': 'get_last_response',
+      'description': '教練模式：取得 App Agent Loop 最後一條回覆內容。讓外部 Agent 能看見 App 內 Agent 的回答。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': <String, dynamic>{},
+        'additionalProperties': false,
+      },
+    },
+    // ── [開光 P0 · 小葵 2026-09-26] 眼/腦工具首次納入 MCP 層 ─────────
+    // app_view：App 視網膜拍照（AppRetina.capture 全域 RepaintBoundary），
+    // 任何頁面都拍得到——視網膜拍照的 MCP 正名版
     {
       'name': 'app_view',
-      'description': '視網膜拍照：拍 App 當前畫面（base64 PNG）。無參數；不需要導航。要「說看哪就拍哪」請用 app_look。',
+      'description': '拍照（低解析快照）：拍下整個 App 目前畫面（base64 PNG），不限畫布頁。App 尚未渲染時回 available:false。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'pixelRatio': {
+            'type': 'number',
+            'description': '拍照解析度倍率（預設 1.5）',
+          },
+        },
+        'additionalProperties': false,
+      },
+    },
+    // render_layer：渲染層場景語言（ActualSizeCache）——canvas_look 對稱版
+    {
+      'name': 'render_layer',
+      'description': '讀場景：畫布渲染層周邊視覺——真實渲染尺寸的節點/重疊/連線場景語言（與原生 Agent canvas_look 同源對稱）。零截圖。',
       'inputSchema': {
         'type': 'object',
         'properties': <String, dynamic>{},
         'additionalProperties': false,
       },
     },
+    // vector_search：語意/混合檢索——外部 agent 的大腦查詢通道
+    {
+      'name': 'vector_search',
+      'description': '語意檢索 App 大腦（記憶/知識）。mode=semantic 純語意，mode=hybrid 走 UI 同款完整管線（FTS 擴展+五因素+類型分層）。tech=1 含工程師技術層。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'q': {'type': 'string', 'description': '查詢語句'},
+          'limit': {'type': 'number', 'description': '回傳筆數上限（預設 10）'},
+          'mode': {
+            'type': 'string',
+            'description': 'semantic（預設）或 hybrid',
+          },
+          'tech': {'type': 'number', 'description': '1 = 含 technical 層（工程師模式）'},
+        },
+        'required': ['q'],
+        'additionalProperties': false,
+      },
+    },
+    // inject_enrich：注入管線單一入口——評測與線上同路徑 [小葵 2026-10-10 M1]
+    {
+      'name': 'inject_enrich',
+      'description': 'M1 記憶注入管線單一入口：digest→K1→候選合併→四槽位+預算→注入塊。名詞註冊：四槽位=core/task/episodic/scratch；K1=守門員篩選。與 agent_loop 線上注入同路徑（評測條件=線上條件）。回 input_digest/input_hash/block/injected_ids/latency_ms/dropped_count/k1_hits_n(命中數)/k1_kept_n(進塊數)/embedding_ok/failure_reason。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'q': {'type': 'string', 'description': '使用者訊息（完整原文）'},
+          'k1': {'type': 'boolean', 'description': '是否跑 K1 守門員（預設 true）'},
+        },
+        'required': ['q'],
+        'additionalProperties': false,
+      },
+    },
+    // get_agent_debug：教練模式偵錯——provider/model/第幾輪/是否本地
+    {
+      'name': 'get_agent_debug',
+      'description': '教練模式：Agent Loop 偵錯資訊——目前 provider、model、第幾輪、是否本地。用於觀察路由行為。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': <String, dynamic>{},
+        'additionalProperties': false,
+      },
+    },
+    // ── [開光 P1 · 小葵 2026-09-26] app.look 語意化視網膜 ─────────
+    {
+      'name': 'tools_health',
+      'description': '[開光 v0.4.0 #7] 工具級自檢：對照 _toolSchemas 與 dispatch case 清單（幽靈工具=有 schema 無 dispatch 立即現形）+ callback 接線狀態彙總。任何工具要嘛正常要嘛明確報錯，不允許優雅地回 null。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'verbose': {'type': 'boolean', 'description': 'true=逐工具明細'},
+        },
+      },
+    },
+    // ── [S1 合併 · 2026-10-12] app_look 雙 schema（頁名導航版 vs enum app/screen 版）
+    // 合併為一份：target 同時支援導航頁名 / app / screen；保留 region 與 pixelRatio。
     {
       'name': 'app_look',
-      'description': '語意化視網膜：說看哪就拍哪。target=home/chat/canvas/brain/vault/system/companion/training/app（app=當下畫面不導航）。導航→等渲染→拍照→回 base64 PNG + page。無效 target 回 -32602 帶合法清單。',
+      'description': '拍照（語意導航版）：說出想看哪裡，就拍到哪裡。target=home/chat/canvas/companion/training/vault/system → 導航後等渲染再拍照（base64 PNG），回傳所在頁面；target=app（預設，不導航）拍 App 當下畫面；target=screen 拍 OS 全螢幕。差異：screenshot=畫布層截圖、app_view=低解析快照、app_look=語意導航拍照、render_layer=圖層隔離、canvas_capture=畫布區域。',
       'inputSchema': {
         'type': 'object',
         'properties': {
-          'target': {'type': 'string', 'description': '頁面語意名'},
+          'target': {
+            'type': 'string',
+            'description': '想看的畫面：home/chat/canvas/brain/vault/system/companion/training（導航後拍照）、app=App 當下畫面不導航（預設）、screen=OS 全螢幕',
+          },
+          'region': {
+            'type': 'object',
+            'description': '可選裁切 {x,y,w,h}（邏輯像素）',
+            'properties': {
+              'x': {'type': 'number'}, 'y': {'type': 'number'},
+              'w': {'type': 'number'}, 'h': {'type': 'number'},
+            },
+          },
+          'pixelRatio': {
+            'type': 'number',
+            'description': '拍照解析度倍率（預設 1.5）',
+          },
         },
-        'required': ['target'],
         'additionalProperties': false,
       },
     },
+    // ── [開光 P1 · 小葵 2026-09-26] window_map 心之地圖 ───────────
     {
       'name': 'window_map',
-      'description': '每視窗地圖：主視窗幾何 + 懸浮夥伴窗狀態 + 大腦圖譜視窗偵測 + App PID。雙 App 重疊/關錯視窗事故的解藥——先看地圖再動手。',
+      'description': '每視窗地圖：主視窗幾何（window_manager）+ 懸浮夥伴窗狀態（NSPanel）+ 大腦圖譜視窗偵測 + App PID。雙 App 重疊/關錯視窗事故的解藥——先看地圖再動手。',
       'inputSchema': {
         'type': 'object',
         'properties': <String, dynamic>{},
         'additionalProperties': false,
       },
     },
-    {
-      'name': 'app_tap',
-      'description': '語意點擊：用按鈕名而非座標。target=canvas_toolbar:save/copy/test/run（存檔/另存/測試/執行）——與 UI 按鈕同一條程式路徑，零座標模擬。',
-      'inputSchema': {
-        'type': 'object',
-        'properties': {
-          'target': {'type': 'string', 'description': 'canvas_toolbar:save|copy|test|run'},
-        },
-        'required': ['target'],
-        'additionalProperties': false,
-      },
-    },
+    // ── [開光 P2 · 小葵 2026-09-26] app_tap 語意點擊 ───────────────
+    // [S2 合併 · 2026-10-12] 舊 canvas_toolbar 專屬 schema 已刪除——
+    // 單一份 app_tap schema 在「54 條隱藏門收編」區（selector/x/y/confirm + target 相容）。
+    // ── [開光 P2 · 小葵 2026-09-26] canvas_zoom 讀寫合一 ───────────
     {
       'name': 'canvas_zoom',
       'description': '畫布縮放讀寫合一：不帶參數=讀目前 scale；帶 scale=設定（自動 clamp）；帶 action=fit 全覽畫布內容。回傳 before/after scale。',
       'inputSchema': {
         'type': 'object',
         'properties': {
-          'scale': {'type': 'number', 'description': '目標縮放（1.0=100%）。省略=唯讀'},
-          'action': {'type': 'string', 'description': 'fit=縮放到看見全部內容'},
+          'scale': {
+            'type': 'number',
+            'description': '目標縮放（自動 clamp 至合法範圍）。1.0=100%。省略=唯讀',
+          },
+          'action': {
+            'type': 'string',
+            'description': 'fit=縮放到看見全部內容（不重排節點）',
+          },
         },
         'additionalProperties': false,
       },
     },
+    // ── [開光 P3 · 小葵 2026-09-26] app_permissions 權限即地圖 ─────
     {
       'name': 'app_permissions',
-      'description': '權限即地圖（紅線是篩選器）：回報 App 能力邊界——sandbox entitlements 聲明 + 外部依賴健康度。agent 行動前先看這張圖，不撞了才知道。',
+      'description': '權限即地圖（紅線是篩選器）：回報 App 能力邊界——sandbox entitlements 聲明（網路/檔案/麥克風/AppleScript）、外部依賴健康度（osascript 可用性）。agent 行動前先看這張圖，不撞了才知道。',
       'inputSchema': {
         'type': 'object',
         'properties': <String, dynamic>{},
         'additionalProperties': false,
       },
     },
+    // ── [開光 P3 · 小葵 2026-09-26] window_control 視窗管理 ────────
     {
       'name': 'window_control',
-      'description': '視窗管理官方 API：action=focus/minimize/center/restore。先 window_map 看地圖再動手。',
+      'description': '視窗管理官方 API：action=focus（聚焦主視窗）/minimize（最小化）/center（置中）/restore（還原預設大小 1440x900 置中）。先 window_map 看地圖再動手。',
       'inputSchema': {
         'type': 'object',
         'properties': {
-          'action': {'type': 'string', 'description': 'focus | minimize | center | restore'},
+          'action': {
+            'type': 'string',
+            'description': 'focus | minimize | center | restore',
+          },
         },
         'required': ['action'],
         'additionalProperties': false,
+      },
+    },
+    // ── [開光 P1 · 小葵 2026-10-01] 54 條隱藏門收編 ──
+    // 今日實證：截圖驗證「選擇模型」按鈕色，因清單在頁面深處需捲動而卡死
+    // ——scroll 這類基礎感官竟不在 discovery。此批收編 agent 高頻隱藏門。
+    // [S1 合併 · 2026-10-12] 舊 enum app/screen 版 app_look schema 已刪除——
+    // 單一份 schema 在上方（target 支援導航頁名 / app / screen）。
+    // ── [S2 合併 · 2026-10-12] app_tap 雙 schema（canvas_toolbar 版 vs selector/x/y 版）
+    // 合併為一份：selector/x/y/confirm 為主，target=canvas_toolbar:... 相容舊用法。
+    {
+      'name': 'app_tap',
+      'description': '點擊（語意目標）：selector=按鈕/連結上的文字（如「設為現役」「下載」），或 x/y 座標精密後門。內部自帶定位（key/text 搜尋），不需要視覺辨識。target=canvas_toolbar:save/copy/test/run 為畫布工具列語意點擊（相容舊用法）。confirm=true 才真點擊。點擊後可用 app_look 複核結果。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'selector': {'type': 'string', 'description': '語意選擇器：按鈕/連結上的文字（如「設為現役」「下載」）'},
+          'x': {'type': 'number', 'description': '精密後門：App 邏輯座標 x'},
+          'y': {'type': 'number', 'description': '精密後門：App 邏輯座標 y'},
+          'confirm': {'type': 'boolean', 'description': 'true=執行真點擊（預設 false 只定位回報）'},
+          'target': {
+            'type': 'string',
+            'description': 'canvas_toolbar:save | canvas_toolbar:copy | canvas_toolbar:test | canvas_toolbar:run（畫布工具列語意點擊，相容舊用法）',
+          },
+        },
+        'additionalProperties': false,
+      },
+    },
+    {
+      'name': 'app_scroll',
+      'description': '捲動目前頁面：direction=up/down/top/bottom，pixels=可選精確量。看見頁面深處的內容（如「選擇模型」清單尾端）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'direction': {'type': 'string', 'enum': ['up', 'down', 'top', 'bottom'], 'description': '捲動方向'},
+          'pixels': {'type': 'number', 'description': '精確捲動像素（與 direction 二選一）'},
+        },
+        'required': ['direction'],
+      },
+    },
+    {
+      'name': 'galaxy_view',
+      'description': '大腦星系視圖：galaxy_data 取星系圖資料、galaxy_open 開啟特定節點。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'action': {'type': 'string', 'enum': ['data', 'open', 'ping', 'version'], 'description': 'data=圖資料/open=開節點/ping=活性/version=版本'},
+          'nodeId': {'type': 'string', 'description': 'action=open 時的節點 ID'},
+        },
+        'required': ['action'],
+      },
+    },
+    {
+      'name': 'identity_reembed',
+      'description': '身份重嵌入進度查詢/觸發（向量資料庫的 identity 嵌入狀態）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'action': {'type': 'string', 'enum': ['status', 'trigger'], 'description': 'status=查進度/trigger=啟動'},
+        },
+        'required': ['action'],
+      },
+    },
+    {
+      'name': 'vector_sketch',
+      'description': '向量素描（VectorSketch）：素描生成進度與狀態查詢。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {},
+      },
+    },
+    {
+      'name': 'import_progress',
+      'description': '資料匯入進度（記憶匯入器等長任務的進度查詢）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {},
+      },
+    },
+    {
+      'name': 'global_notice',
+      'description': '全域對話佇列認領（App 有話要對 agent 說時，agent 認領訊息）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {},
+      },
+    },
+    {
+      'name': 'rescan',
+      'description': '手動觸發資料夾重掃（檔案巡邏）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'root': {'type': 'string', 'description': '要掃的根目錄路徑（空=全部）'},
+        },
       },
     },
   ];
@@ -1756,6 +2020,202 @@ class BridgeMcpServer {
             'message': injected ? 'Message injected to AgentLoop' : 'AgentLoop not running or not ready',
           });
 
+        // ── [開光 v0.4.0 · 2026-10-01] 眼與手：app_look / app_tap ──
+        case 'tools_health': {
+          // [開光 v0.4.0 #7] 幽靈工具現形 + callback 接線彙總
+          final verbose = (args['verbose'] as bool?) ?? false;
+          final schemaNames = _toolSchemas.map((t) => t['name'] as String).toSet();
+          final knownDispatched = _dispatchedTools;
+          final neverDispatched = schemaNames.difference(knownDispatched).toList()..sort();
+          final callbacks = <String, bool>{
+            'onAppScroll': onAppScroll != null,
+            'onAppTap': onAppTap != null,
+            'onSetNodeParams': onSetNodeParams != null,
+            'onGetNodeParams': onGetNodeParams != null,
+          };
+          final missingCallbacks =
+              [for (final e in callbacks.entries) if (!e.value) e.key];
+          // get_canvas_state 活性探針（9/23 回 null 慘案的針對性檢查）
+          String? canvasStateProbe;
+          if (onGetState == null) {
+            canvasStateProbe = 'callback 未接線';
+          } else {
+            try {
+              final st = await _getCanvasStateSafe();
+              canvasStateProbe = st == null
+                  ? 'null（序列化異常——原 #7 慘案形態）'
+                  : 'ok（${(st['nodes'] as List?)?.length ?? '?'} 節點）';
+            } catch (e) {
+              canvasStateProbe = 'exception: $e';
+            }
+          }
+          final healthy = missingCallbacks.isEmpty && canvasStateProbe!.startsWith('ok');
+          return _jsonRpcResult(id, {
+            'resultType': 'complete',
+            'healthy': healthy,
+            'toolsTotal': schemaNames.length,
+            'dispatchedEver': knownDispatched.length,
+            'neverDispatched': neverDispatched, // 曾經宣告但從未被叫過（含幽靈與冷門）
+            'callbacksWired': callbacks,
+            'missingCallbacks': missingCallbacks,
+            'canvasStateProbe': canvasStateProbe,
+            if (verbose) 'allTools': schemaNames.toList()..sort(),
+            'checkedAt': DateTime.now().toIso8601String(),
+            if (!healthy)
+              'message': '有未接線 callback 或 canvas_state 異常——詳見各欄位',
+          });
+        }
+        case 'app_look': {
+          // [S1 合併 · 2026-10-12] 雙 case（語意導航版 vs enum app/screen 版）合併：
+          // target=screen → OS 全螢幕；target=app（預設）→ 不導航拍當下；
+          // 其他合法頁名 → 導航 → 等渲染 → 拍照（原語意導航版邏輯）。
+          const validTargets = [
+            'app', 'home', 'chat', 'canvas', 'brain', 'vault', 'system',
+            'companion', 'training', 'screen',
+          ];
+          final target = (args['target'] as String?) ?? 'app';
+          if (!validTargets.contains(target)) {
+            return _jsonRpcError(id, -32602,
+                'Invalid target: $target. Valid: ${validTargets.join("/")}');
+          }
+          if (target == 'screen') {
+            // [開光 v0.4.x · 2026-10-01] OS 層視網膜——
+            // 走 ScreenCaptureNative（Swift 進程內 CGWindowList，非 sandbox 子進程）
+            if (onScreenCapture == null) {
+              return _jsonRpcResult(id, {
+                'resultType': 'complete', 'available': false,
+                'message': '螢幕拍攝 callback 未接線（onScreenCapture）',
+              });
+            }
+            try {
+              final b64 = await onScreenCapture!();
+              if (b64 == null || b64.isEmpty) {
+                return _jsonRpcResult(id, {
+                  'resultType': 'complete', 'available': false,
+                  'message': 'OS 拍攝回空（可能未授螢幕錄製權限）',
+                });
+              }
+              return _jsonRpcResult(id, {
+                'resultType': 'complete', 'available': true,
+                'image': b64, 'format': 'png', 'encoding': 'base64',
+                'target': 'screen', 'bytes': (b64.length * 3) ~/ 4,
+                'capturedAt': DateTime.now().toIso8601String(),
+              });
+            } catch (e) {
+              return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'message': 'OS 拍攝失敗: $e'});
+            }
+          }
+          // 導航（brain 開獨立視窗不適用視網膜；target=app 不導航）
+          if (target != 'app' && target != 'brain') {
+            if (onNavigate == null) return error('Navigation not available');
+            onNavigate!(target, null);
+          }
+          if (target == 'brain') {
+            // [S1 合併 · 2026-10-12] brain 回覆改用 galaxy 指引訊息（原語意導航版語意）
+            return _jsonRpcResult(id, {
+              'resultType': 'complete',
+              'available': false,
+              'target': target,
+              'message': 'brain 開獨立瀏覽器視窗，視網膜拍不到——改用 /galaxy 頁或 galaxy 截圖指令',
+            });
+          }
+          // 等渲染（幀 Budget：300ms 導航動畫 + 200ms settle）
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          try {
+            final b64 = await AppRetina.capture(
+              pixelRatio: (args['pixelRatio'] as num?)?.toDouble() ?? 1.5,
+            );
+            if (b64 == null) {
+              return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'target': target, 'message': 'App 尚未渲染'});
+            }
+            final page = (onGetAppState != null) ? onGetAppState!()['page'] : null;
+            return _jsonRpcResult(id, {
+              'resultType': 'complete',
+              'available': true,
+              'target': target,
+              'page': page,
+              'image': b64,
+              'format': 'png',
+              'encoding': 'base64',
+              'capturedAt': DateTime.now().toIso8601String(),
+            });
+          } catch (e) {
+            return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'target': target, 'message': '視網膜拍照失敗: $e'});
+          }
+        }
+        case 'app_tap':
+          // [S2 合併 · 2026-10-12] 雙 case（canvas_toolbar 版 vs selector/x/y 版）合併：
+          // args 帶 target（且無 selector/x）→ 走 canvas_toolbar 語意點擊（相容舊用法）；
+          // 否則走 selector/x/y/confirm 核心定位/點擊。
+          final tapTarget = args['target'] as String?;
+          final tapSelector = args['selector'] as String?;
+          final tapX = args['x'] as num?;
+          if (tapTarget != null && tapSelector == null && tapX == null) {
+            // canvas_toolbar 舊路徑：參數驗證先於接線檢查——target 錯就是錯
+            if (tapTarget.isEmpty) {
+              return _jsonRpcError(id, -32602, 'target required');
+            }
+            const validTaps = [
+              'canvas_toolbar:save', 'canvas_toolbar:copy',
+              'canvas_toolbar:test', 'canvas_toolbar:run',
+            ];
+            if (!validTaps.contains(tapTarget)) {
+              return _jsonRpcError(id, -32602,
+                  'Invalid target: $tapTarget. Valid: ${validTaps.join("/")}');
+            }
+            if (onTap == null) return error('Tap handler not connected');
+            final result = onTap!(tapTarget);
+            return _jsonRpcResult(id, {'resultType': 'complete', ...?result});
+          }
+          return _jsonRpcResult(id, await _handleAppTapCore(args));
+        // ── [開光 P1.5 · 2026-10-01] 隱藏門收編：schema+dispatch 全接線 ──
+        case 'galaxy_view': {
+          final action = (args['action'] as String?) ?? 'data';
+          final routeMap = {
+            'data': '/galaxy_data', 'open': '/galaxy_open',
+            'ping': '/galaxy_ping', 'version': '/galaxy_version',
+          };
+          final route = routeMap[action] ?? '/galaxy_data';
+          return _jsonRpcResult(id, await _proxyGet(route));
+        }
+        case 'galaxy_cmd':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_cmd'));
+        case 'galaxy_oplog':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_oplog'));
+        case 'galaxy_note':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_note'));
+        case 'galaxy_edit':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_edit'));
+        case 'galaxy_params':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_params'));
+        case 'galaxy_icons':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_icons'));
+        case 'galaxy_thumb':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_thumb'));
+        case 'galaxy_swarm':
+          return _jsonRpcResult(id, await _proxyGet('/galaxy_swarm_live'));
+        case 'identity_reembed':
+          return _jsonRpcResult(id, await _proxyGet('/identity_reembed'));
+        case 'vector_sketch':
+          return _jsonRpcResult(id, await _proxyGet('/vector_sketch'));
+        case 'import_progress':
+          return _jsonRpcResult(id, await _proxyGet('/import_progress'));
+        case 'global_notice':
+          return _jsonRpcResult(id, await _proxyGet('/global_notice'));
+        case 'rescan':
+          return _jsonRpcResult(id, await _proxyGet('/rescan'));
+        case 'annotations':
+          return _jsonRpcResult(id, await _proxyGet('/annotations'));
+        case 'brain_search_focus':
+          return _jsonRpcResult(id, await _proxyGet('/brain_search_focus'));
+        case 'design_thumb_reindex':
+          return _jsonRpcResult(id, await _proxyGet('/design_thumb_reindex'));
+        case 'fps_probe':
+          return _jsonRpcResult(id, await _proxyGet('/fps_probe'));
+        case 'app_scroll':
+          // [benchmark 抓包 2026-10-01] 傳 args 而非 params——direction 藏在
+          // params['arguments'] 內，傳錯層導致 bottom 永遠被當 down+600
+          return _jsonRpcResult(id, await _handleAppScrollCore(args));
         case 'navigate':
           if (onNavigate == null) return error('Navigation not available');
           final target = args['target'] as String? ?? 'home';
@@ -1844,13 +2304,27 @@ class BridgeMcpServer {
           await onLoadTemplate!(templateId);
           return _jsonRpcResult(id, {'resultType': 'complete', 'success': true, 'message': '模板已載入: $templateId'});
 
-        // ── [v0.4.0 開光] Agent-as-User 心手眼 dispatch — 2026-09-26 ──
-        // 語意化工具：看不見就誠實說看不見（available:false + reason），
-        // 參數錯帶合法清單（-32602），不讓 agent 猜。
+        // ── [開光 P0 · 小葵 2026-09-26] dispatch 補缺 + 眼/腦工具 ─────────
+        // get_agent_debug：清單曾宣稱（GET /mcp/tools 舊版）但 dispatch 沒 case——
+        // get_last_response 9/23 同款「清單有、dispatch 沒」bug 的姐妹案
+        case 'get_agent_debug':
+          if (onGetAgentDebugInfo == null) {
+            return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'message': 'Debug handler not connected'});
+          }
+          final info = onGetAgentDebugInfo!();
+          if (info == null) {
+            return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'message': 'Agent Loop not running'});
+          }
+          return _jsonRpcResult(id, {'resultType': 'complete', 'available': true, ...info, 'timestamp': DateTime.now().toIso8601String()});
 
+        // app_view：視網膜拍照 MCP 正名版——AppRetina 自包含，不需 callback
+        // [開光] 眼的語意：看不見（未渲染/無 binding/拍照失敗）一律 available:false
+        // 附原因——誠實報「看不見」，不噴 -32603 讓 agent 猜
         case 'app_view':
           try {
-            final b64 = await AppRetina.capture();
+            final b64 = await AppRetina.capture(
+              pixelRatio: (args['pixelRatio'] as num?)?.toDouble() ?? 1.5,
+            );
             if (b64 == null) {
               return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'message': 'App 尚未渲染'});
             }
@@ -1858,123 +2332,194 @@ class BridgeMcpServer {
               'resultType': 'complete',
               'available': true,
               'image': b64,
-              'mimeType': 'image/png',
+              'format': 'png',
+              'encoding': 'base64',
               'capturedAt': DateTime.now().toIso8601String(),
             });
           } catch (e) {
             return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'message': '視網膜拍照失敗: $e'});
           }
 
-        case 'app_look':
-          final target = args['target'] as String? ?? '';
-          const validTargets = [
-            'home', 'chat', 'canvas', 'brain', 'vault', 'system',
-            'companion', 'training', 'app',
-          ];
-          if (target.isEmpty || !validTargets.contains(target)) {
-            return _jsonRpcError(id, -32602,
-                'Invalid target: $target. Valid: ${validTargets.join("/")}');
+        // render_layer：渲染層場景語言（canvas_look 對稱）
+        case 'render_layer':
+          if (onGetRenderLayer == null) return error('Render layer not available');
+          final data = await onGetRenderLayer!();
+          return _jsonRpcResult(id, {'resultType': 'complete', ...data});
+
+        // inject_enrich：注入管線單一入口（M1——評測與線上同路徑）
+        case 'inject_enrich':
+          final q = args['q'] as String? ?? '';
+          if (q.isEmpty) {
+            return _jsonRpcError(id, -32602, 'q required');
           }
-          if (onNavigate == null) return error('Navigate not available');
-          if (target != 'app') {
-            onNavigate!(target, null);
-            await Future<void>.delayed(const Duration(milliseconds: 500));
-          }
+          final useK1 = args['k1'] as bool? ?? true;
           try {
-            final b64 = await AppRetina.capture();
-            if (b64 == null) {
-              return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'target': target, 'message': 'App 尚未渲染'});
-            }
+            final outcome = await InjectionPreparer.instance.prepare(
+              q,
+              k1: useK1,
+              logSample: false,
+            );
             return _jsonRpcResult(id, {
               'resultType': 'complete',
-              'available': true,
-              'target': target,
-              'page': target == 'app' ? 'current' : target,
-              'image': b64,
-              'mimeType': 'image/png',
+              'q': q,
+              'input_digest': outcome.inputDigest,
+              'input_hash': outcome.inputHash,
+              'block': outcome.block,
+              'injected_ids': outcome.ids,
+              'latency_ms': outcome.latencyMs,
+              'dropped_count': outcome.droppedCount,
+              'k1_hits_n': outcome.k1MergedN,
+              'k1_kept_n': outcome.k1KeptN,
+              'embedding_ok': outcome.embeddingOk,
+              'k1_label': outcome.k1Label,
+              'k1_confidence': outcome.k1Confidence,
+              'k1_escalated': outcome.k1Escalated,
+              'k1_source': outcome.k1Source,
+              if (outcome.failureReason != null)
+                'failure_reason': outcome.failureReason,
             });
           } catch (e) {
-            return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'target': target, 'message': '視網膜拍照失敗: $e'});
+            return _jsonRpcError(id, -32603, 'inject_enrich failed: $e');
           }
 
-        case 'window_map':
-          final map = <String, dynamic>{'pid': pid};
+        // vector_search：大腦語意檢索
+        // [開光] 序列化對齊 REST 版——HybridSearchResults 是物件不可直接 jsonEncode
+        case 'vector_search':
+          final q = args['q'] as String? ?? '';
+          if (q.isEmpty) {
+            return _jsonRpcError(id, -32602, 'q required');
+          }
+          final limit = (args['limit'] as num?)?.toInt() ?? 10;
+          final mode = args['mode'] as String? ?? 'semantic';
+          final includeTechnical = (args['tech'] as num?)?.toInt() == 1;
           try {
-            final bounds = await windowManager.getBounds();
-            final focused = await windowManager.isFocused();
-            map['mainWindow'] = {
-              'width': bounds.width.round(),
-              'height': bounds.height.round(),
-              'x': bounds.left.round(),
-              'y': bounds.top.round(),
-              'focused': focused,
-            };
+            final results = await HybridSearchService.instance.search(
+              query: q,
+              mode: mode == 'hybrid' ? SearchMode.hybrid : SearchMode.semantic,
+              limit: limit,
+              includeTechnical: includeTechnical,
+            );
+            return _jsonRpcResult(id, {
+              'resultType': 'complete',
+              'query': q,
+              'mode': mode,
+              'memoryHits': results.memoryHits
+                  .map((h) => {
+                        'id': h.id,
+                        'room': h.room,
+                        'score': h.score.toStringAsFixed(4),
+                        'content': h.content.length > 80 ? '${h.content.substring(0, 80)}…' : h.content,
+                      })
+                  .toList(),
+              'assetHits': results.assetHits
+                  .map((h) => {
+                        'id': h.id,
+                        'file': h.fileName,
+                        'path': h.filePath,
+                        'score': h.score.toStringAsFixed(4),
+                      })
+                  .toList(),
+              'crossLinks': results.crossLinks.length,
+              if (results.synthesizedAnswer != null)
+                'synthesizedAnswer': results.synthesizedAnswer,
+            });
           } catch (e) {
-            map['mainWindow'] = {'available': false, 'reason': 'window_manager 未初始化: $e'};
+            return _jsonRpcError(id, -32603, 'Vector search failed: $e');
+          }
+
+        // ── [開光 P1 · 小葵 2026-09-26] app_look 語意化視網膜 ─────────
+        // [S1 合併 · 2026-10-12] 舊語意導航版 case 已刪除——
+        // 單一 app_look case 在上方（screen/app/導航頁名三路合一）。
+        // 「說出想看哪裡，就拍到哪裡」：導航 → 等渲染 → AppRetina 拍照。
+
+        // ── [開光 P1 · 小葵 2026-09-26] window_map 心之地圖 ───────────
+        // 主視窗幾何 + 懸浮窗 + galaxy 偵測 + PID——先看地圖再動手。
+        case 'window_map':
+          final map = <String, dynamic>{
+            'pid': pid,
+            'mcpPort': port,
+            'capturedAt': DateTime.now().toIso8601String(),
+          };
+          try {
+            final size = await windowManager.getSize();
+            final position = await windowManager.getPosition();
+            final isFocused = await windowManager.isFocused();
+            final isVisible = await windowManager.isVisible();
+            map['mainWindow'] = {
+              'width': size.width.round(),
+              'height': size.height.round(),
+              'x': position.dx.round(),
+              'y': position.dy.round(),
+              'focused': isFocused,
+              'visible': isVisible,
+            };
+          } catch (_) {
+            map['mainWindow'] = {'available': false, 'reason': 'window_manager 未初始化（測試環境）'};
           }
           try {
-            // 公開版 shell channel：inspect() 回連線狀態（無逐窗快照 API）
-            final conn = await const MacosDesktopShellChannel().inspect();
-            map['companionPanel'] = {
-              'connected': conn.connected,
-              'platform': conn.platform,
-              'nativePanelAvailable': conn.nativePanelAvailable,
-              if (conn.message.isNotEmpty) 'message': conn.message,
+            final companion = await const MacosDesktopShellChannel().snapshot();
+            if (companion != null) {
+              map['companionPanel'] = {
+                'available': true,
+                'visible': companion.visible,
+                'paused': companion.paused,
+                'alwaysOnTop': companion.alwaysOnTop,
+                'width': companion.width.round(),
+                'height': companion.height.round(),
+                'companionName': companion.companionName,
+                'statusText': companion.statusText,
+              };
+            } else {
+              map['companionPanel'] = {'available': false};
+            }
+          } catch (_) {
+            map['companionPanel'] = {'available': false, 'reason': 'shell channel 未連線'};
+          }
+          try {
+            // galaxy 視窗偵測：Chrome --app 視窗標題「橋樑大腦圖譜」
+            final r = Process.runSync('osascript', [
+              '-e',
+              'tell application "System Events" to get name of every window of every process whose name is "Google Chrome"',
+            ]);
+            final titles = (r.stdout as String).trim();
+            map['galaxyWindow'] = {
+              'detected': titles.contains('橋樑大腦圖譜'),
+              'title': titles.contains('橋樑大腦圖譜') ? '橋樑大腦圖譜' : null,
             };
-          } catch (e) {
-            map['companionPanel'] = {'available': false, 'reason': '懸浮窗檢查失敗: $e'};
+          } catch (_) {
+            map['galaxyWindow'] = {'detected': false, 'reason': 'osascript/權限不可用'};
           }
           return _jsonRpcResult(id, {'resultType': 'complete', ...map});
 
-        case 'app_tap':
-          final target = args['target'] as String? ?? '';
-          if (target.isEmpty) {
-            return _jsonRpcError(id, -32602, 'target required');
-          }
-          final validTaps = [
-            'canvas_toolbar:save', 'canvas_toolbar:copy',
-            'canvas_toolbar:test', 'canvas_toolbar:run',
-          ];
-          if (!validTaps.contains(target)) {
-            return _jsonRpcError(id, -32602,
-                'Invalid target: $target. Valid: ${validTaps.join("/")}');
-          }
-          // 參數驗證先於接線檢查——target 錯就是錯，不管有沒有接線
-          if (onTap == null) return error('Tap handler not connected');
-          final result = onTap!(target);
-          return _jsonRpcResult(id, {'resultType': 'complete', ...?result});
+        // ── [開光 P2 · 小葵 2026-09-26] app_tap 語意點擊 ───────────────
+        // [S2 合併 · 2026-10-12] 舊 canvas_toolbar 專屬 case 已刪除——
+        // 單一 app_tap case 在上方（target 舊路徑與 selector/x/y 核心二合一）。
+        // 手的語意化：按鈕名而非座標。回呼式接線（同 auto_layout 慣例）。
 
+        // ── [開光 P2 · 小葵 2026-09-26] canvas_zoom 讀寫合一 ───────────
+        // 走 CanvasMcpRegistry.controller——ambient 覆寫時自動路由到任務工作畫布
         case 'canvas_zoom':
           final reg = CanvasMcpRegistry.instance;
           final ctrl = reg.controller;
-          if (ctrl == null) {
-            return _jsonRpcError(id, -32603, 'Canvas controller not connected');
-          }
-          final scaleArg = args['scale'];
-          final action = args['action'] as String?;
-          if (scaleArg == null && action == null) {
-            // 唯讀
-            final after = ctrl.state.viewport.scale;
-            return _jsonRpcResult(id, {
-              'resultType': 'complete',
-              'before': double.parse(after.toStringAsFixed(3)),
-              'after': double.parse(after.toStringAsFixed(3)),
-              'percent': '${(after * 100).round()}%',
-              'mode': 'read',
-            });
-          }
+          if (ctrl == null) return error('Canvas controller not connected');
           final before = ctrl.state.viewport.scale;
-          if (action == 'fit') {
+          final scaleArg = (args['scale'] as num?)?.toDouble();
+          final action = args['action'] as String?;
+          if (scaleArg != null) {
+            // 寫：設定縮放（clamp 由 controller.zoom 內部處理）
             final size = reg.canvasPixelSize;
-            ctrl.fitToContent(size ?? const Size(1200, 800));
-          } else if (scaleArg is num) {
-            final size = reg.canvasPixelSize ?? const Size(1200, 800);
-            final focal = Offset(size.width / 2, size.height / 2);
-            ctrl.zoom(scaleArg.toDouble(), focal);
-          } else {
-            return _jsonRpcError(id, -32602, 'Invalid params: scale (number) or action ("fit")');
+            final focal = size != null
+                ? Offset(size.width / 2, size.height / 2)
+                : const Offset(720, 450);
+            ctrl.zoom(scaleArg, focal);
+          } else if (action == 'fit') {
+            final size = reg.canvasPixelSize;
+            if (size != null) {
+              ctrl.fitToContent(size, padding: 100);
+            } else {
+              return error('canvasPixelSize 未就緒（畫布未掛載）');
+            }
           }
-          await Future<void>.delayed(const Duration(milliseconds: 120));
           final after = ctrl.state.viewport.scale;
           return _jsonRpcResult(id, {
             'resultType': 'complete',
@@ -1984,11 +2529,14 @@ class BridgeMcpServer {
             'mode': scaleArg != null ? 'set' : (action == 'fit' ? 'fit' : 'read'),
           });
 
+        // ── [開光 P3 · 小葵 2026-09-26] app_permissions 權限即地圖 ─────
+        // 紅線是篩選器：行動前先看邊界。讀 entitlements 宣告 + 探測外部依賴。
         case 'app_permissions':
           final perms = <String, dynamic>{
             'pid': pid,
             'capturedAt': DateTime.now().toIso8601String(),
           };
+          // ① sandbox entitlements——codesign 讀簽章時的 entitlements（最準）
           try {
             final exePath = Platform.resolvedExecutable;
             final appRoot = exePath.split('/Contents/MacOS/').first;
@@ -2009,6 +2557,7 @@ class BridgeMcpServer {
           } catch (e) {
             perms['entitlements'] = {'available': false, 'reason': 'codesign 讀取失敗: $e'};
           }
+          // ② 外部依賴健康度——agent 常用通道的實測可用性
           final deps = <String, dynamic>{};
           try {
             final r = Process.runSync('osascript', ['-e', 'return "ok"']);
@@ -2029,12 +2578,15 @@ class BridgeMcpServer {
             deps['screencapture'] = false;
           }
           perms['dependencies'] = deps;
+          // [開光 P3] 誠實語意：沙盒內 screencapture 靜默失敗是事實，
+          // 給 agent 指路——App 自家視網膜（app_look/app_view）才是正道
           if (deps['screencapture'] != true) {
             perms['hint'] = '沙盒內 screencapture 不可用屬實（無 TCC 條目、外部 binary 被擋）。'
                 '要拍 App 畫面請改用 app_look / app_view（App 自家視網膜，更快更穩）。';
           }
           return _jsonRpcResult(id, {'resultType': 'complete', ...perms});
 
+        // ── [開光 P3 · 小葵 2026-09-26] window_control 視窗管理 ────────
         case 'window_control':
           final action = args['action'] as String? ?? '';
           const validActions = ['focus', 'minimize', 'center', 'restore'];
@@ -2176,6 +2728,42 @@ static final List<String> _galaxyCmdQueue = [];
   }
 
   /// GET /galaxy_swarm_campaigns — [M5b] 戰役資產列表（作戰模式選單）
+  /// GET /galaxy_missions — [H5] 戰爭模式任務面板資料包
+  /// 「同時看見要做什麼（任務）與腦內正在發生什麼（作戰事件流）」
+  /// —— Phase H spec §4 獨家場景的資料側。
+  Future<Response> _handleGetGalaxyMissions(Request req) async {
+    try {
+      // [H4] 排程卡（Hermes cron 重現——真相源只讀）
+      final schedules = await ScheduleRegistry.instance.loadAll();
+      // 專案門看板（進行中/等待中）
+      final doors = await ProjectDoorStore().loadAll();
+      return Response.ok(jsonEncode({
+        'schedules': [
+          for (final c in schedules)
+            {
+              'id': c.id,
+              'name': c.name,
+              'human': c.humanSchedule,
+              'warmth': c.warmth.name,
+              if (c.warmLine != null) 'warmLine': c.warmLine,
+              if (c.nextRun != null)
+                'nextRun': c.nextRun!.toIso8601String(),
+            }
+        ],
+        'projects': [
+          for (final d in doors)
+            {
+              'id': d.id,
+              'title': d.title,
+              'status': d.status,
+            }
+        ],
+      }), headers: _jsonHeaders);
+    } catch (e) {
+      return Response.ok(jsonEncode({'error': '$e'}), headers: _jsonHeaders);
+    }
+  }
+
   Future<Response> _handleGetSwarmCampaigns(Request req) async {
     try {
       final list = await SwarmCampaignAssets.instance.listCampaigns();

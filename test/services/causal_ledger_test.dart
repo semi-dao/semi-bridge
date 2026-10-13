@@ -178,7 +178,7 @@ void main() {
       // 昨天
       expect(CausalLedger.buildFeedbackSection([mk(DateTime(2026, 9, 11, 8))], now: now),
           contains('[昨天｜成功]'));
-      // 16 天前（時間感案例——不得感知成 3 個月）
+      // 16 天前（歷史案例——不得感知成 3 個月）
       expect(CausalLedger.buildFeedbackSection([mk(DateTime(2026, 8, 27))], now: now),
           contains('[16 天前｜成功]'));
       // 90 天前

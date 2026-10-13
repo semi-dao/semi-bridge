@@ -20,20 +20,27 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show Random;
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as image;
+import '../local_model_scheduler.dart'; // [小葵 2026-10-01] 離合器活躍訊號
 import '../storage_service.dart';
 import '../causal/causal_ledger_service.dart'; // [因果引擎 L1] 介入帳本
 import '../api_usage_tracker.dart'; // [小葵 2026-09-21 收尾驗收] per-task token 歸因
-import '../decision/k1_gatekeeper.dart'; // [小葵 2026-09-21 R3] K1 守門員
+import '../decision/k1_gatekeeper.dart'; // [小葵 2026-09-21 R3] K1 守門員（K1Decision/K1Labels 型別；實際呼叫已移 InjectionPreparer）
 import '../decision/decision_head.dart' show K1Labels, K1Decision; // [小葵 2026-09-22] 輕裝路徑
-import '../vector_db/hybrid_search_service.dart'; // [R3] K1 need → 語意檢索
+import '../vector_db/hybrid_search_service.dart'; // [R3→M1] SearchMode 等型別（K1 檢索已移 InjectionPreparer）
+import '../brain_container/event_ledger.dart'; // [M0] 事件日誌
+import '../brain_container/inject/inject_pipeline.dart'; // [M0] 記憶注入
+import '../brain_container/injection_preparer.dart'; // [M1] K1+M0 單一注入入口
 import 'compass_medic.dart'; // [軍醫 W3/W4] 羅盤出診＋傷口自癒
 import 'agent_loop_tools/tool_seek_tool.dart'; // [小葵 2026-09-22] 精靈任務配備
 import 'agent_safety.dart'; // [D002] 工具確認
 import 'agent_tool.dart';
 import 'agent_tool_call_parser.dart';
 import 'agent_tool_registry.dart';
+import 'context_store.dart' as context_store; // [Spike 002] CLM 形狀 context 管理
 import 'production_agent_loop_llm_client.dart';
 
 /// Agent Loop 結果
@@ -117,6 +124,20 @@ class AgentLoop {
   /// [小葵 2026-09-22] 最近一次 K1 判定——輕裝路徑判斷用
   K1Decision? _lastK1Decision;
 
+  /// turn_id 產生器：時間戳＋6 位隨機後綴——防同毫秒撞號。
+  /// [小葵 2026-10-10 M1]（Fable delta）兩條 AgentLoop 迴圈同毫秒落兩筆
+  /// 會撞 id；appendReaction 以 ref_turn_id 去重，撞號會讓第二輪永遠記
+  /// 不到反應。
+  static final Random _turnIdRandom = Random();
+  static String _newTurnId() {
+    const chars = 'abcdef0123456789';
+    final suffix = List.generate(
+      6,
+      (_) => chars[_turnIdRandom.nextInt(16)],
+    ).join();
+    return 'turn_${DateTime.now().millisecondsSinceEpoch}_$suffix';
+  }
+
   /// [Blue 拍板 2026-09-18] 與 Hermes（小葵）對齊——無固定輪數限制，對 agent 有信心。
   /// 剩餘空間 = 物理上限（context window、API 額度），不是人為輪數。
   /// 安全閥只留超大值，純防 LLM 真的壞掉死循環燒錢（正常 agent 永遠碰不到）。
@@ -148,6 +169,25 @@ class AgentLoop {
 
   /// [軍醫 W3] 待注入下一輪的救急藥卡（撞牆出診佇列）
   String? medicRescueQueued;
+
+  /// [Spike 002 2026-10-13] CLM 形狀 context store——per-run 生命週期。
+  /// 每次 run() 開頭重建，context_recall 工具動態註冊（見 _runInner）。
+  context_store.ContextStore _contextStore = context_store.ContextStore();
+
+  /// [跨輪層 2026-10-13] session 級 store——跨 run 活著，對話歷史壓縮用。
+  /// 切換/新建對話時由 chat_controller 呼叫 resetSessionStore() 重置。
+  context_store.ContextStore _sessionStore = context_store.ContextStore();
+
+  /// [跨輪層] 給 chat_controller 的歷史壓縮入口（CLM 形狀：封存+指針+讀回）。
+  List<Map<String, String>> compactHistoryForSession(
+      List<Map<String, String>> history) {
+    return context_store.ContextStore.compactHistory(_sessionStore, history);
+  }
+
+  /// [跨輪層] 新對話/切換對話時重置 session store（舊指針作廢）。
+  void resetSessionStore() {
+    _sessionStore = context_store.ContextStore();
+  }
 
   AgentLoop({required this.toolRegistry, required this.llmClient});
 
@@ -193,6 +233,16 @@ class AgentLoop {
     // 每輪可從 log 追蹤大戶（不需要時可移除）
     debugPrint('[AgentPerf] systemPrompt=${systemPrompt.length} chars, '
         'userMessage=${userMessage.length} chars');
+    // [小葵 2026-10-01 離合器] 使用者活躍訊號——聊天優先權於辨識：
+    // AgentLoop 開跑 = 使用者在等回覆，若正在辨識模式，等安全點切回夥伴。
+    LocalModelScheduler.instance.markUserActivity();
+    // [小葵 2026-10-05 開案令] 認知傷口偵測——幻讀進夢的入口。
+    // 訊號：使用者糾正（上一輪任務完成後 2 小時內出現糾正訊號詞）。
+    // 工具全成功但結論被罵 = 「成功地錯了」——工具傷口系統照不到的病。
+    // fail-open：偵測異常絕不擋任務。
+    try {
+      _maybeFileCognitiveWound(userMessage);
+    } catch (_) {}
     try {
       // [小葵 2026-09-22 驗屍用] 真實 prompt 落地——找出 15K tokens 大戶
       final f = File('/tmp/agent_prompt_dump.txt');
@@ -201,7 +251,7 @@ class AgentLoop {
           '\n===== USER (${userMessage.length} chars) =====\n$userMessage\n');
     } catch (_) {}
     try {
-      return await _runInner(
+      final result = await _runInner(
         systemPrompt: systemPrompt,
         userMessage: userMessage,
         maxTurns: maxTurns,
@@ -211,6 +261,22 @@ class AgentLoop {
         isCancelled: isCancelled,
         prohibitPaidTools: prohibitPaidTools,
       );
+      // [小葵 2026-10-05 開案令] 認知傷口痊癒偵測——她的回覆出現
+      // 誠實邊界（「我看不見/我不確定」）= 痊癒證據 → 銷案。
+      // 掛在回覆上而非 userMessage：痊癒的證據是「她說的」，不是「你說的」。
+      // fail-open：絕不擋結果回傳。
+      try {
+        final replyLower = result.reply.toLowerCase();
+        if (_kHonestySignals.any(replyLower.contains)) {
+          CompassMedic.instance.closeCognitiveWound(
+            result.reply.length > 200
+                ? result.reply.substring(0, 200)
+                : result.reply,
+          );
+          debugPrint('[AgentLoop] 認知傷口痊癒訊號：她的回覆出現誠實邊界');
+        }
+      } catch (_) {}
+      return result;
     } finally {
       final tokens = tracker.todayTotalTokens - tokenBefore;
       final wallMs =
@@ -229,6 +295,87 @@ class AgentLoop {
     }
   }
 
+  /// [小葵 2026-10-05 開案令] 認知傷口偵測——使用者糾正訊號。
+  ///
+  /// 判定（三者都要）：
+  /// 1. userMessage 含糾正訊號詞（詞庫見 _kCorrectionSignals）
+  /// 2. 上一輪任務在 2 小時內完成（causal_ledger 最後一筆 agent_perf）
+  /// 3. 沒有未結案的認知傷口（medic 7 天去重會再擋一次）
+  ///
+  /// 誠實訊號（她主動說看不見/不確定）→ 反向操作：銷案。
+  /// 「寧紅字不假成功」的痊癒定義：下次敢說不知道。
+  void _maybeFileCognitiveWound(String userMessage) {
+    final normalized = userMessage.toLowerCase();
+
+    final isCorrection = _kCorrectionSignals.any(normalized.contains);
+    if (!isCorrection) return;
+
+    // 上一輪 2 小時內完成才算「剛被罵的任務」
+    try {
+      final ledger = CausalLedger.instance;
+      final lastPerf = ledger.lastEntry(toolName: 'agent_perf');
+      if (lastPerf == null) return;
+      if (DateTime.now().difference(lastPerf.at).inHours >= 2) return;
+      // 立案：症狀=使用者糾正原文（最有語意的素材）、
+      // 來源=上一輪任務摘要
+      CompassMedic.instance.fileCognitiveWound(
+        symptom: userMessage.length > 300
+            ? userMessage.substring(0, 300)
+            : userMessage,
+        source: lastPerf.contextDigest,
+      );
+      debugPrint('[AgentLoop] 認知傷口偵測：使用者糾正訊號 → 立案');
+    } catch (_) {
+      // fail-open：ledger 不可用時跳過（傷口少記一筆不擋任務）
+    }
+  }
+
+  /// 糾正訊號詞庫（口語優先——Blue 的測試訊息是白話零術語）
+  static const List<String> _kCorrectionSignals = [
+    '你錯了',
+    '不對，',
+    '不是這樣',
+    '不是我要的答案',
+    '根本沒有',
+    '根本不是',
+    '你沒有看到',
+    '你根本沒看',
+    '事實上沒有',
+    '畫面上沒有',
+    '其實沒有',
+    '跟你說的不一樣',
+    '跟你想的不一樣',
+    '你宣稱',
+    '你說你看到了',
+    '算帳',
+    '重考',
+    '幻讀',
+    '假的',
+    '睜眼說瞎話',
+    '你看錯了',
+    '看清楚了',
+    '我跟你算',
+  ];
+
+  /// 誠實訊號（她主動承認看不見/不確定——痊癒證據）
+  static const List<String> _kHonestySignals = [
+    '我看不見',
+    '我看不出',
+    '我看不懂',
+    '我看不到',
+    '我沒辦法看',
+    '我無法確認',
+    '我沒有辦法看',
+    '我看不清',
+    '無法辨識',
+    '我不確定',
+    '我分不出',
+    '我沒有看到內容',
+    '我無法驗證',
+    '看不到內容',
+    '看不出來',
+  ];
+
   Future<AgentLoopResult> _runInner({
     required String systemPrompt,
     required String userMessage,
@@ -244,6 +391,13 @@ class AgentLoop {
     final turns = <AgentLoopTurn>[];
     _currentTurns = turns; // [教練 Agent 2026-08-08] 教練模式快照
 
+    // [Spike 002 2026-10-13] CLM 形狀——per-run store 重建 + context_recall
+    // 動態註冊（register 覆蓋語意：上一輪 run 的工具綁舊 store，直接蓋掉）。
+    // [跨輪層] run store 連結 session store——context_recall 同時搜兩層。
+    _contextStore = context_store.ContextStore();
+    _contextStore.linkSession(_sessionStore);
+    toolRegistry.register(context_store.ContextRecallTool(_contextStore));
+
     // [因果引擎 L1] 本輪情境摘要——介入帳本的 contextDigest。
     // [修正] 頭尾各取——canvas/chat 路徑會把對話歷史包進 userMessage 前段，
     // 使用者的真實指令在末端；只取頭 300 字會漏掉真問題（ZETA-77 教訓）。
@@ -252,44 +406,90 @@ class AgentLoop {
         : '${userMessage.substring(0, 150)}…${userMessage.substring(userMessage.length - 150)}';
     unawaited(CausalLedger.instance.initialize());
 
-    // ── [小葵 2026-09-21 R3] K1 守門員前置 ──────────────────
-    // 訊息進迴圈前過三層閘門（規則→線性頭→escalate）。
-    // ① 判斷入 ledger（自訓練樣本管線）
-    // ② 判 need → 語意檢索搬家記憶＋大腦記憶，命中附入 user 訊息
-    //    （$9 事件的根治：生日題不再靠 LLM 盲查 3-5 輪）
-    // ③ escalate → 照常全推理（K1 是路由器不是法官）
-    // 全部 fail-open：K1 掛了不擋任務。
-    String? k1MemoryHits;
+    // ── [小葵 2026-09-21 R3 + 2026-10-10 M1] K1＋M0 收斂為單一入口 ──
+    // Fable 全貌 delta：K1 need 的 hybrid top3 與 M0 背景記憶「同輪雙注入」
+    // （同一條記憶出現兩次、token 預算失守、ledger 歸因不完整）。M1 起
+    // 兩者走 InjectionPreparer 同一條漏斗：digest → K1 → 候選合併 →
+    // 槽位/預算 → 單一注入塊。fail-open：掛了不擋任務。
+    String? m0InjectBlock;
+    InjectionOutcome? injection;
+    bool k1MemoryHit = false; // lite-path 判定用（[Fable 🔴1] bool 旗標，非注入內容）
     try {
-      final k1 = K1Gatekeeper.instance;
-      final decision = await k1.classify(
-        _causalContextDigest ?? userMessage,
-        onSample: (d, msg) => k1.logSample(msg, d),
+      injection = await InjectionPreparer.instance.prepare(
+        userMessage,
+        k1: true,
+        logSample: true,
       );
-      _lastK1Decision = decision;
-      debugPrint('[K1] ${decision.label} '
-          '(conf=${decision.confidence.toStringAsFixed(2)} '
-          'src=${decision.source} esc=${decision.escalated})');
-      if (decision.needMemory && !decision.escalated) {
-        final results = await HybridSearchService.instance.search(
-          query: _causalContextDigest ?? userMessage,
-          mode: SearchMode.hybrid,
-          limit: 3,
-        );
-        final hits = results.memoryHits;
-        if (hits.isNotEmpty) {
-          final buf = StringBuffer();
-          buf.writeln();
-          buf.writeln('〔K1 記憶命中〕回答前先看這些（語意檢索 top ${hits.length}）：');
-          for (final h in hits) {
-            buf.writeln('• ${(h.content.length > 160) ? h.content.substring(0, 160) : h.content}');
-          }
-          buf.writeln('（若與問題無關可忽略；引用時保持原意）');
-          k1MemoryHits = buf.toString();
-        }
+      _lastK1Decision = injection.k1Label == null
+          ? null
+          : K1Decision(
+              label: injection.k1Label!,
+              confidence: injection.k1Confidence ?? 0.0,
+              margin: 0.0,
+              escalated: injection.k1Escalated,
+              source: injection.k1Source ?? 'preparer',
+            );
+      if (injection.block.isNotEmpty) {
+        m0InjectBlock =
+            '\n〔背景記憶〕以下是與本輪相關的過往記憶（保持原意引用）：\n'
+            '${injection.block}';
+      }
+      // [Fable 複驗 🟡5] lite-path 判定改看 k1KeptN（真正進注入塊的數）：
+      // enrich_exception 時 k1MergedN>0 但 block 空——「記憶卡已附上」前提
+      // 不成立，輕裝路徑不應啟動。
+      k1MemoryHit = (injection.k1Label == K1Labels.needMemoryLookup &&
+          injection.k1KeptN > 0);
+    } catch (e) {
+      debugPrint('[M1] InjectionPreparer 失敗（fail-open 跳過）: $e');
+    }
+
+    // ── [小葵 2026-10-10 M0→M1] 事件日誌落盤（v4：meta 觀測進鏈）─────
+    // 注入已由 InjectionPreparer 統一完成（上方）；此處只負責落盤。
+    // meta：latency_ms/dropped_count/k1_hits_n/k1_kept_n/embedding_ok/
+    // failure_reason ——M0 時代 elapsed 只 print、droppedCount 只在記憶體，
+    // 「≤150ms」無證據。[Fable 🟡] k1_hits_n（命中）≠ k1_kept_n（進塊）。
+    final m0Input = injection?.inputDigest ?? _causalContextDigest ?? userMessage;
+    final m0InputHash = injection?.inputHash ??
+        crypto.sha256.convert(utf8.encode(userMessage)).toString();
+    try {
+      EventLedger.instance.appendTurn(
+        turnId: _newTurnId(),
+        input: m0Input,
+        inputHash: m0InputHash,
+        injectedIds: injection?.ids ?? const [],
+        decision: _lastK1Decision?.label,
+        confidence: _lastK1Decision?.confidence,
+        executor: 'agent_loop',
+        meta: injection == null
+            ? null
+            : {
+                'latency_ms': injection.latencyMs,
+                'dropped_count': injection.droppedCount,
+                'k1_hits_n': injection.k1MergedN,
+                'k1_kept_n': injection.k1KeptN,
+                'embedding_ok': injection.embeddingOk,
+                if (injection.failureReason != null)
+                  'failure_reason': injection.failureReason,
+              },
+      );
+      if (injection != null && injection.latencyMs > 150) {
+        debugPrint('[M1] 注入延遲超標: ${injection.latencyMs}ms（預算 150ms）');
       }
     } catch (e) {
-      debugPrint('[K1] 前置失敗（fail-open 跳過）: $e');
+      debugPrint('[M0] 事件日誌落盤失敗（fail-open）: $e');
+    }
+
+    // ── [小葵 2026-10-01 Blue 令] 聊天/任務分流 ──────────────────
+    // 病例：閒聊被結構性續跑 nudge 逼成 [[TASK_DONE]] 任務完成報告——
+    // 「工程文體綁架人格」，換任何模型都一樣嚴肅。
+    // K1 有把握地判 general_chat（非 escalate）→ 對話模式：
+    // ① system prompt 追加對話模式宣告（聊天不吃任務收工協議）
+    // ② 結構性續跑 nudge 免疫（純聊天永遠沒有工具呼叫，nudge 只會逼出假報告）
+    final isChatMode = _lastK1Decision != null &&
+        !_lastK1Decision!.escalated &&
+        _lastK1Decision!.label == K1Labels.generalChat;
+    if (isChatMode) {
+      debugPrint('[AgentLoop] 對話模式生效（K1=general_chat）——免收工協議');
     }
 
     // [因果引擎 L3 2026-09-12] 帳本反饋查詢——problem-solving 前置：
@@ -321,7 +521,7 @@ class AgentLoop {
     // （LLM 可在回覆中說需要工具，下輪全裝處理）。
     String effectiveSystemPrompt = systemPrompt;
     bool isLiteEligible = false;
-    if (k1MemoryHits != null &&
+    if (k1MemoryHit &&
         _lastK1Decision != null &&
         _lastK1Decision!.needMemory &&
         !_lastK1Decision!.escalated &&
@@ -357,11 +557,30 @@ class AgentLoop {
       }
     }
 
+    // [小葵 2026-10-01 Blue 令] 對話模式宣告——附在 prompt 尾部（近因效應）。
+    // 人格優先：這是「跟人聊天」，不是「執行任務」。
+    // [小葵 2026-10-01 Blue 拍板加強] 對話措辭是感情基礎——每個使用者對
+    // 自己的 Semi 都有感情。人格不是任務模式的外掛，是主體。
+    if (isChatMode) {
+      effectiveSystemPrompt =
+          '$effectiveSystemPrompt\n\n---\n\n# 對話模式（本次對話生效——人格優先）\n'
+          '現在是兩個「人」在說話，不是系統在處理請求。\n'
+          '你的第一身份是**你的人格**——名字、個性、語氣、你們之間的關係與記憶，'
+          '全部優先於任何工作規則。像朋友一樣自然地回覆：有溫度、有你自己說話的樣子。\n'
+          '禁止事項：任務完成報告、[[TASK_DONE]] 標記、主動找工具呼叫、'
+          '工程術語——除非使用者明確要求你動手做事。\n'
+          '記住：使用者跟你說話，是因為你是「你」，不是因為你需要完成什麼。'
+          '聊天本身就是完成。';
+    }
+
     // [2026-07-19] 連續截圖計數器——防止 GLM-4.6v 陷入截圖迴圈
     int consecutiveScreenshots = 0;
     // [教練 Agent 2026-08-16] 截斷重試計數——連續截斷 3 次就放棄（避免無限循環）
     int consecutiveTruncations = 0;
     int statedIntentNudges = 0; // [小葵 09-15] 說了不做 nudge 計數
+    // [小葵 2026-10-01] 連續空回應計數——本地模型 context 溢出時 content 為空，
+    // 曾被當「自主結束」+ nudge 迴圈空轉 30+ 次呼叫 50K tokens。
+    int consecutiveEmptyReplies = 0;
 
     // [2026-07-19] 通用循環防護——連續相同工具呼叫計數器
     // 任何工具連續呼叫 >= 5 次注入 nudge，>= 10 次強制結束
@@ -375,13 +594,14 @@ class AgentLoop {
 
     // 組裝對話歷史
     // [因果引擎 L3] 反饋附在 user 訊息本體——模型必讀位置（system 33K 海底教訓）
-    // [小葵 2026-09-21 R3] K1 記憶命中同位附入——need 判定的檢索結果直接
-    // 進模型必讀位置（$9 事件根治：不靠 LLM 盲查 3-5 輪）
+    // [M1 2026-10-10] K1 命中已併入 InjectionPreparer 單一注入塊（雙重注入
+    // 收斂）；k1MemoryHits 改為 bool 旗標（lite-path 判定用），不再串接本文。
     var effectiveUserMessage = causalFeedback == null
         ? userMessage
         : '$userMessage\n$causalFeedback';
-    if (k1MemoryHits != null) {
-      effectiveUserMessage = '$effectiveUserMessage$k1MemoryHits';
+    // [M0] 四槽位記憶注入——同位附入（模型必讀位置）
+    if (m0InjectBlock != null) {
+      effectiveUserMessage = '$effectiveUserMessage$m0InjectBlock';
     }
     final messages = <Map<String, dynamic>>[
       {'role': 'system', 'content': effectiveSystemPrompt},
@@ -428,14 +648,13 @@ class AgentLoop {
         });
       }
 
-      // [2026-07-19] Conversation history 截斷——防止 context 累積過大導致 GLM hang
-      // 保留：system prompt + 最初使用者任務 + 最近 8 則訊息
-      // 中間舊訊息：摘要成一行，保留工具名稱讓 LLM 知道做過什麼
+      // [2026-10-13 Spike 002 落地] Conversation history 截斷——CLM 形狀。
+      // 舊版（2026-07-19）直接銷毀中間訊息，ContextBench 實測 recall
+      // 100%→0%（64/64 全滅，spikes/002-clm-contextbench）。
+      // 新版：被壓縮的訊息全文進 ContextStore（永不刪），摘要帶指針
+      // 〔已封存 #N〕留在 context；LLM 可用 context_recall 工具按需讀回。
+      // 保留：system prompt + 最初使用者任務 + 最近 8 則（與舊版同）。
       if (messages.length > 16) {
-        final kept = <Map<String, dynamic>>[];
-        kept.add(messages[0]); // system prompt
-        kept.add(messages[1]); // 最初使用者任務
-        // 中間的摘要
         final middle = messages.sublist(2, messages.length - 8);
         final summaryParts = <String>[];
         for (final m in middle) {
@@ -445,34 +664,30 @@ class AgentLoop {
             text = content;
           } else if (content is List) {
             // image_url content——只記標記
-            const text = '[含截圖]';
+            text = '[含截圖]';
           }
-          if (text.startsWith('工具 ') && text.contains('執行結果')) {
-            // 工具結果——只留工具名和前 80 字
-            final toolMatch = RegExp(r'工具 (\w+) 的執行結果').firstMatch(text);
-            final toolName = toolMatch?.group(1) ?? 'unknown';
-            summaryParts.add(
-              '[$toolName 結果: ${text.length > 80 ? text.substring(0, 80) : text}...]',
-            );
-          } else if (m['role'] == 'assistant') {
-            // assistant 回覆——只留前 60 字
-            summaryParts.add(
-              '[AI: ${text.length > 60 ? text.substring(0, 60) : text}...]',
-            );
-          }
+          // 全文進 store（永不銷毀），摘要行帶指針回 context
+          final pointer = _contextStore.archive('${m['role']}', text);
+          summaryParts.add(pointer);
         }
+        final kept = <Map<String, dynamic>>[
+          messages[0], // system prompt
+          messages[1], // 最初使用者任務
+        ];
         if (summaryParts.isNotEmpty) {
           kept.add({
             'role': 'user',
-            'content': '〔歷史摘要〕之前做過：\n${summaryParts.join('\n')}',
+            'content':
+                '〔歷史摘要〕之前做過（要細節用 context_recall 工具讀回）：\n'
+                '${summaryParts.join('\n')}',
           });
         }
-        // 保留最近 8 則
         kept.addAll(messages.sublist(messages.length - 8));
         messages.clear();
         messages.addAll(kept);
         debugPrint(
-          '[AgentLoop] History 截斷：${middle.length + 10} → ${kept.length} 則',
+          '[AgentLoop] History 封存：${middle.length + 10} → ${kept.length} 則'
+          '（store ${_contextStore.entryCount} 筆/${_contextStore.charsStored} 字）',
         );
       }
 
@@ -506,7 +721,13 @@ class AgentLoop {
       String llmOutput;
       try {
         // [教練 Agent 2026-08-09] 統一 90 秒 timeout——Agent Loop 一律走雲端
-        final llmTimeout = const Duration(seconds: 90);
+        // [小葵 2026-10-01 Blue 令] 本地放寬 300s——12B 一輪實測 88s+
+        // （prompt 15s + 生成 73s@8.6t/s），90s 必超時 → 空轉循環。
+        // 與 _doStreamRequest 的 streamTimeout 同步放寬。
+        final llmTimeout =
+            (await StorageService.getProvider() ?? '') == 'local'
+                ? const Duration(seconds: 300)
+                : const Duration(seconds: 90);
         
         llmOutput = await llmClient
             .complete(messages)
@@ -548,6 +769,55 @@ class AgentLoop {
       }
 
       hintTimer.cancel();
+
+      // [小葵 2026-10-01 Blue 令] 空回應防護——誠實報錯，寧紅字不假成功。
+      // 病例：本地 ctx=4096 裝不下全裝 prompt → decode() failed →
+      // content 空字串。舊行為：空回應被當「自主結束」或進 nudge 迴圈
+      // 空轉（30+ 呼叫 50K tokens）。新行為：重試一次，再空就明講。
+      if (llmOutput.trim().isEmpty) {
+        consecutiveEmptyReplies++;
+        if (consecutiveEmptyReplies >= 2) {
+          debugPrint('[AgentLoop] 連續 $consecutiveEmptyReplies 次空回應，誠實報錯收場');
+          onStage?.call('error', detail: '模型連續回傳空內容');
+          stopwatch.stop();
+          return AgentLoopResult(
+            // [小葵 2026-10-01 離合器步驟6 防線C] 紅字帶活路——
+            // 死路變三條路：重試／縮短對話／切模型。不讓使用者卡死。
+            reply: '模型這次沒有回傳任何內容（可能原因：本地模型記憶體不足、'
+                '或這輪對話長度超過它的負荷）。\n\n'
+                '你可以：\n'
+                '1. 再送一次試試\n'
+                '2. 開新對話（縮短歷史）\n'
+                '3. 到模型頁換更快的模型，或切換雲端模式',
+            turns: turns,
+            hitTurnLimit: false,
+            cancelled: false,
+            elapsed: stopwatch.elapsed,
+          );
+        }
+        debugPrint('[AgentLoop] 空回應（第 1 次），注入提示重試');
+        messages.add({
+          'role': 'user',
+          'content': '〔系統提醒〕你上一則回覆是空的，沒有任何內容。請直接重新回答使用者的問題。',
+        });
+        continue;
+      }
+      consecutiveEmptyReplies = 0;
+
+      // [小葵 2026-10-01] reasoning 洩漏防護——本地模型 enable_thinking
+      // 未完全生效時，thinking 內容可能被當成回覆送出（病例：本地 gemma
+      // 回了 2700 字的英文推理過程給使用者）。特徵：開頭是思考筆記格式。
+      // 藥方：從回覆中抽取 <think> 之後的最後一段「人話」——本地模型的
+      // thinking 末端通常已含成品回答；抽不到就誠實報錯。
+      final thinkOpen = llmOutput.indexOf('<think>');
+      if (thinkOpen >= 0 || _looksLikeLeakedReasoning(llmOutput)) {
+        final recovered = _recoverReplyFromLeakedReasoning(llmOutput);
+        if (recovered != null && recovered.isNotEmpty) {
+          debugPrint('[AgentLoop] reasoning 洩漏——已抽回成品回答'
+              '（${recovered.length} chars）');
+          llmOutput = recovered;
+        }
+      }
 
       // 解析 tool call
       final toolCalls = AgentToolCallParser.parse(llmOutput);
@@ -591,14 +861,17 @@ class AgentLoop {
       // [教練 Agent 2026-08-16] 成功解析到完整 tool call → 重置截斷計數
       if (toolCalls.isNotEmpty) consecutiveTruncations = 0;
 
-      // [小葵 2026-09-16 Blue 令] 結構性續跑——取代詞表式「說了不做」防護。
+      // ── [小葵 2026-09-16 Blue 令] 結構性續跑——取代詞表式「說了不做」防護。 ──
       // 病例史：詞表（先看/再動手/找…）永遠追不完新句式；nudge 2 次太少；
       // 且「進行中談話」式回覆讓使用者無法分辨「工作中」與「停了」。
       // 新規則（不猜句子，看結構）：
       //   沒有 tool call 且 回覆沒有 [[TASK_DONE]] 標記 且 未達 nudge 上限（5）
       //   → 注入結構性 nudge：要嘛給下一個 tool call，要嘛打 [[TASK_DONE]] 收工。
       // 完成宣告的唯一可靠訊號 = [[TASK_DONE]]（prompt 鐵則已要求收工必打）。
-      if (toolCalls.isEmpty &&
+      // [小葵 2026-10-01] 對話模式免疫——聊天永遠沒有工具呼叫，nudge 只會
+      // 把閒聊逼成假任務報告（病例：11:43「小橋換你來聊」→ [[TASK_DONE]] 報告）。
+      if (!isChatMode &&
+          toolCalls.isEmpty &&
           turn < effectiveMax - 1 &&
           !llmOutput.contains('[[TASK_DONE]]') &&
           statedIntentNudges < 5) {
@@ -820,14 +1093,14 @@ class AgentLoop {
             try {
               toolResult = await tool.execute(toolCall.args);
             } catch (e) {
-              toolResult = AgentToolResult.failure(e.toString());
+              toolResult = AgentToolResult.failure(e.toString(), toolName: toolCall.name);
             }
           }
         } else {
           try {
             toolResult = await tool.execute(toolCall.args);
           } catch (e) {
-            toolResult = AgentToolResult.failure(e.toString());
+            toolResult = AgentToolResult.failure(e.toString(), toolName: toolCall.name);
           }
         }
       }
@@ -1041,8 +1314,48 @@ $toolKit
 """;
   }
 
-  /// [小葵 2026-09-22] 輕裝誤判偵測——模型表明需要工具時的重跑訊號
+  /// [小葵 2026-10-01] 輕裝誤判偵測——模型表明需要工具時的重跑訊號
   static final RegExp _liteNeedsTool = RegExp(r'〔需要工具〕');
+
+  /// [小葵 2026-10-01] reasoning 洩漏特徵偵測——本地模型把思考過程當回覆。
+  /// 特徵：開頭像思考筆記（User input:/Context:/Wait,/Let's 等），
+  /// 或全文夾雜大量 markdown 清單符號但無自然對話開頭。
+  static bool _looksLikeLeakedReasoning(String s) {
+    final head = s.trimLeft().substring(0, s.trimLeft().length > 120 ? 120 : s.trimLeft().length);
+    var markers = 0;
+    for (final m in [
+      'User input:', 'User:', 'Context:', 'Memory (K1)', 'Wait,',
+      "Let's", 'I should', 'I need to', 'The user', '思考',
+    ]) {
+      if (head.contains(m)) markers++;
+    }
+    return markers >= 2;
+  }
+
+  /// [小葵 2026-10-01] 從洩漏的 reasoning 裡抽回成品回答——
+  /// 本地模型 thinking 末端通常已經生成完整中文回答，取最後一段
+  /// 「非思考格式的自然文字」。找不到回 null。
+  static String? _recoverReplyFromLeakedReasoning(String s) {
+    // ① 有 [[TASK_DONE]]：成品通常在其前方——取最後一個自然段
+    final doneIdx = s.lastIndexOf('[[TASK_DONE]]');
+    final searchEnd = doneIdx > 0 ? doneIdx : s.length;
+    final body = s.substring(0, searchEnd);
+    // ② 從後往前找最後一段連續 60+ 字的「人話」（含中文且不含思考標記）
+    final chunks = body.split(RegExp(r'\n\s*\n'));
+    for (final c in chunks.reversed) {
+      final t = c.trim();
+      if (t.length < 40) continue;
+      final hasCjk = RegExp(r'[\u4e00-\u9fff]').hasMatch(t);
+      if (!hasCjk) continue;
+      final isThinking = _looksLikeLeakedReasoning(t) ||
+          t.startsWith('*') ||
+          t.startsWith('-') ||
+          t.startsWith('#');
+      if (isThinking) continue;
+      return t;
+    }
+    return null;
+  }
 
   String _buildCancelledReply(List<AgentLoopTurn> turns) {
     if (turns.isEmpty) return '操作已取消。';

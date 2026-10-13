@@ -69,6 +69,8 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "captureWindow":
         ScreenCaptureNative.captureWindow(call: call, result: result)
+      case "captureScreen": // [開光 v0.4.x] OS 全螢幕視網膜
+        ScreenCaptureNative.captureScreen(result: result)
       case "listWindows":
         ScreenCaptureNative.listWindows(result: result)
       default:
@@ -555,6 +557,16 @@ class MainFlutterWindow: NSWindow {
     if action == "status" {
       restoreLocalRuntimeState()
       advanceLocalRuntimeDownloadIfNeeded()
+      // [小葵 2026-10-01] 真相自癒：status 輪詢時把 title 拉回 activeModelName——
+      // 下載/舊版殘留的 title（如已退位模型名）活不過一個 poll 週期。
+      // Blue 抓包：12B 已登基但卡上大字殘留 E4B，就是 title 無人更正。
+      if (localRuntimeState["phase"] as? String) == "running",
+         let activeName = localRuntimeState["activeModelName"] as? String,
+         !activeName.isEmpty,
+         (localRuntimeState["title"] as? String) != activeName {
+        localRuntimeState["title"] = activeName
+        persistLocalRuntimeState()
+      }
     }
     switch action {
     case "prepareRuntime":
@@ -648,6 +660,18 @@ class MainFlutterWindow: NSWindow {
       DispatchQueue.global(qos: .userInitiated).async {
         self.testLocalModel(modelId: modelId)
       }
+    case "startLabServer":
+      // [小葵 2026-09-29 A案] 模型實驗室專用引擎（port 18799）——不動 18789 主生產線。
+      // 12B thinking 模型批次推論會自殺（實測兩次），快測引擎改用穩定的 E4B。
+      let modelId = actionPayload["modelId"] as? String ?? ""
+      print("[LocalRuntimeAudit] startLabServer requested at \(Date()) modelId=\(modelId)")
+      localRuntimeState["labServer"] = ["modelId": modelId, "status": "starting", "port": 18799]
+      DispatchQueue.global(qos: .userInitiated).async {
+        self.startLabServer(modelId: modelId)
+      }
+    case "stopLabServer":
+      stopLabServer()
+      desktopShellState["lastAction"] = "stopLabServer"
     default:
       break
     }
@@ -1504,6 +1528,9 @@ class MainFlutterWindow: NSWindow {
             localRuntimeState["modelId"] = requestedId
             localRuntimeState["modelFilePath"] = modelDir.path
             localRuntimeState["activeModelName"] = externalName
+            // [小葵 2026-10-01] 外部引擎重用時 title 也要更正——
+            // 否則卡片大字殘留下一次登基的模型名（Blue 抓包：12B 外部登基、卡顯示 E4B）
+            localRuntimeState["title"] = externalName
             localRuntimeState["phase"] = "running"
             localRuntimeState["detail"] = "偵測到 18789 已有引擎載入 \(requestedId)，直接重用（不重複啟動）。"
             localRuntimeState["primaryCommand"] = "startServer"
@@ -1636,12 +1663,17 @@ class MainFlutterWindow: NSWindow {
       // [小葵 2026-07-27] 根據模型大小動態調整 context size
       // 16GB RAM 機器：模型 + KV cache 不能超過 ~12GB
       // Qwen 2.7GB → 65536 context（KV cache ~4GB）= ~7GB ✅
-      // Gemma 5.3GB → 32768 context（KV cache ~2GB）= ~7.5GB ✅
-      // 65536 在 Gemma 4 E4B 上會導致 swap 4.5GB
+      // Gemma E4B 5.3GB → 32768 context（KV cache ~2GB）= ~7.5GB ✅
+      // [小葵 2026-09-28] Gemma 12B 7.1GB（unified KV）→ 4096 context
+      // 實測（09-27/28）：32768 在 12B 上 = 16GB 機直接 Jetsam OOM 重開機；
+      // 4096 穩定運行（bench 20 張全跑完），RAM ~5.8GB。
       let modelAttrs = try? FileManager.default.attributesOfItem(atPath: modelURL.path)
       let modelSize = (modelAttrs?[.size] as? Int) ?? 0
       let ctxSize: String
-      if modelSize > 4_000_000_000 {
+      if modelSize > 6_500_000_000 {
+        // > 6.5GB 模型（如 12B）→ 4096 context（16GB 機防 OOM）
+        ctxSize = "4096"
+      } else if modelSize > 4_000_000_000 {
         // > 4GB 模型用 32768 context
         ctxSize = "32768"
       } else {
@@ -1832,6 +1864,91 @@ class MainFlutterWindow: NSWindow {
   }
 
   /// 檢查 server 是否就緒
+  // ══════════════════════════════════════════════════════════════
+  // [小葵 2026-09-29 A案] 模型實驗室 lab server（port 18799）
+  // 與 18789 主生產線完全獨立——快測用穩定的 E4B，
+  // 12B thinking 模型批次推論會自殺的問題不影響生產線。
+  // ══════════════════════════════════════════════════════════════
+  private var labServerProcess: Process?
+
+  private func startLabServer(modelId: String) {
+    // 若已在跑先停掉（換模型重測）
+    stopLabServer()
+
+    // 找模型（與 testLocalModel 同邏輯但不動 localRuntimeState.modelId）
+    let savedModelId = localRuntimeState["modelId"] as? String
+    localRuntimeState["modelId"] = modelId
+    let preflight = localRuntimePreflight()
+    localRuntimeState["modelId"] = savedModelId // 立刻還原，主生產線不受影響
+
+    guard let executableURL = preflight.executableURL,
+          let modelURL = preflight.modelURL else {
+      DispatchQueue.main.async {
+        self.localRuntimeState["labServer"] = ["modelId": modelId, "status": "error", "error": "找不到模型 \(modelId) 或 llama-server"]
+        self.persistLocalRuntimeState()
+      }
+      return
+    }
+
+    let binDir = executableURL.deletingLastPathComponent().path
+    var env = ProcessInfo.processInfo.environment
+    env["DYLD_LIBRARY_PATH"] = binDir
+
+    let process = Process()
+    process.executableURL = executableURL
+    // [小葵 2026-09-29 修] 補 mmproj（視覺投影器——沒它 E4B 看不到照片，實測 HTTP 500）+ -ngl 99 GPU 卸載
+    let modelDir = modelURL.deletingLastPathComponent()
+    let mmprojURL = modelDir.appendingPathComponent("mmproj-f16.gguf")
+    var labArgs = ["-m", modelURL.path, "--host", "127.0.0.1", "--port", "18799",
+                   "-c", "8192", "-b", "512", "-ub", "512", "-ngl", "99"]
+    if FileManager.default.fileExists(atPath: mmprojURL.path) {
+      labArgs += ["--mmproj", mmprojURL.path]
+      print("[LocalRuntimeAudit] labServer 多模態已啟用: mmproj=\(mmprojURL.path)")
+    } else {
+      print("[LocalRuntimeAudit] labServer ⚠️ 無 mmproj——此模型不支援視覺（快測會失敗）")
+    }
+    process.arguments = labArgs
+    process.environment = env
+    do {
+      try process.run()
+    } catch {
+      DispatchQueue.main.async {
+        self.localRuntimeState["labServer"] = ["modelId": modelId, "status": "error", "error": error.localizedDescription]
+        self.persistLocalRuntimeState()
+      }
+      return
+    }
+    labServerProcess = process
+
+    // 等就緒（最多 60s，大模型載入較久）
+    DispatchQueue.global(qos: .userInitiated).async {
+      var ready = false
+      for _ in 0..<120 {
+        Thread.sleep(forTimeInterval: 0.5)
+        if !process.isRunning { break }
+        if self.isServerReady(port: 18799) { ready = true; break }
+      }
+      DispatchQueue.main.async {
+        self.localRuntimeState["labServer"] = [
+          "modelId": modelId,
+          "status": ready ? "running" : (process.isRunning ? "timeout" : "crashed"),
+          "port": 18799,
+        ]
+        self.persistLocalRuntimeState()
+        print("[LocalRuntimeAudit] labServer \(ready ? "ready" : "failed") modelId=\(modelId)")
+      }
+    }
+  }
+
+  private func stopLabServer() {
+    if let p = labServerProcess, p.isRunning {
+      p.terminate()
+      p.waitUntilExit()
+    }
+    labServerProcess = nil
+    localRuntimeState.removeValue(forKey: "labServer")
+  }
+
   private func isServerReady(port: Int) -> Bool {
     let url = URL(string: "http://127.0.0.1:\(port)/health")!
     var request = URLRequest(url: url)
@@ -2016,19 +2133,19 @@ class MainFlutterWindow: NSWindow {
   }
 
   private func stopLocalRuntimeServer() {
-    // [小葵 2026-08-25] 外部引擎（launchd）不歸 App 管：殺不掉也不該假裝停止成功
-    if (localRuntimeState["engineSource"] as? String) == "external" && localRuntimeProcess?.isRunning != true {
-      localRuntimeState["phase"] = "installed"
-      localRuntimeState["detail"] = "18789 上的引擎由系統服務（launchd）常駐，App 無法停止它；已解除 App 端的重用狀態。"
-      localRuntimeState["primaryCommand"] = "startServer"
-      localRuntimeState["primaryActionLabel"] = "啟動本地 server"
-      localRuntimeState["primaryActionEnabled"] = true
-      localRuntimeState.removeValue(forKey: "engineSource")
-      persistLocalRuntimeState()
-      return
-    }
+    // [小葵 2026-10-05 Blue 令·開關要真的能關] 原設計只停 localRuntimeProcess
+    // （App 自己 spawn 的 handle）。App 重啟後 handle 丟失 → 孤兒引擎
+    // （父進程=launchd）永遠關不掉——「停止本地 server」按了等於沒按。
+    // 修：自己有 handle 就 terminate；沒有但 18789 有引擎在跑 = 孤兒 →
+    // pkill 獵殺（launchd 常駐已退役，孤兒不該活）。
     if localRuntimeProcess?.isRunning == true {
       localRuntimeProcess?.terminate()
+    } else {
+      let orphanKiller = Process()
+      orphanKiller.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+      orphanKiller.arguments = ["-f", "LocalRuntime/runtime/bin/llama-server"]
+      try? orphanKiller.run()
+      orphanKiller.waitUntilExit()
     }
     localRuntimeProcess = nil
     localRuntimeState["phase"] = "installed"
@@ -2036,6 +2153,7 @@ class MainFlutterWindow: NSWindow {
     localRuntimeState["primaryCommand"] = "startServer"
     localRuntimeState["primaryActionLabel"] = "啟動本地 server"
     localRuntimeState["primaryActionEnabled"] = true
+    localRuntimeState.removeValue(forKey: "engineSource")
   }
 
   private func refreshLocalRuntimeProcessState() {
@@ -2393,15 +2511,20 @@ private final class DesktopCompanionPanelController {
       stateId: stringValue(state["rigStateId"], fallback: "idle"),
       videoPath: state["companionVideoPath"] as? String
     )
-    // panel 可能還沒顯示
-    if !panel.isVisible {
-      panel.orderFrontRegardless()
-    }
+    // [小葵 2026-09-30 根修] 移除「不可見就強制開窗」——
+    // 使用者關閉懸浮窗是明確意志；每 6 秒的 idle 輪播推送會把關掉的窗反覆打開。
+    // 現在：隱藏時推送只更新內部狀態（下次 show 時內容已是最新）。
+    // 只有 Dart 端明確 lifecycle('show') 才開窗（ensurePanel 在 show 路徑）。
   }
 
   func show(state: [String: Any]) {
     let panel = ensurePanel(state: state)
     configure(panel: panel, state: state)
+    // [W4.6 Blue 報案 2026-10-09] watchdog/launchd 背景拉起的 App——
+    // orderFrontRegardless 對非前景 app 不浮現（macOS 規定）。
+    // 修：show 時把 app 帶到前台 context（不搶焦點——ignoresOtherWindows），
+    // panel 才畫得出來。前景路徑行為不變。
+    NSApp.activate(ignoringOtherApps: false)
     panel.orderFrontRegardless()
   }
 
@@ -2529,10 +2652,19 @@ private final class DesktopCompanionPanelView: NSView {
   // [小葵 2026-09-24 出道令] 雙緩衝換片：新片疊在舊片下，首幀渲染好才退役舊片——零黑幀
   private var retiringVideoViews: [ChromaKeyPlayerView] = []
   private func playVideo(path: String) {
+    // [小葵 2026-10-02 根修] 播影片前先清空靜態頭像層——
+    // 症狀：切到別的夥伴（載入其靜態圖+呼吸帶）再切回有動圖的夥伴時，
+    // 舊夥伴的立繪/呼吸帶 z-order 在影片之上，把動圖蓋住。
+    // 影片成功接手畫面後靜態層本來就不該存在——清圖、停帶、停呼吸動畫。
+    _clearStaticAvatar()
     // [出道令] 同一支影片已在播→不重啟（避免狀態推送閃跳）
     if playingVideoPath == path, let v = chromaVideoView, v.isPlaying { return }
     let old = chromaVideoView
     if let oldV = old {
+      // [小葵 2026-09-30 根修] 舊 view 進退役名單「同時立刻停掉它的 display link」——
+      // 舊幀已上螢幕不會消失（layer 內容保留），但不再每秒 60 次 renderFrame。
+      // 原設計等 onFirstFrame 才停：鏈條斷裂（首幀未達+guard 失敗）就永久洩漏。
+      oldV.stopDisplayLink()
       retiringVideoViews.append(oldV)
     }
     // 影片自帶 alpha（cyan→透明）——新 view 先放舊 view 之下載入
@@ -2563,6 +2695,7 @@ private final class DesktopCompanionPanelView: NSView {
   }
 
   private func stopVideoPlayback() {
+    ChromaKeyPlayerView.stopAllDisplayLinks() // [小葵 2026-09-30 根修] 先砍所有殘留 link
     chromaVideoView?.stop()
     chromaVideoView?.removeFromSuperview()
     chromaVideoView = nil
@@ -2971,6 +3104,24 @@ private final class DesktopCompanionPanelView: NSView {
     anim.repeatCount = .infinity
     anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
     layer.add(anim, forKey: "breathing")
+  }
+
+  /// [小葵 2026-10-02 根修] 清空靜態頭像層——影片接手畫面時呼叫。
+  /// 舊夥伴的立繪、三帶呼吸覆蓋層、整圖呼吸動畫全部退場，
+  /// 避免殘影疊在動圖上方（症狀：切夥伴回來後動圖被蓋住）。
+  private func _clearStaticAvatar() {
+    // 立繪本體
+    companionImageView.image = nil
+    // 三帶呼吸覆蓋層：圖清掉、藏起來、停掉 60fps 帶動畫 timer
+    for bv in bandViews {
+      bv.image = nil
+      bv.isHidden = true
+    }
+    torsoTimer?.invalidate()
+    torsoTimer = nil
+    bandSpecs = []
+    // 整圖呼吸 layer 動畫
+    companionImageView.layer?.removeAnimation(forKey: "breathing")
   }
 
   private func _setDefaultAvatarColor() {
@@ -3407,9 +3558,13 @@ final class ChromaKeyPlayerView: NSView {
   private var loopObserver: NSObjectProtocol?
   private let ciContext = CIContext(options: [.workingColorSpace: NSNull()])
   private let kernel: CIColorKernel?
+  // [小葵 2026-10-05 去背版直通] .mov（ProRes 4444 alpha）用——AVPlayerLayer 硬解路徑
+  private var playerLayer: AVPlayerLayer?
   // [小葵 2026-09-24 出道令] 首幀回調——雙緩衝換片用它判定「新片畫面已就緒」
   var onFirstFrame: (() -> Void)? = nil
   private var firstFrameFired = false
+  // [小葵 2026-10-05 節能根修] 隔幀開關——30fps 上限用（見 startDisplayLink callback）
+  private var frameSkipToggle = false
 
   private static let kernelSource = """
     kernel vec4 chromaKey(__sample s, vec3 keyColor, float threshold) {
@@ -3443,6 +3598,35 @@ final class ChromaKeyPlayerView: NSView {
   func playLoop(path: String) {
     stop()
     firstFrameFired = false
+    // [小葵 2026-10-05 去背版直通] .mov（ProRes 4444 自帶 alpha）走 AVPlayerLayer
+    // 硬體解碼——零 CIContext 去背、零 displayLink 輪詢。CPU 從 200% 級降到近 0。
+    // .mp4（cyan 底舊素材）保留原 chroma-key 軟體路徑向後相容。
+    if path.hasSuffix(".mov") {
+      let item = AVPlayerItem(url: URL(fileURLWithPath: path))
+      player.replaceCurrentItem(with: item)
+      player.isMuted = true
+      let playerLayer = AVPlayerLayer(player: player)
+      playerLayer.frame = bounds
+      playerLayer.videoGravity = .resizeAspect
+      playerLayer.autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
+      layer?.addSublayer(playerLayer)
+      self.playerLayer = playerLayer
+      loopObserver = NotificationCenter.default.addObserver(
+        forName: .AVPlayerItemDidPlayToEndTime,
+        object: item, queue: .main
+      ) { [weak self] _ in
+        self?.player.seek(to: .zero)
+        self?.player.play()
+      }
+      player.play()
+      // 首幀通知：500ms 後觸發（AVPlayerLayer 自己管渲染，無需逐幀回調）
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        guard let self = self, !self.firstFrameFired else { return }
+        self.firstFrameFired = true
+        self.onFirstFrame?()
+      }
+      return
+    }
     let item = AVPlayerItem(url: URL(fileURLWithPath: path))
     let attrs: [String: Any] = [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
@@ -3466,10 +3650,10 @@ final class ChromaKeyPlayerView: NSView {
   var isPlaying: Bool { player.timeControlStatus == .playing }
 
   func stop() {
-    if let link = displayLink {
-      CVDisplayLinkStop(link)
-      displayLink = nil
-    }
+    stopDisplayLink()
+    // [小葵 2026-10-05 去背版直通] 移除 playerLayer（.mov 路徑專用）
+    playerLayer?.removeFromSuperlayer()
+    playerLayer = nil
     if let o = loopObserver {
       NotificationCenter.default.removeObserver(o)
       loopObserver = nil
@@ -3480,23 +3664,59 @@ final class ChromaKeyPlayerView: NSView {
     layer?.contents = nil
   }
 
+  // [小葵 2026-09-30 CPU 懸案根修] 追蹤所有 live display link——
+  // 洩漏實證：114 個 CVDisplayLink thread（正常 1 個），殘留 link 每個
+  // 每秒回呼 renderFrame 60 次 = CPU 200% 永動機（Swift 層洩漏，Dart log 無感）
+  private static var liveLinks: [CVDisplayLink] = []
+
   private func startDisplayLink() {
     var link: CVDisplayLink?
     CVDisplayLinkCreateWithActiveCGDisplays(&link)
     guard let dl = link else { return }
-    let ctx = Unmanaged.passRetained(self).toOpaque()
+    // [根修] 原本 passRetained(self) 過度保留 view（無人 release）——改弱引用 box，
+    // view 釋放後 callback 自動 no-op，不再洩漏
+    final class WeakBox { weak var view: ChromaKeyPlayerView?; init(_ v: ChromaKeyPlayerView) { view = v } }
+    let box = WeakBox(self)
+    let ctx = Unmanaged.passRetained(box).toOpaque()
     CVDisplayLinkSetOutputCallback(dl, { _, _, _, _, _, userInfo in
       guard let userInfo = userInfo else { return kCVReturnSuccess }
-      let view = Unmanaged<ChromaKeyPlayerView>.fromOpaque(userInfo).takeUnretainedValue()
-      view.renderFrame()
+      let box = Unmanaged<WeakBox>.fromOpaque(userInfo).takeUnretainedValue()
+      // [小葵 2026-10-05 節能根修] 30fps 上限——素材多為 20-30fps 循環短片，
+      // 60Hz 回呼等於一半無效工。隔幀跳過：CPU 減半、視覺零差（人眼對 30fps
+      // 動圖無感）。取樣鐵證：displayLink callback 289 樣本全是最大熱點。
+      if box.view?.frameSkipToggle == false {
+        box.view?.frameSkipToggle = true
+        return kCVReturnSuccess  // 本幀跳過
+      }
+      box.view?.frameSkipToggle = false
+      box.view?.renderFrame()
       return kCVReturnSuccess
     }, ctx)
     CVDisplayLinkStart(dl)
     displayLink = dl
+    ChromaKeyPlayerView.liveLinks.append(dl)
+  }
+
+  /// [根修] 停止本 view 的 link 並從全域清單移除
+  func stopDisplayLink() {
+    if let link = displayLink {
+      CVDisplayLinkStop(link)
+      ChromaKeyPlayerView.liveLinks.removeAll { $0 == link }
+      displayLink = nil
+    }
+  }
+
+  /// [根修] 全域清道夫：停掉所有殘留 link（互換 view 鏈斷裂時的保險）
+  static func stopAllDisplayLinks() {
+    for link in liveLinks { CVDisplayLinkStop(link) }
+    liveLinks.removeAll()
   }
 
   private func renderFrame() {
     guard let output = videoOutput, let item = player.currentItem else { return }
+    // [小葵 2026-10-05 節能根修] 懸浮窗不在螢幕上（最小化/隱藏）→ 跳過渲染。
+    // window.orderOut 後 displayLink 仍在跑——白燒 CPU。視窗不可見時完全跳過。
+    if window == nil || !window!.isVisible { return }
     let time = item.currentTime()
     guard output.hasNewPixelBuffer(forItemTime: time),
           let pb = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil)

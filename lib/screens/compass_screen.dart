@@ -17,6 +17,8 @@ import 'package:bridge_app/theme/tier.dart';
 import 'package:bridge_app/widgets/compass/compass_graph_view.dart';
 import 'package:bridge_app/theme/tier_style.dart';
 import 'package:bridge_app/widgets/trust/agent_seal.dart'; // [Blue 令] 蓋章制度
+import 'package:bridge_app/screens/life_tree_screen.dart'; // [小葵 2026-10-05 Blue 令] 生命樹觀景窗
+import 'package:bridge_app/services/life_tree/life_tree_store.dart'; // 入口卡統計
 
 class CompassScreen extends StatefulWidget {
   const CompassScreen({super.key});
@@ -31,6 +33,8 @@ class _CompassScreenState extends State<CompassScreen> {
   final store = CompassStore.instance;
   StreamSubscription? _sub;
   final _selectedOrgan = ValueNotifier<String?>(null);
+  // [小葵 2026-10-05 Blue 令] 生命樹觀景窗——長在羅盤裡
+  bool _showLifeTree = false;
 
   @override
   void initState() {
@@ -57,6 +61,11 @@ class _CompassScreenState extends State<CompassScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // [小葵 2026-10-05 Blue 令] 生命樹觀景窗——長在羅盤裡的子頁
+    if (_showLifeTree) {
+      return LifeTreeScreen(
+          onBack: () => setState(() => _showLifeTree = false));
+    }
     final organs = store.organs();
     final surgeries = store.surgeries(limit: 12);
     final selectedId = _selectedOrgan.value;
@@ -127,6 +136,8 @@ class _CompassScreenState extends State<CompassScreen> {
                 // ③Agent 直覺地圖（agent 看得到的，人也要看得到）
                 // ④無規則器官收合成一行（想看再展開）
                 _panoramaSummary(),
+                const SizedBox(height: BridgeDS.spaceMD),
+                _lifeTreeCard(),
                 const SizedBox(height: BridgeDS.spaceLG),
                 _timeline(surgeries),
                 const SizedBox(height: BridgeDS.spaceLG),
@@ -138,6 +149,65 @@ class _CompassScreenState extends State<CompassScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// [小葵 2026-10-05 Blue 令] 生命樹觀景窗入口卡——
+  /// 「生命樹是長在羅盤裡的」：夢（反思樹）+ 戰役（歷史樹）+ 遺憾。
+  /// 點卡開生命樹頁。
+  Widget _lifeTreeCard() {
+    final cs = BridgeDSColors.of(context);
+    Map<String, int> snap;
+    try {
+      snap = LifeTreeStore.instance.snapshot();
+    } catch (_) {
+      snap = const {};
+    }
+    final dreams = snap['dreams'] ?? 0;
+    final regrets = snap['unrevisited'] ?? 0;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10.0),
+      onTap: () => setState(() => _showLifeTree = true),
+      child: Container(
+        padding: const EdgeInsets.all(BridgeDS.spaceMD),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [cs.surface, cs.surfaceElevated],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(10.0),
+          border: Border.all(color: cs.borderSubtle),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.park_outlined,
+                color: cs.accentPurple, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('生命樹 — 她的夢與成長',
+                      style: TextStyle(
+                          color: cs.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 2),
+                  Text(
+                      '$dreams 張夢卡'
+                      '${regrets > 0 ? ' · $regrets 條遺憾想請你看' : ' · 遺憾清單乾淨'}'
+                      ' — 點開看她睡著時反思了什麼',
+                      style: TextStyle(
+                          color: cs.textSecondary, fontSize: 12)),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right,
+                size: 18, color: cs.textMuted),
+          ],
+        ),
       ),
     );
   }

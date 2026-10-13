@@ -13,9 +13,9 @@
 // - 安全邊界：破壞性操作需要使用者確認
 
 import 'dart:async';
-import '../core/dev_paths.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import '../core/dev_paths.dart';
 
 import 'agent_loop/agent_loop.dart';
 import 'agent_loop/agent_tool_registry.dart';
@@ -57,8 +57,8 @@ class NativeAgentLoop {
 - 沒有事做時保持安靜，不亂說話
 
 ## 專案路徑
-- 原始碼：~/Developer/bridge_app（可用 BRIDGE_APP_HOME 環境變數覆寫）
-- 設計文件：docs/（本 repo 的設計文件集）
+- 原始碼：bridge_app 專案根
+- 設計文件：橋樑計劃 02-架構設計/
 - App container：~/Library/Containers/farm.semiwasabi.bridgeApp/''';
 
   final AgentLoop _agentLoop;
@@ -190,7 +190,13 @@ class NativeAgentLoop {
         break;
 
       case AgentEventType.userIdle:
-        _handleUserIdle(event);
+        // [小葵 2026-10-05 Blue 令] 閒置自主巡邏已拔除——
+        // 「小葵形象設定」事件：閒置提示叫她檢查未連線節點，
+        // 她照做還想刪 output 節點「重來」。教訓：機器看不出
+        // 「人工已完工」，閒置推測 = 誤判溫床。
+        // 新規則：她只在使用者明確要求時才行動；閒置就閒著。
+        debugPrint('[自主心跳] userIdle 收到但不行動（Blue 2026-10-05 令：閒置不自主檢查/接線，僅使用者要求時執行）');
+        break;
 
       case AgentEventType.brainMemoryAdded:
         // 記憶寫入不觸發行動
@@ -264,6 +270,12 @@ class NativeAgentLoop {
   }
 
   /// 使用者閒置
+  ///
+  /// [小葵 2026-10-05 Blue 令] **已退役**——呼叫點已移除。
+  /// 閒置自主巡邏造成「小葵形象設定」誤刪事件（把人工已完工的
+  /// 管線判讀為「沒連線=沒做完」）。保留函式體供歷史參照，
+  /// 永不再接回——要接回必須先過 Blue。
+  @Deprecated('Blue 2026-10-05 令：閒置不自主檢查/修改，僅使用者要求時執行')
   Future<void> _handleUserIdle(AgentEvent event) async {
     _isActing = true;
     try {
@@ -644,11 +656,11 @@ class NativeAgentLoop {
 
     // 使用者超過 5 分鐘沒動作 → emit userIdle
     // [教練 Agent 2026-07-23] 同一次閒置期間只觸發一次
+    // [小葵 2026-10-05 Blue 令] 發射端也停——接收端已退役，發了也
+    // 沒人做事，純浪費事件循環。整條閒置自主鏈（發射+接收）移除。
+    // 若未來要恢復，發射端+接收端+Blue 三方同意才接回。
     if (idleDuration.inMinutes >= 5 && !_hasSpokenOnIdle) {
       _hasSpokenOnIdle = true;
-      _eventBus.emit(AgentEventType.userIdle, data: {
-        'idleMinutes': idleDuration.inMinutes,
-      });
       // 不重置 _lastUserActivityTime — 等 onUserActivity 重置
     }
 

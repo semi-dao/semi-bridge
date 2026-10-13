@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 /// BreathingImage — 帶呼吸感的靜態立繪容器
@@ -49,10 +51,21 @@ class _BreathingImageState extends State<BreathingImage>
     _controller = AnimationController(vsync: this, duration: widget.period);
     _scale = Tween<double>(begin: 1.0, end: 1.0 + widget.scaleAmplitude)
         .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-    if (widget.enabled) {
-      _controller.repeat(reverse: true);
-    }
+    // [小葵 2026-10-05 節能根修] repeat(reverse:) 每幀排 vsync——1.2% 微縮放
+    // 用 60fps 是 50 倍浪費。12fps 離散取樣：每 83ms 跳一格（72 格循環），
+    // 人眼對慢呼吸完全無感，幀需求砍 1/5。
+    _lowFreqTicker = Timer.periodic(const Duration(milliseconds: 83), (_) {
+      if (!mounted || !widget.enabled) return;
+      _tick = (_tick + 1) % 24;
+      // 24 格離散三角波（12 上升 + 12 下降），easeInOut 近似
+      final t = _tick < 12 ? _tick / 12.0 : (24 - _tick) / 12.0;
+      final eased = t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) * (2 - 2 * t) / 2;
+      _controller.value = eased;
+    });
   }
+
+  Timer? _lowFreqTicker;
+  int _tick = 0;
 
   @override
   void didUpdateWidget(covariant BreathingImage oldWidget) {
@@ -66,6 +79,7 @@ class _BreathingImageState extends State<BreathingImage>
 
   @override
   void dispose() {
+    _lowFreqTicker?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -73,14 +87,17 @@ class _BreathingImageState extends State<BreathingImage>
   @override
   Widget build(BuildContext context) {
     if (!widget.enabled) return widget.child;
-    return AnimatedBuilder(
-      animation: _scale,
-      builder: (context, child) => Transform.scale(
-        scale: _scale.value,
-        alignment: widget.anchor,
-        child: child,
+    return RepaintBoundary(
+      // [小葵 2026-10-05 節能] 隔離呼吸縮放的重繪範圍——立繪縮放不再連坐整頁 PAINT
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (context, child) => Transform.scale(
+          scale: _scale.value,
+          alignment: widget.anchor,
+          child: child,
+        ),
+        child: widget.child,
       ),
-      child: widget.child,
     );
   }
 }

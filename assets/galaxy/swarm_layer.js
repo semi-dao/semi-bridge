@@ -17,13 +17,16 @@
   window.__swarmLayer = true;
 
   // 等 galaxy 主場景就緒（galaxy group 是主模組變數——用 scene children 找）
+  // [H5 修] 舊版 10s 超時只是 clearInterval——promise 永遠 pending，
+  // 大腦初始化 >10s 時整層靜默癱瘓（__warEnter 掛不上）。改：超時也 resolve
+  //（進場函數內部自行重試），並把 window 掛載提前到本行後（見檔尾）。
   const waitScene = () => new Promise(res => {
     const t = setInterval(() => {
-      if (window.__galaxyReady) { clearInterval(t); res(); }
+      if (window.__galaxyReady) { clearInterval(t); res(true); }
     }, 200);
-    setTimeout(() => clearInterval(t), 10000); // 10s 超時放棄
+    setTimeout(() => { clearInterval(t); res(window.__galaxyReady === true); }, 15000);
   });
-  await waitScene();
+  const sceneReady = await waitScene();
 
   // ── CSS：四角框（複製 lockBox 語系，色可變）──
   const css = document.createElement('style');
@@ -200,6 +203,7 @@
     // 弱化長住層——透過主體掛的 window 參照（__swDim/__swRestore 由 galaxy.html 提供）
     try { if (window.__swDim) window.__swDim(WAR.saved = {}); } catch (e) {}
     buildWarUI();
+    buildMissionsPanel(); // [H5 2026-10-08] 左側任務面板——同時看見「要做什麼」與「腦內正在發生什麼」
     await loadCampaignList();
     // [Blue 問出的縫隙] 使用者可能先進作戰模式等著、再回對話開戰——
     // 每 5s 輕查活躍戰役，開打自動切 LIVE（在 live/回放中不吵）
@@ -228,7 +232,13 @@
     WAR.replayBoxes.forEach(b => b.remove()); WAR.replayBoxes = [];
     if (WAR.eventPanel) { WAR.eventPanel.remove(); WAR.eventPanel = null; }
     if (WAR.timeBar) { WAR.timeBar.remove(); WAR.timeBar = null; }
+    if (WAR.missionsPanel) { WAR.missionsPanel.remove(); WAR.missionsPanel = null; } // [H5]
   };
+
+  // [H5 修] 提前掛 window 進出點——後面初始化流程再慢/再炸，
+  // 模式切換（setVizMode → __warEnter）都不會找不到函數。
+  window.__warEnter = enterWarMode;
+  window.__warExit = exitWarMode;
 
   const scene2 = () => window.__swScene;
 
@@ -259,6 +269,68 @@
     panel.innerHTML = '<div style="color:#ffb98a;font-weight:600;margin-bottom:6px">📜 作戰事件流（點擊跳轉）</div><div id="warEventList">載入中…</div>';
     document.body.appendChild(panel);
     WAR.eventPanel = panel;
+  };
+
+  // ── [H5 2026-10-08] 左側任務面板——戰爭模式獨家場景 ──
+  // Phase H spec §4：「使用者開戰爭模式 → 同時看 任務面板＋大腦圖譜戰爭模式
+  //   = 一眼同時看見『要做什麼』與『腦內正在發生什麼』」
+  // 資料：/galaxy_missions（H4 排程卡＋專案門）。溫度語彙與 H4 kanban 一致：
+  // 生活卡紫暖色＋心意一行；工作卡冷靜緊湊。
+  const fmtNext = (iso) => {
+    if (!iso) return '';
+    const ms = new Date(iso) - Date.now();
+    if (ms < 0) return '';
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return mins + ' 分鐘後';
+    if (mins < 1440) return Math.round(mins / 60) + ' 小時後';
+    return Math.round(mins / 1440) + ' 天後';
+  };
+  const buildMissionsPanel = async () => {
+    const panel = document.createElement('div');
+    panel.style.cssText = 'position:fixed;left:16px;top:110px;bottom:90px;width:270px;z-index:55;background:rgba(10,8,16,.9);border:1px solid #b18cff33;border-radius:12px;padding:10px;overflow-y:auto;font:12px system-ui;color:#d5cfe5;backdrop-filter:blur(6px)';
+    panel.innerHTML = '<div style=\"color:#c9b3ff;font-weight:600;margin-bottom:6px\">🗺️ 任務面板（載入中…）</div>';
+    document.body.appendChild(panel);
+    WAR.missionsPanel = panel;
+    try {
+      const _tk = new URLSearchParams(location.search).get('token') ?? '';
+      const r = await fetch('/galaxy_missions?cb=' + Date.now(),
+        {headers: {'x-bridge-token': _tk}, cache: 'no-store'});
+      const j = await r.json();
+      if (j.error) throw new Error(j.error);
+      const life = (j.schedules || []).filter(x => x.warmth === 'life');
+      const work = (j.schedules || []).filter(x => x.warmth !== 'life');
+      const projs = (j.projects || []).filter(p => p.status === 'active' || p.status === 'waiting');
+      let html = '<div style="color:#c9b3ff;font-weight:600;margin-bottom:6px">🗺️ 任務面板 <span style="color:#8a7fa8;font-weight:400">· ' + (j.schedules||[]).length + ' 個約定</span></div>';
+      if (projs.length) {
+        html += '<div style="color:#8fb8a5;font-weight:600;margin:4px 0">專案</div>';
+        for (const p of projs.slice(0, 6)) {
+          html += '<div style="padding:3px 0;color:#cfe0d5">▸ ' + p.title +
+            ' <span style="color:' + (p.status==='active'?'#7dd8a0':'#e0c060') + ';font-size:11px">' +
+            (p.status==='active'?'進行中':'等待中') + '</span></div>';
+        }
+      }
+      if (life.length) {
+        html += '<div style="color:#c9b3ff;font-weight:600;margin:8px 0 4px">生活 · 心意</div>';
+        for (const c of life) {
+          const nx = fmtNext(c.nextRun);
+          html += '<div style="background:linear-gradient(135deg,#b18cff14,#7ee8d40d);border:1px solid #b18cff2e;border-radius:9px;padding:7px 9px;margin-bottom:6px">' +
+            '<div style="font-weight:600;color:#e8e2f5">' + c.name + '</div>' +
+            (c.warmLine ? '<div style="color:#a89cc2;margin:3px 0">' + c.warmLine + '</div>' : '') +
+            '<div style="color:#c9b3ff;font-size:11px">♡ ' + (nx || c.human) + '</div></div>';
+        }
+      }
+      if (work.length) {
+        html += '<div style="color:#8a7fa8;font-weight:600;margin:8px 0 4px">工作 · 維運</div>';
+        for (const c of work.slice(0, 10)) {
+          html += '<div style="padding:2px 0;color:#a89fba;font-size:11px">· ' + c.name +
+            ' <span style="color:#6d6584">' + c.human + '</span></div>';
+        }
+        if (work.length > 10) html += '<div style="color:#6d6584;font-size:11px">…還有 ' + (work.length-10) + ' 個</div>';
+      }
+      panel.innerHTML = html;
+    } catch (e) {
+      panel.innerHTML = '<div style="color:#c9b3ff;font-weight:600">🗺️ 任務面板</div><div style="color:#8a7fa8">載入失敗：' + e.message + '</div>';
+    }
   };
 
   // ── 戰役列表（LIVE 優先：有活躍戰役自動進即時戰況）──
@@ -499,6 +571,4 @@
 
   // [M5b fix] galaxy.html 已原生支援 swarm 模式（VIZ_NAMES+setVizMode 分支）——
   // 掛 window 進出點，不需攔截
-  window.__warEnter = enterWarMode;
-  window.__warExit = exitWarMode;
 })();

@@ -197,6 +197,10 @@ class HybridSearchService {
     // [小葵 2026-09-09 Blue 分層令] 預設只搜 general 層；工程模式傳
     // true 才含 technical（vendored 依賴/工具設定/build 產物）
     bool includeTechnical = false,
+    // [M1 K1 獨立通道 2026-10-10 Fable 拍板] false = 跳過圖譜展開與
+    // 上下文展開——K1 候選只要 RRF 直接命中（展開命中分數固定 0.2~0.5
+    // 會把 RRF 真命中（上限 ~0.033）擠出排序——噪音壓過真命中）。
+    bool expand = true,
   }) async {
     // 空查詢直接回傳空結果
     if (query.trim().isEmpty) {
@@ -295,13 +299,15 @@ class HybridSearchService {
           assetHits: fiveFactorAssets,
         );
 
-        // 圖譜展開（保持原有邏輯）
-        final expanded = await _expandGraph(result, limit);
-        result = result.mergeWith(expanded);
+        // 圖譜展開（保持原有邏輯）——[M1] expand:false 時跳過（K1 通道）
+        if (expand) {
+          final expanded = await _expandGraph(result, limit);
+          result = result.mergeWith(expanded);
 
-        // Context expansion（鄰近段落展開）
-        final contextExpanded = await _expandContext(result, limit);
-        result = result.mergeWith(contextExpanded);
+          // Context expansion（鄰近段落展開）
+          final contextExpanded = await _expandContext(result, limit);
+          result = result.mergeWith(contextExpanded);
+        }
 
         // [小葵 2026-09-09 Blue 令] 最終排序（五因素+類型分層：圖片>
         // 文字>其他）搬到回傳前——圖譜/上下文展開新增的命中也要過排序

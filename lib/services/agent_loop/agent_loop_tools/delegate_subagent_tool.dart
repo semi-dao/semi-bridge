@@ -19,7 +19,7 @@
 ///
 /// 錯誤處理：
 /// - provider 不可用（無 token）→ 回傳錯誤提示
-/// - timeout 120 秒
+/// - timeout 60 秒
 /// - 回傳空內容 → 報錯
 
 import 'dart:async';
@@ -308,7 +308,8 @@ class DelegateSubagentTool extends AgentTool {
       );
     } on TimeoutException {
       return AgentToolResult.failure(
-        '子代理執行逾時（120 秒）。provider=$provider，任務可能太複雜或模型回應太慢。',
+        '子代理執行逾時（60 秒）。provider=$provider，任務可能太複雜或模型回應太慢。',
+        toolName: name,
       );
     } on DioException catch (e) {
       final statusCode = e.response?.statusCode;
@@ -323,7 +324,8 @@ class DelegateSubagentTool extends AgentTool {
       }
       if (e.type == DioExceptionType.receiveTimeout) {
         return AgentToolResult.failure(
-          '子代理執行逾時（120 秒）。provider=$provider。',
+          '子代理執行逾時（60 秒）。provider=$provider。',
+          toolName: name,
         );
       }
       return AgentToolResult.failure(

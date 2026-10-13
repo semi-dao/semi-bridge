@@ -392,6 +392,17 @@ class StorageService {
     return prefs.getString(_keyLocalModelEndpoint);
   }
 
+  // [Blue 令 2026-10-05] 本地模型閒置自動卸載開關（預設開）
+  static Future<bool> getLocalModelIdleUnloadEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('local_model_idle_unload_enabled') ?? true;
+  }
+
+  static Future<void> saveLocalModelIdleUnloadEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('local_model_idle_unload_enabled', v);
+  }
+
   static Future<void> saveLocalModelName(String model) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyLocalModelName, model);
@@ -400,6 +411,40 @@ class StorageService {
   static Future<String?> getLocalModelName() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyLocalModelName);
+  }
+
+  // ========== 本地模型雙角色槽（自動離合器，小葵 2026-10-01） ==========
+  static const _keyLocalCompanionModel = 'local_companion_model';
+  static const _keyLocalVisionModel = 'local_vision_model';
+
+  /// 夥伴模型槽（聊天＋簡單任務＋subagent）
+  static Future<void> setLocalCompanionModel(String? modelId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (modelId == null || modelId.isEmpty) {
+      await prefs.remove(_keyLocalCompanionModel);
+    } else {
+      await prefs.setString(_keyLocalCompanionModel, modelId);
+    }
+  }
+
+  static Future<String?> getLocalCompanionModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyLocalCompanionModel);
+  }
+
+  /// 辨識模型槽（照片嵌入＋視覺分析）
+  static Future<void> setLocalVisionModel(String? modelId) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (modelId == null || modelId.isEmpty) {
+      await prefs.remove(_keyLocalVisionModel);
+    } else {
+      await prefs.setString(_keyLocalVisionModel, modelId);
+    }
+  }
+
+  static Future<String?> getLocalVisionModel() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyLocalVisionModel);
   }
 
   // ========== Auth Settings ==========

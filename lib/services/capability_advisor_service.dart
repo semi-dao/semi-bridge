@@ -243,7 +243,9 @@ class CapabilityAdvisorService {
         if (correctedIntent != null) '使用者修正後的意圖：$correctedIntent',
         '',
         '以下是搜尋到的市面方案資訊：',
-        searchResult.isEmpty ? '（搜尋結果為空，請根據你的知識提供三家主流方案）' : searchResult,
+        searchResult.isEmpty
+            ? '（搜尋結果為空，請根據你的知識提供三家主流方案，並在 aiNote 標註「未驗證：來自模型知識」）'
+            : searchResult,
       ].join('\n');
 
       final chatResponse = await ApiService.sendMessage([

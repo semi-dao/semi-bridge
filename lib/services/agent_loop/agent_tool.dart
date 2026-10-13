@@ -36,8 +36,14 @@ class AgentToolResult {
     return AgentToolResult(success: true, content: content, mediaUrl: mediaUrl, metadata: metadata);
   }
 
-  factory AgentToolResult.failure(String error) {
-    return AgentToolResult(success: false, content: '工具執行失敗：$error');
+  /// [小葵 2026-10-12 M15] 失敗前綴帶工具名——LLM 與使用者一看就知道
+  /// 哪個工具壞了。`toolName` 選填：未帶時維持舊文案（向下相容，
+  /// 呼叫端可漸進補上）。
+  factory AgentToolResult.failure(String error, {String? toolName}) {
+    final prefix = toolName != null && toolName.isNotEmpty
+        ? '工具執行失敗（$toolName）：'
+        : '工具執行失敗：';
+    return AgentToolResult(success: false, content: '$prefix$error');
   }
 }
 

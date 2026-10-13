@@ -4,8 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:bridge_app/services/causal/time_sense_service.dart';
 
 void main() {
-  group('相遇時間軸——elapsedDays 計算（時間感案回歸）', () {
-    test('相遇 16 個晝夜 = 第 17 天（時間感案：8/27 相遇，9/12 為第 17 天，不得感知成 3 個月）', () {
+  group('相遇時間軸——elapsedDays 計算（歷史案回歸）', () {
+    test('相遇 16 個晝夜 = 第 17 天（歷史案：8/27 相遇，9/12 為第 17 天，不得感知成 3 個月）', () {
       final t = TimeSenseService.buildTimelineSection(CompanionTimeline(
         companionId: 'c1',
         firstMetAt: DateTime(2026, 8, 27),
@@ -14,7 +14,7 @@ void main() {
       expect(t, contains('相遇第 17 天'));
       expect(t, contains('初次相遇：2026 年 8 月 27 日'));
       expect(t, contains('16 個晝夜'));
-      // 鐵則：不得出現「三個月」的錯誤膨脹
+      // Ada鐵則：不得出現「三個月」的錯誤膨脹
       expect(t.contains('三個月'), isFalse);
       expect(t.contains('3 個月'), isFalse);
     });

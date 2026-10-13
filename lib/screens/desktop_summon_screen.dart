@@ -78,6 +78,7 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
   final _artStyleController = TextEditingController();
   final _speciesController = TextEditingController();
   final _freeformController = TextEditingController();
+  final _soulMdController = TextEditingController(); // [H3] 靈魂文檔
 
   // 服務
   final _summoningService = CompanionSummoningService();
@@ -154,6 +155,7 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
     _artStyleController.dispose();
     _speciesController.dispose();
     _freeformController.dispose();
+    _soulMdController.dispose();
     super.dispose();
   }
 
@@ -241,6 +243,8 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
         'artStyle': _artStyleController.text,
         'species': _speciesController.text,
         'freeform': _freeformController.text,
+        if (_soulMdController.text.trim().isNotEmpty)
+          'soulMd': _soulMdController.text, // [H3]
         'savedAt': DateTime.now().toIso8601String(),
       };
       if (_candidate != null) {
@@ -311,6 +315,7 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
       _artStyleController.text = draft['artStyle'] as String? ?? '';
       _speciesController.text = draft['species'] as String? ?? '';
       _freeformController.text = draft['freeform'] as String? ?? '';
+      _soulMdController.text = draft['soulMd'] as String? ?? ''; // [H3]
 
       final refImages = draft['referenceImages'] as List<dynamic>?;
       if (refImages != null) {
@@ -512,6 +517,14 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
           _freeformController,
           '建議 20 字左右，例如：需要嚴謹時找我，會提醒風險',
           maxLines: 3,
+        ),
+        const SizedBox(height: BridgeDS.spaceMD),
+        // [H3 2026-10-08] 靈魂文檔——人格最深處，注入 system prompt 最頂層
+        _buildTextField(
+          '靈魂文檔 SOUL',
+          _soulMdController,
+          'Markdown。核心身份層（先於角色與風格）。Hermes 移民用：貼上 SOUL.md',
+          maxLines: 8,
         ),
         SizedBox(height: BridgeDS.spaceLG),
 
@@ -3412,7 +3425,12 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
       id: editingCompanion?.id ?? CompanionStore.generateId(),
       baseCompanion: editingCompanion,
     );
-    final certifiedCompanion = await _certifyFinalCompanion(companion);
+    // [H3] 表單裡的靈魂文檔寫入（編輯時沿用既有、填了就覆蓋）
+    final soulText = _soulMdController.text.trim();
+    final companionWithSoul =
+        soulText.isEmpty ? companion : companion.copyWith(soulMd: soulText);
+    final certifiedCompanion =
+        await _certifyFinalCompanion(companionWithSoul);
     if (certifiedCompanion == null) return;
 
     if (editingCompanion == null) {
@@ -3557,6 +3575,8 @@ class _DesktopSummonScreenState extends State<DesktopSummonScreen>
           '圖組 ${entry.key}：${entry.value}',
       ],
       modelEndpoint: 'default',
+      // [H3 2026-10-08] 靈魂文檔沿襲——編輯夥伴不得失魂
+      soulMd: baseCompanion?.soulMd ?? '',
       rightsPassport: _primaryRightsPassport ?? baseCompanion?.rightsPassport,
       totalConversations: baseCompanion?.totalConversations ?? 0,
       totalTokens: baseCompanion?.totalTokens ?? 0,

@@ -159,7 +159,7 @@ CLARIFY:
 不要加任何前言或解釋，直接輸出。''';
 
     final contextPart = previousContext != null
-        ? '之前的對話上下文：\\n$previousContext\\n\\n'
+        ? '之前的對話上下文：\n$previousContext\n\n'
         : '';
     final userPrompt = '${contextPart}使用者說：「$userInput」';
 
@@ -193,12 +193,17 @@ CLARIFY:
         prompt = prompt.substring('PROMPT:'.length).trim();
       }
 
+      // [Blue 令 2026-10-05] 反重複工鐵律——每次增強都附上，讓 Agent Loop 的
+      // 每一輪都記得：發現重複工/無用工當場排除。極簡三行，不佔 context。
+      prompt =
+          '$prompt\n\n〔反重複工鐵律〕發現重複工/無用工當場排除。判準：跑兩次≠跑一次就要修；輸入沒變就跳過；輪詢能改事件就改；離線預處理勝過線上重算。';
+
       debugPrint('[PromptEnhancer] 增強成功：${userInput.length} → ${prompt.length} 字元');
       return EnhanceResult.prompt(prompt, '意圖明確，直接轉譯');
     } catch (e) {
       debugPrint('[PromptEnhancer] 增強失敗（fallback 原文）：$e');
       return EnhanceResult.prompt(
-        '使用者指令：$userInput\\n\\n請先用 ui_get_state 了解當前狀態，再根據使用者意圖執行。',
+        '使用者指令：$userInput\n\n請先用 ui_get_state 了解當前狀態，再根據使用者意圖執行。',
         'LLM 失敗，fallback 原文',
       );
     }

@@ -8,8 +8,8 @@
 // - 改完後自動回傳 diff 讓 LLM 確認
 
 import 'dart:io';
-import '../../../core/dev_paths.dart';
 import '../agent_tool.dart';
+import '../../../core/dev_paths.dart';
 
 final _projectRoot = resolveDevPath('~/Developer/bridge_app');
 

@@ -17,13 +17,13 @@
 // - 隱藏游標：進入時 SystemChrome 隱藏（macOS 上 MouseCursor.defer）
 
 import 'dart:async';
-import '../core/dev_paths.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../widgets/brain/galaxy_webview.dart';
+import '../core/dev_paths.dart';
+import 'brain/galaxy_webview.dart';
 
 /// 星系保護模式 controller——掛在 App root
 class GalaxyScreensaverController extends ChangeNotifier {

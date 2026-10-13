@@ -15,8 +15,12 @@ class ReadAppLogTool extends AgentTool {
   @override
   String get description =>
       '讀取 App 運行時的 log（debugPrint 輸出）。用於診斷 bug、確認修復是否生效、'
-      '追蹤事件流程。Log 存在 ring buffer 中（最近 500 行）。'
-      '可用 filter 參數過濾包含特定關鍵字的行，例如 "AgentSensor" 或 "error"。';
+      '追蹤事件流程。Log 存在 ring buffer 中（最近 2000 行）。'
+      '可用 filter 參數過濾包含特定關鍵字的行，例如 "AgentSensor" 或 "error"。'
+      '⚠️ 陷阱警告：filter "error" 只會抓 error 級——排版問題（畫面爆版、'
+      '黑黃警示條）在 log 裡是 warning 級的 "overflowed" 訊息，會被剛好濾掉。'
+      '查畫面問題時：filter 用 "overflowed"，或先不 filter 讀 200 行。'
+      '視覺問題請先用 app_look 看當下畫面，再用本工具交叉驗證。';
 
   @override
   List<AgentToolParamSpec> get paramSpecs => const [
@@ -28,7 +32,7 @@ class ReadAppLogTool extends AgentTool {
         ),
         AgentToolParamSpec(
           name: 'filter',
-          description: '關鍵字過濾（只回傳包含此字串的行），例如 "AgentSensor" 或 "error"',
+          description: '關鍵字過濾（只回傳包含此字串的行）。查畫面問題用 "overflowed"（排版訊息是 warning 級，filter "error" 會漏掉）',
           required: false,
         ),
       ];

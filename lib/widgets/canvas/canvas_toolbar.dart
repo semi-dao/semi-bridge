@@ -130,7 +130,7 @@ class _CanvasToolbarState extends State<CanvasToolbar> {
   @override
   Widget build(BuildContext context) {
     final ds = BridgeDSColors.of(context);
-    // SemiCanvas 視覺 P1: 半透明浮動工具列
+    // SemiCanvas 視覺 P1: Miro 風格半透明浮動工具列
     return Container(
       width: 60,  // [教練 Agent 2026-08-03] 配合按鈕升級 44x44
       margin: const EdgeInsets.only(top: 8, bottom: 8, left: 4),

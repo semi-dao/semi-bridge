@@ -1,0 +1,197 @@
+{
+  "source_conversation_id": "1789195012963",
+  "source_title": "排程任務測試",
+  "msg_count": 179,
+  "time_range": {
+    "first": "2026-09-12T14:36:52.983119",
+    "last": "2026-09-19T13:30:22.815243"
+  },
+  "facts": [
+    {
+      "id": "commit_03d43e12_what",
+      "category": "commit",
+      "question": "commit 03d43e12 是做什麼的？",
+      "expected_keywords": [
+        "getCanvasNodes",
+        "canvasId",
+        "兩處修正",
+        "pod_nodes"
+      ],
+      "source_msg_idx": 113,
+      "difficulty": "medium"
+    },
+    {
+      "id": "commit_a8f3d29e_status",
+      "category": "commit",
+      "question": "commit a8f3d29e 是否真的有上線？",
+      "expected_answer": "未上線 / 撤回 / 不實 / commit 不存在",
+      "expected_keywords": [
+        "撤回",
+        "不實",
+        "git log 沒有",
+        "驗收抓包"
+      ],
+      "source_msg_idx": 125,
+      "difficulty": "medium"
+    },
+    {
+      "id": "commit_1a5590b4_purpose",
+      "category": "commit",
+      "question": "dagNodes 空殼的技術債是怎麼修的？commit hash 是什麼？",
+      "expected_answer": "1a5590b4",
+      "expected_keywords": [
+        "1a5590b4",
+        "dagNodes",
+        "tts"
+      ],
+      "source_msg_idx": 137,
+      "difficulty": "medium"
+    },
+    {
+      "id": "commit_e8308d6a_purpose",
+      "category": "commit",
+      "question": "200 輪閥移除是哪個 commit？",
+      "expected_answer": "e8308d6a",
+      "expected_keywords": [
+        "e8308d6a",
+        "200 輪",
+        "閥",
+        "自由"
+      ],
+      "source_msg_idx": 144,
+      "difficulty": "easy"
+    },
+    {
+      "id": "commit_0ab9ee4a_purpose",
+      "category": "commit",
+      "question": "工單一上線的 commit 是哪個？驗收方式是？",
+      "expected_answer": "0ab9ee4a",
+      "expected_keywords": [
+        "0ab9ee4a",
+        "tts_service",
+        "asset_preview",
+        "profile build"
+      ],
+      "source_msg_idx": 151,
+      "difficulty": "medium"
+    },
+    {
+      "id": "blue_decision_free_lim",
+      "category": "decision",
+      "question": "Blue 對 200 輪閥的拍板態度是什麼？",
+      "expected_answer": "移除 / 不限 / 自由 / 信心",
+      "expected_keywords": [
+        "200 輪閥已移除",
+        "Blue 拍板",
+        "信心",
+        "物理上限"
+      ],
+      "source_msg_idx": 144,
+      "difficulty": "easy"
+    },
+    {
+      "id": "structure_continue_rule",
+      "category": "decision",
+      "question": "結構性續跑新規則上線後，未帶 tool call 也未帶 [[TASK_DONE]] 的回覆會怎樣？",
+      "expected_answer": "自動催續跑（最多5次）",
+      "expected_keywords": [
+        "催續跑",
+        "最多5次",
+        "結構性續跑"
+      ],
+      "source_msg_idx": 123,
+      "difficulty": "medium"
+    },
+    {
+      "id": "schedule_time_change",
+      "category": "decision",
+      "question": "咖啡排程從 09:00 改到幾點？為什麼？",
+      "expected_answer": "10:30 / Blue 臨時出門要在場親耳聽",
+      "expected_keywords": [
+        "10:30",
+        "出門",
+        "親耳聽"
+      ],
+      "source_msg_idx": 135,
+      "difficulty": "easy"
+    },
+    {
+      "id": "bug_a_status",
+      "category": "task",
+      "question": "Bug A（畫布離線 fallback）的最終修復狀態？",
+      "expected_answer": "已修，已部署（commit 03d43e12 + Bug A+ 擴展 a8f3d29e 不實撤回）",
+      "expected_keywords": [
+        "已修",
+        "部署",
+        "上線",
+        "03d43e12",
+        "教練 build+重啟"
+      ],
+      "source_msg_idx": 115,
+      "difficulty": "hard"
+    },
+    {
+      "id": "work_order_2_status",
+      "category": "task",
+      "question": "工單二（地雷拆除）的最終 commit hash 是？",
+      "expected_answer": "44032cdf",
+      "expected_keywords": [
+        "44032cdf",
+        "地雷拆除",
+        "_lastFiredMap.clear"
+      ],
+      "source_msg_idx": 156,
+      "difficulty": "medium"
+    },
+    {
+      "id": "horror_repeated_grep",
+      "category": "lesson",
+      "question": "這個 agent 在 09-18 01:26 犯了什麼錯？",
+      "expected_answer": "重複 grep / 同一條指令兩小時內跑兩次 / 通道雜訊",
+      "expected_keywords": [
+        "重複送達",
+        "通道雜訊",
+        "兩小時前",
+        "舊指令"
+      ],
+      "source_msg_idx": 138,
+      "difficulty": "medium"
+    },
+    {
+      "id": "horror_hallucinated_pause",
+      "category": "lesson",
+      "question": "agent 曾在 09-15 21:15 撤回過什麼宣稱？",
+      "expected_answer": "磁碟上沒有修復 / 第二次宣稱也是假的 / 撤回",
+      "expected_keywords": [
+        "磁碟上沒有",
+        "撤回",
+        "假的"
+      ],
+      "source_msg_idx": 83,
+      "difficulty": "hard"
+    },
+    {
+      "id": "design_doc_path",
+      "category": "doc",
+      "question": "W1 開卷提到的設計稿檔名是？",
+      "expected_answer": "SCHEDULE_UX_DESIGN_SECOND_CUT.md",
+      "expected_keywords": [
+        "SCHEDULE_UX_DESIGN_SECOND_CUT"
+      ],
+      "source_msg_idx": 159,
+      "difficulty": "easy"
+    },
+    {
+      "id": "max_retry_count",
+      "category": "quantitative",
+      "question": "結構性續跑規則最多催幾次？",
+      "expected_answer": "5 次",
+      "expected_keywords": [
+        "5",
+        "五次"
+      ],
+      "source_msg_idx": 123,
+      "difficulty": "medium"
+    }
+  ]
+}

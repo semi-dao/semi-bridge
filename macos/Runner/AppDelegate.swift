@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import desktop_multi_window
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -40,6 +41,15 @@ class AppDelegate: FlutterAppDelegate {
   private var _activity: NSObjectProtocol?
 
   override func applicationDidFinishLaunching(_ notification: Notification) {
+    // [無限插槽 C1 2026-10-06 移植自 semi-bridge f339fae] 子視窗 plugin 註冊——
+    // desktop_multi_window 的子引擎是「裸引擎」：不會跑
+    // RegisterGeneratedPlugins，所以 window_manager / hotkey 等 plugin
+    // 在子引擎全是 MissingPluginException。plugin 提供
+    // setOnWindowCreatedCallback：在這裡對每個新子引擎補註冊。
+    FlutterMultiWindowPlugin.setOnWindowCreatedCallback { controller in
+      RegisterGeneratedPlugins(registry: controller)
+    }
+
     // App Nap 除名（傳統手段）+ 現代 process activity 雙保險
     ProcessInfo.processInfo.disableAutomaticTermination("galaxy-live")
     ProcessInfo.processInfo.disableSuddenTermination()

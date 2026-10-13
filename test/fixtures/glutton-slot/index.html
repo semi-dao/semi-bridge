@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>暴食測試插槽（故意失控）</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #eee;
+         padding: 24px; }
+  button { padding: 12px 18px; margin: 6px; font-size: 15px; border: none;
+           border-radius: 8px; cursor: pointer; }
+  .storm { background: #e74c3c; color: white; }
+  .err  { background: #e67e22; color: white; }
+  .ok   { background: #27ae60; color: white; }
+  p { line-height: 1.6; }
+  code { background:#2d2d44; padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h2>⚡ 暴食測試插槽</h2>
+<p>這是<strong>故意寫壞</strong>的插槽，用來驗收 C4 看門狗：
+<ul>
+  <li><code>導航風暴</code>：10 秒內狂跳 30 次外部連結 → 看門狗自動斷電</li>
+  <li><code>錯誤風暴</code>：狂呼叫不存在的函數製造 JS 錯誤 → 自動斷電</li>
+</ul>
+觀察重點：按鈕按下去後幾秒內，這個視窗會被自動關閉，
+插槽管理頁會顯示「⚠️ 已被看門狗暫停」。</p>
+
+<button class="storm" onclick="navStorm()">🌪️ 觸發導航風暴（跳外部連結×30）</button>
+<button class="err" onclick="errStorm()">💥 觸發 JS 錯誤風暴</button>
+<button class="ok" onclick="normalWork()">✅ 正常工作（不觸發任何東西）</button>
+
+<div id="out" style="margin-top:16px; color:#aaa;"></div>
+
+<script>
+function log(m){ document.getElementById('out').textContent = m; }
+
+// 導航風暴：狂開外部連結（全部會被沙箱導航閘擋下→餵看門狗計數）
+function navStorm(){
+  log('導航風暴開始——30 次跳出嘗試…');
+  var i = 0;
+  var t = setInterval(function(){
+    location.href = 'https://example.com/escape/' + i;
+    if (++i >= 32) clearInterval(t);
+  }, 80);
+}
+
+// JS 錯誤風暴：狂呼叫不存在的東西
+function errStorm(){
+  log('錯誤風暴開始——100 個未捕捉錯誤…');
+  for (var i = 0; i < 100; i++) {
+    setTimeout(function(){ nonexistentFunctionBoom(); }, i * 5);
+  }
+}
+
+function normalWork(){
+  log('我只是個安靜的工具，什麼壞事都不做。✅');
+}
+</script>
+</body>
+</html>

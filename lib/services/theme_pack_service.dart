@@ -256,7 +256,7 @@ class ThemePackService {
       name: '橋樑暗色（內建）',
       author: 'Bridge Team',
       license: 'MIT',
-      description: '預設暗色主題，暗色科技氛圍',
+      description: '預設暗色主題，xAI 科技氛圍',
       minBridgeVersion: '1.0',
       targetModes: const ['dark'],
       colors: _darkColors(),

@@ -12,10 +12,14 @@ import 'dart:convert';
 import 'package:bridge_app/services/vector_db/incremental_ingest_service.dart';
 import 'package:flutter/foundation.dart';
 
+import '../activity/background_task_registry.dart';
+
 import 'package:bridge_app/models/brain_container/brain_room.dart';
 import 'package:bridge_app/models/brain_container/connection.dart';
 import 'package:bridge_app/models/brain_container/memory.dart';
 import 'persistence/memory_file_backfill_service.dart';
+// [小葵 2026-10-13 K1 修復線] K1 頭還原
+import '../decision/k1_bootstrapper.dart';
 import 'package:bridge_app/models/brain_container/memory_source.dart';
 import 'package:bridge_app/services/brain_container/brain_database.dart';
 import 'package:bridge_app/services/brain_container/asset_reembed_service.dart';
@@ -112,6 +116,10 @@ class BrainContainerService {
       _embedder = EmbeddingService.instance;
       await _embedder.initialize();
 
+      // 2.5 [小葵 2026-10-13 K1 修復線] 還原 K1 決策頭（權重檔在
+      // brain_state/k1_head.json；無檔時 K1 走規則層+escalate 不阻擋啟動）
+      K1Bootstrapper.instance.restoreFromStore();
+
       // 3. 管線元件
       _preprocessor = ContentPreprocessor();
       _writer = MemoryWriter(database: _database);
@@ -152,7 +160,9 @@ class BrainContainerService {
       });
       // [小葵 2026-09-09 Blue v2 檢索令] 全量身份重嵌（冪等——只處理
       // 還不是 identity 的筆數）。延遲 120s：等 folder_origin 先回填。
+      // [小葵 2026-09-30 金礦1] 掛牌系統活動中心——背景任務不再是隱形的
       Future.delayed(const Duration(seconds: 120), () {
+        IdentityReembedReporter.attach();
         IdentityReembedService.instance.start();
       });
       // [教練 Agent 2026-08-20] 鐵三角 #6——memory_asset_links 回填。

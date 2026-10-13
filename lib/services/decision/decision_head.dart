@@ -29,7 +29,20 @@ class K1Labels {
   /// 二元化：查/不查記憶（守門員的生死題）
   static const needSet = {needMemoryLookup, repeatQuery};
 
-  static bool isNeed(String label) => needSet.contains(label);
+  // [小葵 2026-10-13 路線1] 二元頭標籤——4 類 LOO 天花板 ~51%（表徵×rubric×容量
+  // 三元瓶頸，實證見 docs/K1_EG2_MIGRATION_PLAN.md §2），二元 78% 過門檻。
+  /// 二元「不查」標籤：direct_action + general_chat 的合併
+  static const noLookup = 'no_lookup';
+
+  /// 二元標籤集
+  static const binaryAll = [needMemoryLookup, noLookup];
+
+  /// 4 類 → 二元映射（訓練引導用）
+  static String toBinary(String label) =>
+      isNeed(label) ? needMemoryLookup : noLookup;
+
+  static bool isNeed(String label) =>
+      needSet.contains(label) || label == needMemoryLookup;
 }
 
 /// K1 判斷結果
@@ -123,8 +136,9 @@ class DecisionHeadTrainer {
     double l2 = 1e-3,
     int trainedAtMs = 0,
     double holdoutAcc = 0.0,
+    List<String>? labelSet, // [小葵 2026-10-13 路線1] 二元頭用 K1Labels.binaryAll
   }) {
-    final labels = K1Labels.all;
+    final labels = labelSet ?? K1Labels.all;
     final dim = samples.first.$1.length;
     final n = samples.length;
     final w = [

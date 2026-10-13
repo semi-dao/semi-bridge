@@ -56,6 +56,37 @@ struct ScreenCaptureNative {
     }
 
     /// 截取指定視窗
+    /// [開光 v0.4.x 2026-10-01] 全螢幕拍攝（CGRect.null + 所有視窗 = 整個桌面）
+    static func captureScreen(result: @escaping FlutterResult) {
+        let image = CGWindowListCreateImage(
+            .null,
+            [.optionOnScreenOnly],
+            kCGNullWindowID,
+            [.boundsIgnoreFraming, .nominalResolution]
+        )
+        guard let cgImage = image else {
+            result(FlutterError(code: "capture_failed", message: "CGWindowListCreateImage 回 nil（可能未授螢幕錄製權限）", details: nil))
+            return
+        }
+        let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
+        guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            result(FlutterError(code: "encode_failed", message: "PNG 編碼失敗", details: nil))
+            return
+        }
+        // 寫到 App 沙盒暫存（Dart 讀完即刪）
+        let tmp = NSTemporaryDirectory() + "bridge_os_retina_\(Int(Date().timeIntervalSince1970)).png"
+        do {
+            try pngData.write(to: URL(fileURLWithPath: tmp))
+            result([
+                "screenshotPath": tmp,
+                "width": cgImage.width,
+                "height": cgImage.height,
+            ])
+        } catch {
+            result(FlutterError(code: "write_failed", message: "\(error.localizedDescription)", details: nil))
+        }
+    }
+
     static func captureWindow(call: FlutterMethodCall, result: @escaping FlutterResult) {
         let args = call.arguments as? [String: Any] ?? [:]
         let windowId = args["windowId"] as? Int

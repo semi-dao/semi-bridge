@@ -18,6 +18,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'asset_sandbox.dart';
+import '../activity/background_task_registry.dart';
 import 'identity_embed_text.dart';
 import 'embedding_progress_tracker.dart';
 import 'file_classifier.dart';
@@ -363,6 +364,59 @@ class AssetIndexService {
   /// [教練 Agent 2026-08-21] 樹指紋快取——root → 指紋（fullScan 短路用）
   final Map<String, String> _lastTreeFingerprints = {};
 
+  // [小葵 2026-09-30 D1-F1 指紋落盤] tree fingerprint 存 brain_meta——
+  // 重啟不再全量重掃（原：記憶體快取重啟歸零 → 每次啟動 30GB hash 讀取 1 小時）。
+  // key: tree_fp:<root路徑hash>；value: fingerprint 字串。
+  bool _fpLoadedFromDb = false;
+  static const _fpKeyPrefix = 'tree_fp:';
+
+  void _loadFingerprintsFromDb() {
+    if (_fpLoadedFromDb) return;
+    _fpLoadedFromDb = true;
+    try {
+      final db = BrainDatabase.instance.db;
+      final rows = db.select(
+        "SELECT key, value FROM brain_meta WHERE key LIKE '$_fpKeyPrefix%'",
+      );
+      for (final r in rows) {
+        final rootHash = (r['key'] as String).substring(_fpKeyPrefix.length);
+        // 反查 root：value 格式 "rootPath\nfingerprint"（FNV-1a 穩定驗證）
+        final raw = r['value'] as String;
+        final idx = raw.indexOf('\n');
+        if (idx <= 0) continue;
+        final rootPath = raw.substring(0, idx);
+        if (_stablePathHash(rootPath) != rootHash) continue; // 防竄改/搬移
+        _lastTreeFingerprints[rootPath] = raw.substring(idx + 1);
+      }
+      debugPrint('[AssetIndex] 指紋快取落盤載入: ${_lastTreeFingerprints.length} roots');
+    } catch (e) {
+      debugPrint('[AssetIndex] 指紋落盤載入失敗（無害，走全掃）: $e');
+    }
+  }
+
+  void _persistFingerprint(String root, String fp) {
+    try {
+      final db = BrainDatabase.instance.db;
+      // [F1c] String.hashCode 每個 isolate 隨機化（重啟即變）→ key 必 miss。
+      // 改穩定 digest：路徑 UTF-8 bytes 的 FNV-1a 64bit（純 Dart、無依賴）。
+      final key = '$_fpKeyPrefix${_stablePathHash(root)}';
+      db.execute(
+        "INSERT OR REPLACE INTO brain_meta (key, value) VALUES (?, ?)",
+        [key, '$root\n$fp'],
+      );
+    } catch (_) {/* 無害——下次掃描重存 */}
+  }
+
+  /// FNV-1a 64bit——跨啟動穩定的路徑指紋
+  static String _stablePathHash(String s) {
+    var h = 0xcbf29ce484222325;
+    for (final b in s.codeUnits) {
+      h ^= b;
+      h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
+    }
+    return h.toRadixString(16);
+  }
+
   /// 唯讀：目前 manifest
   VectorDbManifest get manifest => _manifest;
 
@@ -457,6 +511,7 @@ class AssetIndexService {
     final root = _normalizeRoot(rootPath);
 
     if (skipIfUnchanged) {
+      _loadFingerprintsFromDb(); // [D1-F1] 重啟後也吃得到上次指紋
       final fp = await _computeTreeFingerprint(root);
       if (fp != null && fp == _lastTreeFingerprints[root]) {
         debugPrint('[AssetIndex] 指紋一致，跳過整輪 fullScan ($root) '
@@ -472,7 +527,10 @@ class AssetIndexService {
         );
       }
       // 指紋不同或首次：記住新指紋（全掃完成後的樹狀態）
-      if (fp != null) _lastTreeFingerprints[root] = fp;
+      if (fp != null) {
+        _lastTreeFingerprints[root] = fp;
+        _persistFingerprint(root, fp); // [D1-F1] 落盤
+      }
     }
 
     final records = <AssetRecord>[];
@@ -541,11 +599,17 @@ class AssetIndexService {
     // [教練 Agent 2026-07-28] v8: 將分類結果寫入 DB
     await _writeRecordsToDb(records, root);
 
-    // [教練 Agent 2026-08-21] 死鏈清理——檔案系統是唯一真相：這輪掃描沒看到
+    // [教練 Agent 2026-08-21] 死鏈處理——檔案系統是唯一真相：這輪掃描沒看到
     /// 的（屬於此 root、已不存在於磁碟的）行，從 asset_index 移除。
     /// 動機：fullScan 只增不刪，24/7 autoIngest 下刪掉的檔案會變死鏈
     /// 永遠留在 DB／圖譜（08-21 曾手動清 6 筆）。指紋短路保證這段
     /// 只在樹真的變了才執行，成本可接受。
+    /// [小葵 2026-10-06 移植自 semi-bridge 025642f 改標記制] 跨 root 搬家的
+    /// 檔案舊路徑會先在這裡被掃到——直接 DELETE 會把向量一起埋掉，新 root
+    /// 的 hash 對帳就沒得救了。改標 index_status='missing'：搜尋/嵌入查詢
+    /// 全部過濾 ='indexed' 自然排除（行為等價於刪除），但身份（向量/描述）
+    /// 保留，給 _writeRecordsToDb 的搬家對帳一個救回的機會。真的被刪除的
+    /// 檔案就永遠停在 missing（無害殘跡，未來可批量清）。
     try {
       final db = BrainDatabase.instance.db;
       final currentPaths = records.map((r) => r.filePath).toSet();
@@ -558,17 +622,19 @@ class AssetIndexService {
         final fp = row['file_path'] as String;
         if (!currentPaths.contains(fp) && !File('$root/$fp').existsSync()) {
           db.execute(
-            'DELETE FROM asset_index WHERE file_path = ? AND folder_root = ?',
+            "UPDATE asset_index SET index_status = 'missing' "
+            "WHERE file_path = ? AND folder_root = ?",
             [fp, root],
           );
           removed++;
         }
       }
       if (removed > 0) {
-        debugPrint('[AssetIndex] 死鏈清理 ($root): 移除 $removed 筆');
+        debugPrint('[AssetIndex] 死鏈標記 ($root): $removed 筆 → missing'
+            '（搬家對帳可救回，向量不埋葬）');
       }
     } catch (e) {
-      debugPrint('[AssetIndex] 死鏈清理失敗 ($root): $e');
+      debugPrint('[AssetIndex] 死鏈標記失敗 ($root): $e');
     }
 
     stopwatch.stop();
@@ -841,30 +907,114 @@ class AssetIndexService {
     final db = BrainDatabase.instance.db;
     final now = DateTime.now().millisecondsSinceEpoch;
 
+    // [小葵 2026-09-30 F1b] 批次化：原逐筆 SELECT+debugPrint，7000 檔 =
+    // 7000 次查詢 + 7000 行 log——fullScan「掃描 5 根目錄」卡 80 分鐘的元兇。
+    // 改一次撈全表 file_path→index_status，記憶體比對。
+    final existingStatuses = <String, String>{};
+    try {
+      for (final row in db.select(
+        "SELECT file_path, index_status FROM asset_index",
+      )) {
+        final fp0 = row['file_path'] as String?;
+        final st0 = row['index_status'] as String?;
+        if (fp0 != null && st0 != null) existingStatuses[fp0] = st0;
+      }
+    } catch (_) {/* 無害——fallback 逐筆 */}
+    var skippedCount = 0;
+
+    // [小葵 2026-10-06 移植自 semi-bridge 025642f] hash 優先對帳——檔案
+    // 搬家/改名偵測。內容是身份，路徑只是指標（vault 只整理不動檔案的鏡像）。
+    // 掃描發現的「新路徑」若內容 hash 與 DB 某筆已嵌入紀錄相同，且舊路徑
+    // 已不存在於磁碟（=搬家/改名，非複製）→ 那筆搬家，向量/描述/標籤/分類
+    // 全保留（零重嵌入）。跨 root 搬家也吃這條路；missing（死鏈標記）在
+    // 救回名單內——復原 indexed。舊路徑還在＝複製→當新檔案走 INSERT。
+    // 只對帳已嵌入（indexed/embedded/missing）的——pending 重嵌成本低。
+    // 融合 F1b 批次化：hash 索引也一次撈全表。
+    final hashIndex = <String, ({String root, String path})>{};
+    try {
+      for (final row in db.select(
+        "SELECT folder_root, file_path, file_hash FROM asset_index "
+        "WHERE file_hash IS NOT NULL "
+        "  AND index_status IN ('indexed','embedded','missing')",
+      )) {
+        hashIndex[row['file_hash'] as String] = (
+          root: row['folder_root'] as String,
+          path: row['file_path'] as String,
+        );
+      }
+    } catch (e) {
+      debugPrint('[AssetIndex] hash 對帳索引建置失敗（無妨，跳過搬家偵測）: $e');
+    }
+
+    var relocated = 0;
     for (final r in records) {
       try {
+        // ── 搬家偵測：新路徑 + 內容 hash 命中舊紀錄 ──
+        String? newHash = r.fileHash;
+        if (newHash == null || newHash.isEmpty) {
+          // 掃描時不算 content hash——這裡補算（只在 hash 索引非空時，
+          // 空 DB/首掃完全零成本）
+          if (hashIndex.isNotEmpty) {
+            newHash = await _computeFileHash(File('$root/${r.filePath}'));
+          }
+        }
+        final hit = newHash == null ? null : hashIndex[newHash];
+        if (newHash != null && hit != null && hit.path != r.filePath) {
+          final oldFull = '${hit.root}/${hit.path}';
+          final oldStillExists = File(oldFull).existsSync();
+          if (!oldStillExists) {
+            db.execute(
+              'UPDATE asset_index SET '
+              'file_path = ?, folder_root = ?, file_name = ?, file_ext = ?, '
+              'file_size = ?, file_modified = ?, indexed_at = ?, '
+              "index_status = 'indexed' "
+              'WHERE file_path = ?',
+              [r.filePath, root, r.fileName, r.fileExt, r.fileSize,
+               r.fileModified, now, hit.path],
+            );
+            hashIndex[newHash] = (root: root, path: r.filePath);
+            relocated++;
+            debugPrint('[AssetIndex] 🔄 搬家偵測: ${hit.root}/${hit.path} → '
+                '$root/${r.filePath}（內容相同，向量與描述保留）');
+            continue;
+          }
+          // 舊路徑還在＝複製，兩筆並存——落到正常 INSERT 當新檔案
+        }
+
         // [教練 Agent 2026-07-31] 修復：不要覆蓋已嵌入的記錄
         // 如果 DB 裡已有此 file_path 且 index_status != 'pending'，跳過不覆蓋
-        final existing = db.select(
-          "SELECT index_status FROM asset_index WHERE file_path = ?",
-          [r.filePath],
-        );
+        final existing = existingStatuses.containsKey(r.filePath)
+            ? <String, Object?>{'index_status': existingStatuses[r.filePath]}
+            : null;
 
-        if (existing.isNotEmpty) {
-          final status = existing.first['index_status'] as String?;
+        if (existing != null) {
+          final status = existing['index_status'] as String?;
           if (status == 'indexed' || status == 'embedded') {
-            debugPrint('[AssetIndex] 跳過已嵌入記錄: ${r.fileName} (status=$status)');
+            skippedCount++;
             continue;
           }
         }
 
         db.execute(
-          '''INSERT OR REPLACE INTO asset_index
+          '''INSERT INTO asset_index
              (id, file_path, folder_root, file_name, file_ext, file_size,
               file_modified, index_status, indexed_at, title, asset_kind,
               tags, source, created_at, room, project_id,
               classification_confidence, source_type, file_hash, audience)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(file_path) DO UPDATE SET
+              file_name = excluded.file_name,
+              file_ext = excluded.file_ext,
+              file_size = excluded.file_size,
+              file_modified = excluded.file_modified,
+              title = excluded.title,
+              asset_kind = excluded.asset_kind,
+              tags = excluded.tags,
+              file_hash = excluded.file_hash,
+              indexed_at = excluded.indexed_at
+             -- [小葵 2026-09-30 狀態機] 不碰 embed_source/embedding/content_text：
+             -- INSERT OR REPLACE 會整 row 重建、丟失嵌入成果（第七金礦根因）
+             --''',
           [
             r.id,
             r.filePath,
@@ -891,6 +1041,12 @@ class AssetIndexService {
       } catch (e) {
         debugPrint('[AssetIndex] DB 寫入失敗 (${r.fileName}): $e');
       }
+    }
+    if (skippedCount > 0) {
+      debugPrint('[AssetIndex] 批次完成：跳過 $skippedCount 筆已嵌入記錄（F1b 批次化）');
+    }
+    if (relocated > 0) {
+      debugPrint('[AssetIndex] hash 對帳完成: $relocated 筆搬家（零重嵌入）');
     }
 
     debugPrint('[AssetIndex] DB 寫入完成: ${records.length} 筆 ($root)');
@@ -1209,8 +1365,24 @@ class AssetIndexService {
       }
     } catch (_) {}
 
+    // [小葵 2026-09-30 根修] identity = 終態：已是身份嵌入的檔案一律跳過。
+    // 慘案：generateEmbeddings 把 manifest.embedding=false 的舊檔重嵌成
+    // embed_source='content'，把 IdentityReembed 做好的身份嵌入整批覆蓋
+    //（2026-09-30 實證：identity 6802→4148、content 281→2946，兩個任務互相踩）。
+    final identityPaths = <String>{};
+    try {
+      final rows = db.select(
+        "SELECT file_path FROM asset_index WHERE embed_source = 'identity'",
+      );
+      for (final row in rows) {
+        identityPaths.add(row['file_path'] as String);
+      }
+    } catch (_) {}
+
     var pendingFiles = _manifest.files.where((mf) {
       if (rootPath != null && mf.folder != rootPath) return false;
+      // [小葵 2026-09-30] identity 終態保護——絕不重嵌（身份嵌入是檢索升級 v2 的成果）
+      if (identityPaths.contains(mf.path)) return false;
       // [教練 Agent 2026-08-02] DB pending 的檔案直接納入，不管 manifest.embedding
       if (pendingDbPaths.contains(mf.path)) return true;
       // manifest 裡 embedding=false 且 DB 也不是 indexed 的也納入
@@ -1267,18 +1439,47 @@ class AssetIndexService {
       // file_hash 欄位可能還不存在（舊 schema）
     }
 
-    // 過濾掉 hash 相同的檔案，並暫存 hash 供後續寫入
+    // [小葵 2026-10-01 F3] hash 統一層——快指紋優先：
+    // 舊流程對每個 pending 檔全量讀檔算 SHA256（7000 筆=30GB 讀取），
+    // 但絕大多數是「內容未變、只是 file_hash 空」的舊資產。
+    // 新流程：stat 的 mtime+size 與 DB 一致 → 視同未變（零讀檔）；
+    // 不一致才讀檔算 hash（真變更）。
+    final existingStatFingerprints = <String, String>{};
+    try {
+      for (final row in db.select(
+          'SELECT file_path, file_size, file_modified FROM asset_index')) {
+        final fp0 = row['file_path'] as String?;
+        if (fp0 == null) continue;
+        existingStatFingerprints[fp0] =
+            '${row['file_size']}:${row['file_modified']}';
+      }
+    } catch (_) {/* 舊 schema 無欄位——fallback 全量 hash */}
+
     final hashCache = <String, String?>{}; // path -> hash
     final filesToEmbed = <ManifestFile>[];
+    var statSkipped = 0;
     for (final mf in pendingFiles) {
       final fullPath = '${mf.folder}/${mf.path}';
-      final hash = await _computeFileHash(File(fullPath));
+      final f = File(fullPath);
+      // 快指紋層：stat 比對（零讀檔）
+      try {
+        final st = await f.stat();
+        final fastFp = '${st.size}:${st.modified.millisecondsSinceEpoch}';
+        if (existingStatFingerprints[fullPath] != null &&
+            existingStatFingerprints[fullPath] == fastFp) {
+          statSkipped++;
+          continue; // mtime+size 未變——內容 hash 必然一致（碰撞率可忽略）
+        }
+      } catch (_) {/* stat 失敗——走完整 hash */}
+      final hash = await _computeFileHash(f);
       if (hash != null && existingHashes[mf.path] == hash) {
-        debugPrint('[AssetIndex] 跳過未改變的檔案: ${mf.path}');
         continue;
       }
       hashCache[mf.path] = hash;
       filesToEmbed.add(mf);
+    }
+    if (statSkipped > 0) {
+      debugPrint('[AssetIndex] [F3] 快指紋跳過 $statSkipped 筆（零讀檔）');
     }
 
     if (filesToEmbed.isEmpty) return 0;
@@ -1338,7 +1539,8 @@ class AssetIndexService {
               "  content_text = ?, file_hash = ?, "
               "  embed_source = 'content', "
               "  index_status = 'indexed', indexed_at = ? "
-              "WHERE file_path = ?",
+              "WHERE file_path = ? "
+              "  AND COALESCE(embed_source, '') != 'identity'",
               [
                 jsonEncode(result.vector),
                 body,
@@ -1424,7 +1626,8 @@ class AssetIndexService {
             "  content_text = ?, file_hash = ?, "
             "  embed_source = 'content', "
             "  index_status = 'indexed', indexed_at = ? "
-            "WHERE file_path = ?",
+            "WHERE file_path = ? "
+            "  AND COALESCE(embed_source, '') != 'identity'",
             [
               jsonEncode(result.vector),
               fullText,
@@ -1447,6 +1650,14 @@ class AssetIndexService {
           );
           if (result) success++;
           debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length}: ${mf.path} (${isImage ? "圖片" : "影片"})');
+          // [F2] 視覺資產進度（VisionPipeline 逐張）
+          BackgroundTaskRegistry.instance.update(BackgroundTask(
+            id: 'gen_embeddings', name: '檔案嵌入',
+            detail: '補嵌 ${filesToEmbed.length} 個（視覺管线）',
+            progress: filesToEmbed.isEmpty ? 1 : done / filesToEmbed.length,
+            current: '${isImage ? "🖼" : "🎬"} ${mf.path.split('/').last}',
+            startedAt: DateTime.now(),
+          ));
 
         } else {
           // ── 其他：用檔名 embed（標記 'filename'——內容補嵌掃描的待辦印記）──
@@ -1463,7 +1674,8 @@ class AssetIndexService {
             "  content_text = ?, file_hash = ?, "
             "  embed_source = 'filename', "
             "  index_status = 'indexed', indexed_at = ? "
-            "WHERE file_path = ?",
+            "WHERE file_path = ? "
+            "  AND COALESCE(embed_source, '') != 'identity'",
             [
               jsonEncode(result.vector),
               fallbackText,
@@ -1533,6 +1745,12 @@ class AssetIndexService {
     tracker.completeEmbedding();
 
     debugPrint('[AssetIndex] Embedding 生成完成: $success/$done 成功');
+    // [幽靈進度條終結 2026-10-01 案二] finish 收進函數自身——
+    // 所有呼叫者（autoIngest/watcher/vault 手動）都受保護，不再依賴
+    // 呼叫端記得收尾（本案：auto_ingest 裸呼 generateEmbeddings 沒 finish，
+    // 任務屍體 67% 永凍；前案 86% 同根因不同入口）
+    BackgroundTaskRegistry.instance.finish('gen_embeddings',
+        note: '$success/$done 成功');
 
     // [小葵 2026-08-28] Blue 指定：新檔導入後接內容重嵌掃描——
     // generateEmbeddings 的「其他類只嵌檔名」遺珠，content_text 有料的
@@ -1688,8 +1906,13 @@ class AssetIndexService {
           try {
             final count = await generateEmbeddings();
             debugPrint('[AssetIndex] 嵌入完成: $count 個檔案');
+            BackgroundTaskRegistry.instance.finish('gen_embeddings',
+                note: '$count 個完成');
           } catch (e) {
             debugPrint('[AssetIndex] 自動嵌入失敗: $e');
+            // [幽靈進度條修復 2026-10-01] 失敗也要收尾——registry 不留 running 屍體
+            BackgroundTaskRegistry.instance.finish('gen_embeddings',
+                note: '嵌入中斷: $e');
           }
         });
       } else {

@@ -147,6 +147,63 @@ class CompassMedic {
     }
   }
 
+  /// [小葵 2026-10-05 開案令] 認知傷口立案——「幻讀」進夢的正門。
+  ///
+  /// 跟工具傷口的差別：工具沒失敗（app_look 成功回傳 443KB PNG），
+  /// 是「結論」錯了——宣稱看到了不存在的東西。這種病不留疤，
+  /// 因為傷口系統只看工具成敗（Blue 10-05 開案：讓幻讀有資格進夢）。
+  ///
+  /// 訊號源：使用者糾正（AgentLoop.run 偵測糾正訊號後呼叫）。
+  /// 痊癒條件（closeCognitiveWound）：下次同情境她主動說「我看不見/
+  /// 我不確定」→ 誠實邊界 = 痊癒。與工具傷口共用 compass_pitfalls 表，
+  /// 夢的三議程（銷案驗證/紅燈/深夢 corpus）自動帶上。
+  int? fileCognitiveWound({
+    required String symptom,
+    String? source,
+    String? toolHint,
+  }) {
+    try {
+      final store = CompassStore.instance;
+      const oid = 'agent.loop';
+      // 去重：7 天內已有未結案認知傷口不重複立案
+      // （認知病灶是「習慣」不是「事件」——一個未癒的幻讀習慣
+      // 一晚只需要夢一次；重複立案會淹夢）
+      final key = 'wound:cognitive';
+      final last = store.getMeta(key);
+      final now = DateTime.now();
+      if (last != null) {
+        try {
+          final lastAt = DateTime.parse(jsonDecode(last)['at'] as String);
+          if (now.difference(lastAt).inDays < 7) return null;
+        } catch (_) {}
+      }
+      final symptomShort =
+          symptom.length > 160 ? symptom.substring(0, 160) : symptom;
+      final src = (source == null || source.isEmpty)
+          ? ''
+          : '（來源：${source.length > 60 ? source.substring(0, 60) : source}）';
+      final hint = (toolHint == null || toolHint.isEmpty) ? '' : '[$toolHint] ';
+      final text = '【pending·認知傷口】${hint}結論與事實不符：$symptomShort$src';
+      store.addPitfall(oid, text, author: 'auto:medic');
+      store.setMeta(key, jsonEncode({'at': now.toIso8601String()}));
+      // 認知傷口進歷史主幹——歷史樹必須看見「她以為看到了」（否則
+      // 戰後分析只能靠 conversations 重挖）
+      try {
+        CausalLedger.instance.record(CausalEntry(
+          toolName: 'cognitive_wound',
+          intervention: '認知傷口立案：$symptomShort',
+          contextDigest: src.isEmpty ? hint : src,
+          observedOutcome: '待夢境消化（議程 0 銷案驗證／深夢反思題材）',
+          success: true,
+          at: DateTime.now(),
+        ));
+      } catch (_) {}
+      return 0; // 已立案
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 修復成功 → 自動草擬藥方（把 pending 案件升級為正式坑卡）。
   /// 藥方格式：症狀 → 病根 → 解法（來自失敗→成功的對照）。
   void closeWoundCase(String toolName, String howFixed) {
@@ -175,6 +232,44 @@ class CompassMedic {
           intervention: '傷口自癒：$toolName（器官 $oid）',
           contextDigest: pending.isEmpty ? toolName : target.text.substring(0, target.text.length > 300 ? 300 : target.text.length),
           observedOutcome: '藥方入庫：${fixed.substring(0, fixed.length > 300 ? 300 : fixed.length)}',
+          success: true,
+          at: DateTime.now(),
+        ));
+      } catch (_) {}
+    } catch (_) {}
+  }
+
+  /// [小葵 2026-10-05 開案令] 認知傷口銷案——誠實邊界 = 痊癒。
+  ///
+  /// 與工具傷口的「失敗→成功對照」不同：認知傷口痊癒的證據是
+  /// **她主動說出看不見/不確定**（誠實邊界），由呼叫端在偵測到
+  /// 誠實訊號時呼叫。痊癒不是「下次答對」——是「下次敢說不知道」。
+  void closeCognitiveWound(String honestyEvidence, {String? toolHint}) {
+    try {
+      final store = CompassStore.instance;
+      const oid = 'agent.loop';
+      final pits = store.pitfalls(oid);
+      final pending = pits.where((p) =>
+          p.text.contains('【pending·認知傷口】') &&
+          !p.text.contains('【已自癒】') &&
+          (toolHint == null || p.text.contains('[$toolHint]')));
+      if (pending.isEmpty) return;
+      final target = pending.first;
+      final targetId = target.id;
+      if (targetId == null) return;
+      final ev = honestyEvidence.length > 200
+          ? honestyEvidence.substring(0, 200)
+          : honestyEvidence;
+      final newText =
+          '${target.text}\n【已自癒】誠實邊界出現，銷案：$ev';
+      store.replacePitfall(targetId, newText, author: 'auto:medic');
+      try {
+        CausalLedger.instance.record(CausalEntry(
+          toolName: 'compass_self_heal',
+          intervention: '認知傷口自癒：誠實邊界（器官 $oid）',
+          contextDigest: target.text.substring(0,
+              target.text.length > 300 ? 300 : target.text.length),
+          observedOutcome: '藥方入庫：$ev',
           success: true,
           at: DateTime.now(),
         ));

@@ -8,10 +8,10 @@
 // - 關視窗 = 隱藏（不是退出 App）
 
 import 'dart:io';
-import '../../core/dev_paths.dart';
 import 'package:flutter/material.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
+import '../../core/dev_paths.dart';
 import 'package:bridge_app/services/tasks/task_dispatcher.dart'; // [隊友訊息流 C7]
 import 'package:bridge_app/widgets/trust/trust_meter_card.dart'; // [刀 6 K6.3]
 import 'package:bridge_app/widgets/routines/system_routine_overlay.dart'; // [刀 5 延伸 SR.3]

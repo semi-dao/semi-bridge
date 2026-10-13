@@ -7,7 +7,7 @@
 // 4. 生成 CustomRoutingPolicy 草稿（isActive = false，等使用者確認）
 // 5. 太模糊時回傳 null（讓呼叫方反問使用者）
 //
-// 設計文件：docs/（routing policy 相關設計見本 repo docs/）
+// 設計文件：custom-routing-policy-design.md §C
 //
 // 不動 CustomRoutingPolicy / ActiveStrategy / ProviderProfileStore 本身。
 // 只引用、組裝資料。

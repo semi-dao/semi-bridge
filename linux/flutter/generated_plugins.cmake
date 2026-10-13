@@ -4,8 +4,10 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
+  desktop_multi_window
   flutter_gemma
   flutter_secure_storage_linux
+  hotkey_manager_linux
   media_kit_video
   screen_retriever_linux
   tray_manager

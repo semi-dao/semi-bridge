@@ -5,8 +5,8 @@
 // 安全限制：只允許讀取專案目錄下的檔案，禁止讀取沙盒外路徑。
 
 import 'dart:io';
-import '../../../core/dev_paths.dart';
 import '../agent_tool.dart';
+import '../../../core/dev_paths.dart';
 
 /// 專案根目錄——Agent 只能讀這個目錄底下的檔案
 final _projectRoot = resolveDevPath('~/Developer/bridge_app');

@@ -74,6 +74,8 @@ dependencies:
   # [教練 Agent 2026-07-24] P4: 系統列圖示 + 視窗管理
   tray_manager: ^0.4.0
   window_manager: ^0.4.3
+  desktop_multi_window: ^0.3.1
+  hotkey_manager: ^0.2.3
 
   # MCP HTTP server
   shelf: ^1.4.2

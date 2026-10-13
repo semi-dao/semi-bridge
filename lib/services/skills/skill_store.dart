@@ -11,6 +11,7 @@
 
 import 'dart:io';
 import 'skill.dart';
+import 'skill_catalog.dart';
 
 class SkillStore {
   static SkillStore? _instance;
@@ -61,6 +62,18 @@ class SkillStore {
     }
 
     _loaded = true;
+
+    // 委派 catalog 重掃（metadata-only、遞迴含子目錄）——插槽輕量化 Task 2。
+    // SkillStore 維持平面全載（find()/save()/delete() 相容不變）；
+    // catalog 負責「看得到吃不到」的子目錄死檔案索引。
+    if (_skillsDir != null) {
+      try {
+        SkillCatalog.instance.setSkillsDir(_skillsDir!);
+        await SkillCatalog.instance.reload();
+      } catch (_) {
+        // catalog 失敗不影響 SkillStore 既有行為
+      }
+    }
   }
 
   /// 所有已載入的 skill

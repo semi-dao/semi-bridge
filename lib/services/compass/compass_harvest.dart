@@ -11,8 +11,8 @@
 // 治理：只寫事實層（facts），不碰意義層/規則層。冪等：重掃覆蓋 facts。
 
 import 'dart:io';
-import '../../core/dev_paths.dart';
 
+import '../../core/dev_paths.dart';
 import 'compass_models.dart';
 import 'compass_store.dart';
 

@@ -145,6 +145,7 @@ class _DataPathOverviewCardState extends State<DataPathOverviewCard> {
         DataPathPurpose.vision => '照片分析',
         DataPathPurpose.delegate => '委派任務',
         DataPathPurpose.review => '內容審查',
+        DataPathPurpose.slotWeb => '插槽流量', // [C4]
       };
 
   String _gradeLabel(DataPathGrade g) => switch (g) {

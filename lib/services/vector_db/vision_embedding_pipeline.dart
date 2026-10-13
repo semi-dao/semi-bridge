@@ -28,6 +28,7 @@ import 'package:flutter/foundation.dart';
 
 import '../brain_container/brain_database.dart';
 import '../brain_container/brain_container_service.dart';
+import '../local_model_scheduler.dart'; // [小葵 2026-10-01] 離合器安全點標記
 import '../brain_container/embedding/embedding_service.dart';
 import '../sovereignty/data_path_gate.dart';
 import '../sovereignty/data_path_interceptor.dart';
@@ -184,11 +185,17 @@ class VisionEmbeddingPipeline {
       return 0;
     }
 
+    // [小葵 2026-10-01 離合器步驟7] 嵌入 job 進行中標記——
+    // LocalModelScheduler 據此判斷安全點（item 邊界）；
+    // 使用者發話時等當前 item 做完才切回夥伴模型。
+    LocalModelScheduler.instance.visionJobActive = true;
+
     // 確認 embedding 模型可用
     if (!_embedder.isModelAvailable) {
       debugPrint('[VisionPipeline] Embedding 模型未安裝，跳過');
       _emitProgress(VisionPipelineStage.error, 0, 0,
           'Embedding 模型未安裝，無法進行向量嵌入');
+      LocalModelScheduler.instance.visionJobActive = false;
       return 0;
     }
 
@@ -197,6 +204,7 @@ class VisionEmbeddingPipeline {
     if (records.isEmpty) {
       debugPrint('[VisionPipeline] 無待處理的圖片/影片');
       _emitProgress(VisionPipelineStage.done, 0, 0, '無待處理的圖片/影片');
+      LocalModelScheduler.instance.visionJobActive = false;
       return 0;
     }
 
@@ -268,6 +276,8 @@ class VisionEmbeddingPipeline {
     );
 
     debugPrint('[VisionPipeline] 全部完成: $success/$total 成功');
+    // [小葵 2026-10-01 離合器步驟7] job 結束——安全點，Scheduler 可切回夥伴
+    LocalModelScheduler.instance.visionJobActive = false;
     return success;
   }
 
@@ -598,6 +608,16 @@ class VisionEmbeddingPipeline {
 
     final args = rootPath != null ? [rootPath] : <String>[];
 
+    // [小葵 2026-10-01 離合器步驟7] pending 計數注入 Scheduler——
+    // 系統活動中心「待辨識 N 張」與離合器評估的資料源（單一真相：DB）
+    try {
+      final count = db.select(
+        'SELECT COUNT(*) as n FROM asset_index WHERE $whereClause',
+        args,
+      ).first['n'] as int;
+      LocalModelScheduler.instance.updatePendingVisionCount(count);
+    } catch (_) {} // 計數失敗不擋主流程
+
     try {
       final results = db.select(
         'SELECT id, file_path, folder_root, file_name, file_ext, asset_kind '
@@ -631,7 +651,8 @@ class VisionEmbeddingPipeline {
       "  index_status = 'indexed', "
       "  indexed_at = ? "
       "${tags != null && tags.isNotEmpty ? ', tags = ?' : ''} "
-      "WHERE file_path = ?",
+      "WHERE file_path = ? "
+      "  AND COALESCE(embed_source, '') != 'identity'",
       [
         jsonEncode(vector),
         description,

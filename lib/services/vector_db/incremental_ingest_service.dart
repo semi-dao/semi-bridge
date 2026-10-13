@@ -13,6 +13,8 @@
 // - 誠實：進度寫 brain_meta（'auto_ingest_status'），MCP /import_progress 可查
 
 import 'dart:async';
+
+import '../activity/background_task_registry.dart';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -199,6 +201,20 @@ class IncrementalIngestService {
   }
 
   void _writeStatus(String s) {
+    // [小葵 2026-09-30 F2] 活動中心掛牌——AutoIngest 全生命週期可視
+    final r = BackgroundTaskRegistry.instance;
+    final now = DateTime.now();
+    if (s.startsWith('running:')) {
+      r.update(BackgroundTask(
+        id: 'auto_ingest', name: '自動檔案巡邏',
+        detail: s.substring(8), startedAt: now,
+        progress: -1, current: s.substring(8),
+      ));
+    } else if (s.startsWith('idle')) {
+      r.finish('auto_ingest', note: '一輪完成');
+    } else if (s.startsWith('error')) {
+      r.finish('auto_ingest', note: '失敗：$s');
+    }
     try {
       final db = BrainDatabase.instance.db;
       db.execute(

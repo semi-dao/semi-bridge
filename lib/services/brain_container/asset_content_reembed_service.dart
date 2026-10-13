@@ -18,6 +18,8 @@
 // 條件 embed_source != 'content' 且 content_text 非檔名 → 嵌。
 
 import 'dart:async';
+
+import '../activity/background_task_registry.dart';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -72,6 +74,12 @@ class AssetContentReembedService {
       return;
     }
     debugPrint('[ContentReembed] 開始：$total 筆待內容重嵌');
+    // [小葵 2026-09-30 F2] 活動中心掛牌
+    BackgroundTaskRegistry.instance.update(BackgroundTask(
+      id: 'content_reembed', name: '內容重嵌入',
+      detail: '升級 $total 筆的內容嵌入',
+      progress: 0, startedAt: DateTime.now(),
+    ));
 
     final sw = Stopwatch()..start();
     var done = 0;
@@ -115,6 +123,10 @@ class AssetContentReembedService {
       db.execute('BEGIN');
       try {
         for (var i = 0; i < rows.length; i++) {
+          // [U1] 溫和暫停——批次邊界檢查（不打斷當前筆）
+          while (BackgroundTaskRegistry.instance.isPauseRequested('content_reembed')) {
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+          }
           db.execute(
             "UPDATE asset_index SET embedding = ?, embed_source = 'content' "
             "WHERE id = ?",
@@ -138,6 +150,7 @@ class AssetContentReembedService {
 
     sw.stop();
     _mark('done');
+    BackgroundTaskRegistry.instance.finish('content_reembed', note: '$done 筆完成');
     debugPrint('[ContentReembed] ✅ 完成 $done 筆 '
         '${(sw.elapsedMilliseconds / 1000).toStringAsFixed(1)} 秒');
   }
@@ -153,6 +166,13 @@ class AssetContentReembedService {
   }
 
   void _markProgress(int done, int total) {
+    // [F2] 活動中心進度
+    BackgroundTaskRegistry.instance.update(BackgroundTask(
+      id: 'content_reembed', name: '內容重嵌入',
+      detail: '升級 $total 筆的內容嵌入',
+      progress: total == 0 ? 1 : done / total,
+      startedAt: DateTime.now(),
+    ));
     try {
       BrainDatabase.instance.db.execute(
         "INSERT OR REPLACE INTO brain_meta (key, value) "

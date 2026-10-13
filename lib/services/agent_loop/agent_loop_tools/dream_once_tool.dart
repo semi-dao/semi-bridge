@@ -155,10 +155,15 @@ class DreamOnceTool extends AgentTool {
           'canvas.chat', 'canvas.storage']) {
         for (final p in store.pitfalls(oid)) {
           if (p.id == null) continue;
-          if (p.text.contains('【pending·傷口立案】') &&
+          // [小葵 2026-10-05 開案令] 認知傷口（幻讀族）也進夢：
+          // 工具沒失敗但結論錯了——深夢最好的反思題材。
+          final isWound = p.text.contains('【pending·傷口立案】') ||
+              p.text.contains('【pending·認知傷口】');
+          if (isWound &&
               !p.text.contains('【已自癒】') &&
               !p.text.contains('【夢境銷案')) {
             // 從傷口文字提取工具名：「...立案】<tool> 失敗：...」
+            // （認知傷口無此格式 → 用 oid，顯示為器官名）
             final m = RegExp('】(\\S+) 失敗').firstMatch(p.text);
             wounds.add(PendingWound(
               pitfallId: p.id!,

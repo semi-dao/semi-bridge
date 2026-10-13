@@ -27,6 +27,13 @@ if(new URLSearchParams(location.search).get('saver')==='1'){
   document.getElementById('hint').style.display='none';
   window.__SAVER__=true;
 }
+// [v323 截圖模式] ?clean=1 → 全 UI 淨空（社群預覽圖用）。
+// ★旗標進源頭：各 UI 建立處自檢 window.__CLEAN__（事後刪除法會被動態重建打敗——
+//   subLegend 每秒輪詢重繪、fpsEl/diag 常駐、vizUI 切模式重建）
+if(new URLSearchParams(location.search).get('clean')==='1'){
+  window.__CLEAN__=true;
+  ['ui','hint'].forEach(id=>{const el=document.getElementById(id); if(el) el.style.display='none';});
+}
 </script>
 <div id="lockBox" style="position:fixed;display:none;pointer-events:none;z-index:9;width:120px;height:120px;--lk:26px">
 <style>
@@ -48,6 +55,7 @@ window.addEventListener('unhandledrejection',ev=>{const e=document.getElementByI
 // [v57 診斷可視化] module 載入成敗直接寫在畫面上——不再靠猜
 window.__diag=document.createElement('div');
 __diag.style.cssText='position:fixed;bottom:60px;left:12px;z-index:999;background:#000;color:#0f0;padding:4px 10px;font:12px monospace;pointer-events:none';
+if(window.__CLEAN__) __diag.style.display='none'; // [v324b] 必須在 cssText 之後——cssText 賦值會清掉 display
 __diag.textContent='⏳ module 載入中…';
 document.currentScript.parentNode.appendChild(__diag);
 setTimeout(()=>{ if(__diag.textContent==='⏳ module 載入中…') __diag.textContent='❌ module 未執行（import 失敗）'; },6000);
@@ -84,6 +92,8 @@ const THREE = await import('/three.module.js?v62').catch(e=>{
   throw e;
 });
 window.__diag && (window.__diag.textContent='✓ three import OK');
+// [H5 修] 戰爭層（plain script）取用 THREE 的正道——與 __swScene 同模式匯出
+window.THREE = THREE;
 // [v66 律動探針] 5 秒後顯示 uTime 是否前進（律動診斷）
 setTimeout(()=>{
   const t1=window.__causalMat?.uniforms?.uTime?.value;
@@ -178,6 +188,7 @@ window.__renderLegend = function(){
     document.head.appendChild(st);
   }
   let el=document.getElementById('subLegend');
+  if(window.__CLEAN__){ if(el) el.style.display='none'; return; } // [v323] 乾淨模式不建圖例
   if(!el){
     el=document.createElement('div'); el.id='subLegend';
     el.style.cssText='position:fixed;top:64px;left:50%;transform:translateX(-50%);display:flex;gap:4px;flex-wrap:wrap;justify-content:center;padding:5px 12px;background:rgba(8,12,16,.72);border:1px solid rgba(240,206,94,.22);border-radius:10px;z-index:60;pointer-events:auto;max-width:88vw;backdrop-filter:blur(6px)';
@@ -326,6 +337,7 @@ window.__bootT = performance.now(); // [小葵 2026-09-25 開機靜音令] 開�
       },600);
     }
     // 膠囊鈕（App 同款：左側 top:80）
+    if(window.__CLEAN__) return; // [v323] 乾淨截圖模式不建設定鈕/面板
     const pill=document.createElement('div'); pill.id='gsetPill';
     pill.textContent='🎛️ 星系設定';
     pill.style.cssText='position:fixed;left:12px;top:80px;padding:6px 12px;font:12px system-ui;color:#E8F0E8;background:rgba(14,22,38,.8);border:1px solid rgba(240,206,94,.4);border-radius:8px;cursor:pointer;z-index:70;user-select:none;backdrop-filter:blur(6px)';
@@ -1343,7 +1355,7 @@ if(res.mem_asset_links && res.mem_asset_links.length){
 }
 
 // ── 檔案 hover：主題星團名浮籤 ──
-const TOPIC_CN = {'巡查紀錄':'巡查紀錄','生成圖像':'生成圖像','晨間拾穗':'晨間拾穗','以利沙農務判讀':'農務判讀','photo-vision':'photo-vision','以西結稽核':'以西結稽核','daily-reflection':'每日反思','農場日記':'農場日記','晨間拾穗_IG':'晨間拾穗IG','策劃室日更':'策劃室日更'};
+const TOPIC_CN = {'daily-reflection':'每日反思','photo-vision':'視覺判讀','web-search':'網路搜尋','code-review':'程式碼審查','weekly-report':'週報'};
 let topicLabel = null;
 function showTopic(text){
   removeTopic();
@@ -1798,6 +1810,7 @@ renderer.domElement.addEventListener('dblclick',()=>{
 let rotY=0.6, rotX=0.35, dist=1900,
     target=new THREE.Vector3(0,0,0);
 if(new URLSearchParams(location.search).get('zoom')==='mid') dist=3600; // 測試用：全宇宙視角
+if(new URLSearchParams(location.search).get('dist')){ dist=Math.min(9000, +new URLSearchParams(location.search).get('dist')); } // [v323] ?dist= 直接設距離（截圖用）
 let spaceHeld=false; // [v24] 空白鍵+左鍵拖曳=平移（中鍵備援）
 addEventListener('keydown',e=>{ // [v20] R=重置視角（逃生門）
   if(e.key===' '){ spaceHeld=true; }
@@ -2088,7 +2101,7 @@ updateCam();
 // ── FPS 儀表 ──
 // [v52 快取自癒] webview 可能殘留舊版 DOM——載入後對指紋，不符即重載（最多 3 次）
 (function(){
-  const FINGERPRINT='v311-fourfix-20260908';
+  const FINGERPRINT='v325-diagfix-20260927';
   let tries=0;
   const check=()=>{
     fetch('/galaxy_version?'+Math.random(),{cache:'no-store'})
@@ -2143,6 +2156,7 @@ window.fetch=(...a)=>{const t0=performance.now();
 };
 const fpsEl = document.createElement('div');
 fpsEl.style.cssText='position:fixed;top:14px;right:16px;font:700 30px Menlo,monospace;color:#7fff9f;text-shadow:0 0 8px #050;z-index:9;pointer-events:none';
+if(window.__CLEAN__) fpsEl.style.display='none'; // [v323] 乾淨截圖模式藏 FPS
 document.body.appendChild(fpsEl);
 let ftimes=[];
 function fpsTick(now){
@@ -2375,6 +2389,7 @@ const eventTime=u=>{ // 名次→真實時刻（日期顯示用）
 
 let vizUI=null;
 function buildVizUI(){
+  if(window.__CLEAN__) return; // [v323] 乾淨截圖模式不建模式按鈕列
   if(vizUI) vizUI.remove();
   const bar=document.createElement('div');
   bar.style.cssText='position:fixed;top:56px;right:16px;z-index:50;display:flex;gap:6px;align-items:center;background:rgba(8,14,10,.85);border:1px solid #2a3d33;border-radius:14px;padding:7px 10px;touch-action:none;user-select:none;-webkit-user-select:none';
@@ -3712,7 +3727,7 @@ window.__galaxyCmd = function(cmd){
       // [小葵 2026-09-24 出道令] 平滑版操控——像滑鼠一樣絲滑，不跳切
       case 'zoom': { // {factor:0.55=拉近, 1.8=拉遠, ms:900}
         window.__zAnim = {from:dist,
-          to:Math.min(4200, Math.max(26, dist*(+cmd.factor||0.6))),
+          to:Math.min(9000, Math.max(26, dist*(+cmd.factor||0.6))), // [v323] clamp 放寬 4200→9000（全範圍截圖）
           t0:performance.now(), ms:+cmd.ms||900};
         return {ok:true};
       }
@@ -3807,8 +3822,27 @@ addEventListener('resize',()=>{
 // 延遲注入：等主 IIFE 的 galaxy group 就緒（__galaxyReady 由主循環設）
 (function loadSwarmLayer(){
   const s = document.createElement('script');
-  s.src = '/galaxy_swarm_layer.js'; // MCP 端點供應（same-origin——COEP 合規）
+  // [H5 修] src 打錯 endpoint（.js 不存在=layer 一直載不到）＋
+  // script tag 不帶 header——token 用 query 帶（頁面 URL 已有）
+  s.src = '/galaxy_swarm_layer?token=' + encodeURIComponent(new URLSearchParams(location.search).get('token') ?? ''); // MCP 端點供應（same-origin——COEP 合規）
   s.onerror = () => console.warn('[swarm] layer 載入失敗（星系照轉）');
+  s.onload = () => {
+    // [H5 2026-10-08] ?viz=swarm 開局進作戰模式（deep-link；驗證/捷徑用）
+    // [Blue 親測抓包] VIZ_NAMES 是 module-local——inline script 不可見
+    // （Uncaught ReferenceError @3830）。改走 DOM 按鈕：click 觸發 module
+    // 內掛的 onclick（setVizMode 正規入口），不碰 module 變數空間。
+    const v = new URLSearchParams(location.search).get('viz');
+    if (v) {
+      // [H5 修] onload 時模式按鈕可能還沒 render（module 尾才建）——
+      // 500ms × 20 次重試等按鈕出現再 click。
+      let n = 0;
+      const t = setInterval(() => {
+        const btn = document.querySelector('button[data-viz="' + v + '"]');
+        if (btn) { clearInterval(t); try { btn.click(); } catch (e) { console.warn('[viz-deeplink]', e); } }
+        else if (++n > 20) clearInterval(t);
+      }, 500);
+    }
+  };
   document.body.appendChild(s);
 })();
 

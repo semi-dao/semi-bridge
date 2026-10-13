@@ -9,9 +9,9 @@
 // - 回傳 stdout + stderr + exit code
 
 import 'dart:async';
-import '../../../core/dev_paths.dart';
 import 'dart:io';
 import '../agent_tool.dart';
+import '../../../core/dev_paths.dart';
 
 final _projectRoot = resolveDevPath('~/Developer/bridge_app');
 

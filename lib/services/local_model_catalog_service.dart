@@ -208,7 +208,34 @@ class LocalModelCatalogService {
           LocalModelTask.coding,
         ],
       ),
-      // ── Google Gemma-4 E4B（多模態：語音+視覺+文字） ──
+      // ── Google Gemma-4 12B Unified（多模態：視覺+文字；品質首選） ──
+      // [小葵 2026-09-28] 盲測 19/20 = 95%（vs E4B 17/20 = 85%），Blue 拍板為預設本地模型。
+      // 16GB 機實測：c=4096 穩定（32768 會 OOM）；速度 ~103s/張（E4B 的 1/2）。
+      LocalModelCatalogEntry(
+        id: 'gemma-4-12b-q4',
+        name: 'Gemma 4 12B',
+        sizeClass: '12B',
+        quantization: 'Q4_K_M',
+        minRamGb: 12,
+        recommendedRamGb: 16,
+        recommendedVramGb: null,
+        downloadSize: '約 7 GB',
+        runtime: 'llama.cpp',
+        sourceLabel: 'Google · HuggingFace (unsloth)',
+        licenseLabel: 'Apache-2.0',
+        manifestUrl: 'https://huggingface.co/unsloth/gemma-4-12b-it-GGUF',
+        checksumSha256: 'pending-verification',
+        fileName: 'gemma-4-12b-it-Q4_K_M.gguf',
+        repoId: 'unsloth/gemma-4-12b-it-GGUF',
+        downloadUrl:
+            'https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q4_K_M.gguf',
+        bestFor: [
+          LocalModelTask.quickChat,
+          LocalModelTask.privateDraft,
+        ],
+      ),
+      // ── Google Gemma-4 E4B（多模態：語音+視覺+文字；速度首選） ──
+      // [小葵 2026-09-28] 盲測 17/20 = 85%，速度 40-55s/張（12B 的 2 倍快）。
       LocalModelCatalogEntry(
         id: 'gemma-4-e4b-q4',
         name: 'Gemma 4 E4B',
