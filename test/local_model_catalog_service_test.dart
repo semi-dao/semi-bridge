@@ -13,7 +13,7 @@ void main() {
 
     expect(plan.hardware.desktopConnected, isFalse);
     expect(plan.summary, contains('尚未連接 Bridge Desktop'));
-    expect(plan.recommendations, hasLength(3));
+    expect(plan.recommendations, hasLength(4)); // [2026-10-13] 12B 登基後 catalog=4（Qwen3.5-4B/Gemma-4-E4B/Llama-3.2-3B/Gemma4-12B）
     expect(
       plan.recommendations.map((item) => item.model.sizeClass),
       containsAll(['4B', '3B']),

@@ -71,15 +71,24 @@ void main() {
   });
 
   test('vision 輸出也可接 imageGen——看圖→改圖工作流', () {
-    final visionOut = NodeTypePorts.portsFor(WorkflowNodeType.vision)
+    final visionOutputs = NodeTypePorts.portsFor(WorkflowNodeType.vision)
         .where((p) => p.isOutput)
-        .first;
+        .toList();
     final imageGenIn = NodeTypePorts.portsFor(WorkflowNodeType.imageGen)
         .where((p) => p.name == 'image')
         .first;
-    // vision 輸出是 text——不能直接接 image 輸入（型別不匹配是正確的）
-    expect(NodeConnection.isPortTypeMatch(visionOut.dataType, imageGenIn.dataType),
+    // [2026-09-22 修 bug 後的設計] vision 有兩個輸出埠：
+    // 'output'（text 分析結果）——不能接 image 輸入（型別把關）
+    // 'original'（原圖直通 image）——正是看圖→改圖工作流的通道
+    final textOut = visionOutputs.firstWhere((p) => p.name == 'output');
+    final originalOut = visionOutputs.firstWhere((p) => p.name == 'original');
+    expect(
+        NodeConnection.isPortTypeMatch(textOut.dataType, imageGenIn.dataType),
         isFalse,
-        reason: 'vision 輸出 text 不能硬接 image 輸入——型別系統把關');
+        reason: 'vision 文字輸出不能硬接 image 輸入——型別系統把關');
+    expect(
+        NodeConnection.isPortTypeMatch(originalOut.dataType, imageGenIn.dataType),
+        isTrue,
+        reason: "vision 'original' 原圖輸出可接 imageGen——看圖→改圖直通（9-22 fix）");
   });
 }

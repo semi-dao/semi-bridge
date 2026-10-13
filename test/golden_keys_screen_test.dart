@@ -62,7 +62,7 @@ void main() {
     // [2026-09-22] catalog 改版：0.5B/3B/7B/14B 四級距 → 3 模型
     // （Qwen3.5-4B / Gemma 4 E4B / Llama 3.2 3B）
     expect(find.textContaining('Qwen3.5-4B'), findsOneWidget);
-    expect(find.textContaining('Gemma 4'), findsOneWidget);
+    expect(find.textContaining('Gemma 4 E4B'), findsOneWidget); // [2026-10-13] 12B 登基後 'Gemma 4' 命中 2 張卡，改精確比對
     expect(find.textContaining('Llama 3.2 3B'), findsOneWidget);
     expect(find.text('任務分配'), findsOneWidget);
     expect(find.text('待設定'), findsWidgets);

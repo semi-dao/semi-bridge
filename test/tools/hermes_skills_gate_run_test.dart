@@ -7,6 +7,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('Hermes skills 入境安檢跑批', () async {
+    // [開源整備] 此測試掃描本機 Hermes skills（~/.hermes/skills 與 ~/Documents/skills）
+    // ——內容因人而異，僅 opt-in（HERMES_GATE_TEST=1）時執行；CI / fresh clone skip。
+    if (Platform.environment['HERMES_GATE_TEST'] != '1' ||
+        !Directory(Platform.environment['HOME']! + '/.hermes/skills').existsSync()) {
+      // ignore: avoid_print
+      print('SKIP：安檢跑批需要本機 Hermes skills 資料（HERMES_GATE_TEST=1）');
+      return;
+    }
     final home = Platform.environment['HOME']!;
     final localSkills = Directory('$home/Documents/skills')
         .listSync()

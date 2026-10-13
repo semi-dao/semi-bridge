@@ -28,6 +28,11 @@ void main() {
       '/tmp/conv_179_msgs.json';
   final fixturePath = Platform.environment['BRIDGE_RT_FIXTURE'] ??
       'test/fixtures/compression_ground_truth.json';
+  // [開源整備] 對話本體（/tmp/conv_179_msgs.json）是本機導出的真實對話——
+  // 無此檔的環境（CI / fresh clone）整檔 skip，不炸 cloner。
+  final rtSkip = !File(convPath).existsSync()
+      ? '需要本機對話導出檔（BRIDGE_RT_CONV 可覆寫路徑）'
+      : null;
   final remote = Platform.environment['BRIDGE_RT_REMOTE'] == '1';
   final openaiKey = Platform.environment['BRIDGE_RT_OPENAI_KEY'] ?? '';
 
@@ -35,12 +40,13 @@ void main() {
   late Map<String, dynamic> fixture;
 
   setUpAll(() {
+    if (rtSkip != null) return; // [開源整備] 無本機對話檔時跳過載入
     msgs = ConversationCompressor.parseMessages(File(convPath).readAsStringSync());
     fixture =
         jsonDecode(File(fixturePath).readAsStringSync()) as Map<String, dynamic>;
   });
 
-  test('fixture 與對話本體對得上（id / 則數 / 錨點訊息）', () {
+  test('fixture 與對話本體對得上（id / 則數 / 錨點訊息）', skip: rtSkip, () {
     expect(fixture['source_conversation_id'], '1789195012963');
     expect(fixture['msg_count'], lessThanOrEqualTo(msgs.length));
     // 錨點驗證：source_msg_idx 指到的訊息應含對應 hash 線索
@@ -53,7 +59,7 @@ void main() {
     expect(anchored, facts.length, reason: '所有題目錨點都落在訊息範圍內');
   });
 
-  test('L1 分段：180 則 → locked / middle / recent 邊界正確', () {
+  test('L1 分段：180 則 → locked / middle / recent 邊界正確', skip: rtSkip, () {
     final c = ConversationCompressor(keepRecentTurns: 8);
     final seg = c.segment(msgs);
     expect(seg.lockedPrefix.length, lessThanOrEqualTo(2));
@@ -64,7 +70,7 @@ void main() {
     expect(seg.recent.last.content, msgs.last.content);
   });
 
-  test('L3 截斷模式（無 summarizer）：壓縮率與結構', () async {
+  test('L3 截斷模式（無 summarizer）：壓縮率與結構', skip: rtSkip, () async {
     final c = ConversationCompressor(keepRecentTurns: 8);
     final r = await c.compress(msgs); // summarizer == null → L3
     expect(r.usedLlmSummary, isFalse);
@@ -73,7 +79,7 @@ void main() {
     expect(r.savedCount, greaterThan(100)); // 180 → ~12
   });
 
-  test('L2 摘要模式（fake summarizer，零成本）：摘要被注入', () async {
+  test('L2 摘要模式（fake summarizer，零成本）：摘要被注入', skip: rtSkip, () async {
     final c = ConversationCompressor(keepRecentTurns: 8);
     final r = await c.compress(msgs, summarizer: (m) async {
       expect(m.length, greaterThan(100)); // 真的拿到中間段
@@ -84,7 +90,7 @@ void main() {
         r.messages.any((m) => m.content.contains('FAKE_SUMMARY_假摘要')), isTrue);
   });
 
-  test('門檻保護：中間段 ≤ threshold 時不壓縮（不花冤枉錢）', () async {
+  test('門檻保護：中間段 ≤ threshold 時不壓縮（不花冤枉錢）', skip: rtSkip, () async {
     final c = ConversationCompressor(middleThreshold: 10, keepRecentTurns: 8);
     final shortMsgs = msgs.sublist(0, 15); // 中間段 = 15-2-8 = 5 ≤ 10
     final r = await c.compress(shortMsgs, summarizer: (m) async => 'X');
@@ -93,7 +99,7 @@ void main() {
   });
 
   group('遠端組（真實 API，花小錢）', skip: remote ? false : 'BRIDGE_RT_REMOTE=1 才跑', () {
-    test('L2 真實摘要 + 14 題 QA round-trip', () async {
+    test('L2 真實摘要 + 14 題 QA round-trip', skip: rtSkip, () async {
       expect(openaiKey, isNotEmpty, reason: '需要 BRIDGE_RT_OPENAI_KEY');
       final facts = (fixture['facts'] as List).cast<Map<String, dynamic>>();
 
