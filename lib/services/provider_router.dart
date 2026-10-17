@@ -52,6 +52,12 @@ class ProviderRouter {
   static final ProviderRouter instance = ProviderRouter._();
   ProviderRouter._();
 
+  /// [T7⑤ 2026-10-16 編織線] 雲端 fallback 順序——全 App 唯一一份常數。
+  /// MemoryGuard 緊急降級、LLM client 階梯起點都用這裡，改一處全生效。
+  static const List<String> cloudFallbackOrder = [
+    'glm', 'openai', 'kimi', 'gemini', 'claude', 'minimax', 'anthropic',
+  ];
+
   /// 當前路由結果（per-message 設定，供 native_agent_loop 讀取）
   RoutedProvider? _current;
   RoutedProvider? get current => _current;
@@ -294,6 +300,10 @@ class ProviderRouter {
   ///
   /// 回傳 RoutedProvider，呼叫端用它來 setCurrent()
   Future<RoutedProvider> resolveDefault() async {
+    // [T7④ 2026-10-16 編織線] localOnly 模式——永不回雲端（M6 斷網血管）
+    if (await StorageService.getLocalOnly()) {
+      return _setAsync(RoutedTarget.local, 'local', 'localOnly 模式——斷網可用優先，禁上雲');
+    }
     // 1. 查 active custom policies
     final store = ProviderProfileStore.instance;
     await store.initialize();

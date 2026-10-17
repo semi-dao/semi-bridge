@@ -9,6 +9,8 @@
 
 import 'package:bridge_app/services/agent_loop/agent_tool.dart';
 import 'package:bridge_app/services/agent_loop/agent_knowledge_service.dart';
+import 'package:bridge_app/services/memory_layer_service.dart'; // [T3] 分層寫入
+import 'package:bridge_app/services/belief_gate.dart'; // [T3] BeliefGateRejectedError
 import 'package:flutter/foundation.dart';
 
 /// AgentSearchKnowledgeTool — 搜尋本地知識庫
@@ -183,7 +185,9 @@ class AgentSaveMemoryTool extends AgentTool {
   String get description =>
       '將記憶點（教訓/偏好/模式/里程碑）儲存到本地知識庫。'
       '用於記錄從互動中學到的經驗，避免重複犯錯。'
-      '記憶點會在未來相關對話中被自動檢索和引用。';
+      '記憶點會在未來相關對話中被自動檢索和引用。'
+      '[T3] layer=environment（環境/事實斷言）會經 BeliefGate 驗證'
+      '（需 3 次一致證據），證據不足時建議改用 project_cold。';
 
   @override
   List<AgentToolParamSpec> get paramSpecs => [
@@ -208,6 +212,14 @@ class AgentSaveMemoryTool extends AgentTool {
       required: false,
       defaultValue: 'lesson',
     ),
+    const AgentToolParamSpec(
+      name: 'layer',
+      description: '記憶層（lesson=教訓 / preference=偏好 / pattern=模式 / '
+          'milestone=里程碑 / environment=環境事實（過 BeliefGate）/ '
+          'decision=決策 / project_cold=專案冷）',
+      required: false,
+      defaultValue: 'lesson',
+    ),
   ];
 
   @override
@@ -217,9 +229,54 @@ class AgentSaveMemoryTool extends AgentTool {
       final content = args['content'] as String? ?? '';
       final tags = args['tags'] as String?;
       final memoryType = args['memory_type'] as String? ?? 'lesson';
+      // [小葵 2026-10-15 T3] layer 參數——分層寫入；
+      // environment（L4）走 MemoryLayerService 過 BeliefGate（證據門檻）
+      final layerArg = args['layer'] as String? ?? memoryType;
 
       if (title.trim().isEmpty || content.trim().isEmpty) {
         return AgentToolResult.failure('標題和內容不能為空');
+      }
+
+      // layer 對映：工具參數 → MemoryLayer
+      const layerMap = {
+        'lesson': 'L6',
+        'preference': 'L4', // 偏好本質是環境事實——同樣過 gate
+        'pattern': 'L6',
+        'milestone': 'L5',
+        'environment': 'L4',
+        'decision': 'L5',
+        'project_cold': 'L7',
+        'talks': 'L8',
+      };
+      final layerCode = layerMap[layerArg] ?? 'L6';
+
+      if (layerCode == 'L4') {
+        // [T3] BeliefGate 通道——拒絕時降級 L7（專案冷）不擋任務
+        try {
+          final id = await MemoryLayerService.instance.write(
+            layer: MemoryLayer.l4Environment,
+            title: title,
+            content: content,
+            tags: tags,
+            memoryType: memoryType,
+          );
+          return AgentToolResult.success(
+            '已儲存環境信念「$title」到 L4（BeliefGate 驗證通過）。\nID: $id',
+          );
+        } on BeliefGateRejectedError catch (e) {
+          // 降級寫 L7——信念存證不足不硬寫，但知識不丟（記憶鐵律）
+          final id = await MemoryLayerService.instance.write(
+            layer: MemoryLayer.l7ProjectCold,
+            title: '[待驗證] $title',
+            content: content,
+            tags: (tags ?? '') + (tags == null || tags.isEmpty ? '' : ',') + 'belief_pending',
+            memoryType: memoryType,
+          );
+          return AgentToolResult.success(
+            '「$title」證據不足（${e.verdict.evidenceCount}/3），已存入 L7 專案冷'
+            '（tag=belief_pending）。反覆被印證後可升級為 L4 信念。\nID: $id',
+          );
+        }
       }
 
       final id = AgentKnowledgeService.instance.createMemory(
@@ -228,9 +285,13 @@ class AgentSaveMemoryTool extends AgentTool {
         tags: tags,
         memoryType: memoryType,
       );
+      // [T3] 非 L6 預設層：補 UPDATE layer（createMemory 不帶 layer）
+      if (layerCode != 'L6' && layerCode != null) {
+        AgentKnowledgeService.instance.setMemoryLayer(id, layerCode);
+      }
 
       return AgentToolResult.success(
-        '已儲存記憶點「$title」到本地知識庫。\nID: $id\n這個記憶會在未來相關對話中被自動檢索。',
+        '已儲存記憶點「$title」到本地知識庫（$layerCode 層）。\nID: $id\n這個記憶會在未來相關對話中被自動檢索。',
       );
     } catch (e) {
       debugPrint('[AgentSaveMemoryTool] 失敗: $e');

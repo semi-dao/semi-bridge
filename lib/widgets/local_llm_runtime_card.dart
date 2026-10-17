@@ -35,6 +35,10 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   LocalModelPlan? _modelPlan;
   bool _isLoading = true;
   Timer? _pollTimer;
+  // [小葵 2026-10-16 Blue 審計令] running 狀態即時健康監控——state 檔是快照，
+  // server 事後掛掉時 UI 仍顯示假「運行中」。定期 ping 真引擎覆寫真相。
+  Timer? _healthTimer;
+  bool _engineUnreachable = false;
   bool _autoRestoreAttempted = false; // [小葵 2026-09-29] 自動恢復只做一次（防輪詢無限循環）
   int _selectedModelIndex = 0; // 使用者選中的模型索引
   bool _isSearching = false;
@@ -46,7 +50,6 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   Map<String, String> _modelTestResponses = {}; // 模型 ID → 測試回應
   Set<String> _candidateModels = {}; // 已加入候選列表的模型 ID
   Set<String> _testingModels = {}; // 正在測試中的模型 ID
-  bool _parallelModeEnabled = false; // 多模型並行運算開關
   String? _downloadingModelId; // 正在下載的模型 ID
   List<Map<String, dynamic>> _trendingModels = []; // HuggingFace 動態熱門模型
   bool _isLoadingTrending = false;
@@ -60,6 +63,10 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   void initState() {
     super.initState();
     _loadState();
+    // [小葵 2026-10-16] running 健康輪詢（60s）——真實引擎狀態 > state 檔快照
+    _healthTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      _probeEngineHealth();
+    });
     // [小葵 2026-10-01 離合器步驟2] 載入已存角色設定
     LocalModelScheduler.instance.loadRoles().then((_) {
       final s = LocalModelScheduler.instance.snapshot;
@@ -75,7 +82,26 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _healthTimer?.cancel();
     super.dispose();
+  }
+
+  /// [小葵 2026-10-16] ping 18789 /v1/models——2 秒逾時。
+  /// 與 state 檔不符時以真相為準（顯示引擎無回應）。
+  Future<void> _probeEngineHealth() async {
+    if (_runtimeState?.phase != BridgeLocalRuntimePhase.running) return;
+    try {
+      final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 2), receiveTimeout: const Duration(seconds: 2)));
+      final r = await dio.get('http://127.0.0.1:18789/v1/models');
+      final alive = r.statusCode == 200;
+      if (mounted && _engineUnreachable == alive) {
+        setState(() => _engineUnreachable = !alive);
+      }
+    } catch (_) {
+      if (mounted && !_engineUnreachable) {
+        setState(() => _engineUnreachable = true);
+      }
+    }
   }
 
   Future<void> _loadState() async {
@@ -283,30 +309,6 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
     );
   }
 
-  Widget _buildHeader() {
-    return Row(
-      children: [
-        Icon(
-          Icons.memory,
-          color: BridgeDSColors.of(context).accentPurple,
-          size: 24,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            '本地 LLM 引擎',
-            style: TierStyle.of(context, Tier.cardTitle).toTextStyle().copyWith(fontWeight: FontWeight.bold,
-              color: BridgeDSColors.of(context).textPrimary,),
-          ),
-        ),
-        if (_runtimeState != null)
-          BridgeStatusTag(
-            label: _runtimeState!.phase.label,
-            type: _getStatusTagType(_runtimeState!.phase),
-          ),
-      ],
-    );
-  }
 
   BridgeTagType _getStatusTagType(BridgeLocalRuntimePhase phase) {
     switch (phase) {
@@ -385,10 +387,9 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
           ),
         const SizedBox(height: BridgeDS.spaceMD),
 
-        // [教練 Agent 2026-07-20] 多模型並行運算開關
-        // 依硬體 RAM 判斷：< 20GB 禁止，≥ 20GB 雙模型，≥ 30GB 三模型
-        if (_hardwareProfile != null && _candidateModels.length >= 2)
-          _buildParallelModeSwitch(),
+        // [小葵 2026-10-16 Blue 審計令] 多模型並行運算開關移除——
+        // 純前端 setState 無引擎綁定（審計判「假」：顯示了系統沒有的承諾）。
+        // 真並行調度實作後（LocalModelScheduler/ProviderRouter 接線）再回來。
 
         // Primary action button — 只有在引擎相關階段才顯示
         // installed/running 階段時隱藏（改由模型旁的按鈕操作）
@@ -451,22 +452,6 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
     }
   }
 
-  Color _getActionColor() {
-    switch (_runtimeState!.primaryCommand) {
-      case BridgeLocalRuntimeCommand.stopServer:
-      case BridgeLocalRuntimeCommand.deleteModel:
-      case BridgeLocalRuntimeCommand.testModel:
-      case BridgeLocalRuntimeCommand.startLabServer:
-      case BridgeLocalRuntimeCommand.stopLabServer:
-        return BridgeDSColors.of(context).accentRed;
-      case BridgeLocalRuntimeCommand.prepareRuntime:
-      case BridgeLocalRuntimeCommand.downloadModel:
-      case BridgeLocalRuntimeCommand.startServer:
-        return BridgeDSColors.of(context).accentPurple;
-      case BridgeLocalRuntimeCommand.status:
-        return BridgeDSColors.of(context).accentBlue;
-    }
-  }
 
   Widget _buildDownloadProgress() {
     final progress = _runtimeState!.progress;
@@ -1462,130 +1447,7 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
     return '${(bytes / 1024).toStringAsFixed(0)} KB';
   }
 
-  /// [教練 Agent 2026-07-20] 多模型並行運算開關
-  /// 依硬體 RAM 判斷：< 20GB 禁止，≥ 20GB 雙模型，≥ 30GB 三模型
-  Widget _buildParallelModeSwitch() {
-    final ramGb = _hardwareProfile?.ramGb ?? 0;
-    final candidateCount = _candidateModels.length;
 
-    // 計算硬體允許的並行數
-    int maxParallel;
-    String hwAdvice;
-    if (ramGb < 20) {
-      maxParallel = 1;
-      hwAdvice = '目前是 Agent 自動切換模式，一次呼叫一個模型運算，等硬體升級後再開啟並行運算';
-    } else if (ramGb < 30) {
-      maxParallel = 2;
-      hwAdvice = '本機 ${ramGb}GB RAM 可並行 2 個模型';
-    } else {
-      maxParallel = 3;
-      hwAdvice = '本機 ${ramGb}GB RAM 可並行最多 3 個模型';
-    }
-
-    final canEnable = maxParallel >= 2 && candidateCount >= 2;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: BridgeDSColors.of(context).surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: _parallelModeEnabled
-              ? BridgeDSColors.of(context).accentPurple.withValues(alpha: 0.4)
-              : BridgeDSColors.of(context).borderSubtle,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.dynamic_feed,
-                  size: 16,
-                  color: canEnable ? BridgeDSColors.of(context).accentPurple : BridgeDSColors.of(context).textMuted),
-              const SizedBox(width: 8),
-              Text('多模型並行運算',
-                  style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(fontWeight: FontWeight.w600,
-                      color: BridgeDSColors.of(context).textPrimary)),
-              const Spacer(),
-              // 開關
-              GestureDetector(
-                onTap: canEnable
-                    ? () {
-                        setState(() {
-                          _parallelModeEnabled = !_parallelModeEnabled;
-                        });
-                      }
-                    : null,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 40,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: _parallelModeEnabled
-                        ? BridgeDSColors.of(context).accentPurple
-                        : BridgeDSColors.of(context).surfaceHover,
-                    borderRadius: BorderRadius.circular(11),
-                  ),
-                  child: AnimatedAlign(
-                    duration: const Duration(milliseconds: 200),
-                    alignment: _parallelModeEnabled ? Alignment.centerRight : Alignment.centerLeft,
-                    child: Container(
-                      width: 18,
-                      height: 18,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        color: BridgeDSColors.of(context).textPrimary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          // 硬體建議
-          Row(
-            children: [
-              Icon(Icons.memory, size: 12, color: BridgeDSColors.of(context).textMuted),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  canEnable
-                      ? '$hwAdvice（候選 $candidateCount 個模型）'
-                      : '$hwAdvice（需 ≥20GB RAM 和 ≥2 個候選模型）',
-                  style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: canEnable ? BridgeDSColors.of(context).textSecondary : BridgeDSColors.of(context).textMuted,),
-                ),
-              ),
-            ],
-          ),
-          if (_parallelModeEnabled && canEnable) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: BridgeDSColors.of(context).accentPurple.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, size: 12, color: BridgeDSColors.of(context).accentPurple),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Agent 將可同時使用最多 ${maxParallel.clamp(0, candidateCount)} 個模型並行處理任務',
-                      style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).accentPurple),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   /// [教練 Agent 2026-07-20] 啟動指定模型（切換模型）
   Future<void> _switchToModel(String modelId) async {
@@ -1692,19 +1554,20 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
       // 根據 RAM 計算可安裝的最大模型大小（bytes）
       // 經驗值：模型檔案大小 ≤ RAM × 0.6（留空間給 KV cache + 系統）
       final ramGb = _hardwareProfile?.ramGb ?? 16;
-      final maxModelSizeBytes = (ramGb * 0.6 * 1024 * 1024 * 1024).round();
       // 限制最大參數量：16GB → 8B, 32GB → 14B, 64GB → 30B
       final maxParamB = (ramGb / 2).round().clamp(4, 30);
 
       final results = <Map<String, dynamic>>[];
-      // 三大系列各拉 5 個熱門 GGUF（多拉一些再過濾）
+      // 三大系列各拉 5 個最新 GGUF（多拉一些再過濾）
+      // [Blue 令 2026-10-16 四修] 推薦=最新消息——sort 從 downloads 改
+      // lastModified（模型日新月異，商店/推薦每次打開都要是最新）
       for (final query in ['Qwen', 'Gemma', 'Llama']) {
         final response = await _dio.get(
           'https://huggingface.co/api/models',
           queryParameters: {
             'search': query,
             'filter': 'gguf',
-            'sort': 'downloads',
+            'sort': 'lastModified',
             'direction': '-1',
             'limit': 5,
           },
@@ -1869,6 +1732,67 @@ class _LocalLlmRuntimeCardState extends State<LocalLlmRuntimeCard> {
   }
 
   Widget _buildRunningInfoBody() {
+    // [小葵 2026-10-16 Blue 審計令] 即時健康覆寫——state 檔說 running
+    // 但引擎 ping 不通時，誠實顯示無回應（不假冒運行中）。
+    // [Blue 報案二修] 引擎不在≠故障：手動關（userEnabled=false）或
+    // 閒置自動卸載（idleUnloaded=true）是正當休眠——顯示休眠狀態，不報紅警
+    if (_engineUnreachable) {
+      final revival = BrainRevivalService.instance;
+      if (!revival.userEnabled || revival.idleUnloaded) {
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: BridgeDSColors.of(context).accentBlue.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: BridgeDSColors.of(context).accentBlue.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.bedtime_outlined,
+                  color: BridgeDSColors.of(context).accentBlue, size: 16),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  revival.idleUnloaded
+                      ? '引擎休眠中（閒置 10 分鐘自動卸載，釋放記憶體）——有需求時會自動喚醒，或點頂部「本地模型」立即啟動'
+                      : '引擎已手動關閉——點頂部「本地模型」開關啟動',
+                  style: TierStyle.of(context, Tier.cardBody)
+                      .toTextStyle()
+                      .copyWith(color: BridgeDSColors.of(context).accentBlue),
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: BridgeDSColors.of(context).accentRed.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: BridgeDSColors.of(context).accentRed.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.error_outline,
+                color: BridgeDSColors.of(context).accentRed, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '引擎無回應（127.0.0.1:18789 ping 失敗）——狀態檔顯示運行中，但真實引擎沒有回應。請重新啟動引擎。',
+                style: TierStyle.of(context, Tier.cardBody)
+                    .toTextStyle()
+                    .copyWith(color: BridgeDSColors.of(context).accentRed),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

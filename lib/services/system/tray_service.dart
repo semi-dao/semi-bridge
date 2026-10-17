@@ -252,7 +252,7 @@ class TrayService with TrayListener {
       }
       // 開發中的路徑
       final devPath =
-          resolveDevPath('~/Developer/bridge_app/build/macos/Build/Products/Debug/bridge_app.app');
+          '<HOME>/Developer/bridge_app/build/macos/Build/Products/Debug/bridge_app.app';
       if (await File(devPath).exists()) {
         return devPath;
       }

@@ -9,6 +9,7 @@
 // 冷門時段=動態（Blue 2026-09-20 設計「不固定 23:00」）——
 // v1 取 02:00-05:00 窗口，未來可依使用數據調整。
 
+import 'package:bridge_app/services/compass/compass_speaker.dart';
 import 'package:flutter/foundation.dart';
 
 import '../agent_loop/agent_loop_tools/dream_once_tool.dart';
@@ -55,6 +56,19 @@ class DreamScheduler {
       );
       debugPrint('[DreamScheduler] 淺眠夢完成（${result.sessionId}，'
           '${result.conclusions} 卡）');
+
+      // [T9② 2026-10-17] 紅旗 → 羅盤開口排隊——夢裡看到的不安，
+      // 醒來（下次開 App）用一兩句人話說給使用者聽。開口閘在
+      // CompassSpeaker（信心>0.7＋每日≤3＋證據）；夢結論 ≥1 才排。
+      if (metrics.redFlags().isNotEmpty && result.conclusions > 0) {
+        CompassSpeaker.instance.enqueue(CompassSpeakDraft(
+          '剛剛整理內部的時候，我注意到一些狀況（'
+          '${metrics.redFlags().take(2).join('；')}）。'
+          '不急，你有空的時候可以看看羅盤頁。',
+          'dream_red_flags:${metrics.redFlags().length}',
+          0.85, // 夢結論有實證（conclusions>0）——高信心
+        ));
+      }
 
       // ── 節律決定是否深夢/詩夢 ──
       final newWounds = metrics.pendingWounds;

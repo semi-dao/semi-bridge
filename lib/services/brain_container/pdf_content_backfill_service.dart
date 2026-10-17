@@ -155,7 +155,7 @@ class PdfContentBackfillService {
 
   String _appDir() {
     // helper 在 repo tools/（dev 機）；打包後 App 不含——fallback 用絕對路徑找
-    final dev = Directory(resolveDevPath('~/Developer/bridge_app'));
+    final dev = Directory('<HOME>/Developer/bridge_app');
     if (File('${dev.path}/$_helperPath').existsSync()) return dev.path;
     return Directory.current.path;
   }

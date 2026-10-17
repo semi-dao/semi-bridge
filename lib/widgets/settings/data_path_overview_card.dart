@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/sovereignty/data_path_gate.dart';
 import '../../services/sovereignty/trace_scrubber.dart';
+import '../../services/sovereignty/scrub_history_store.dart'; // [Blue 令 2026-10-17] 除痕歷史
 import '../../theme/bridge_design_system.dart';
 import '../bridge_desktop_widgets.dart';
 import '../../theme/tier.dart';
@@ -28,6 +29,7 @@ class _DataPathOverviewCardState extends State<DataPathOverviewCard> {
   bool _loading = true;
   bool _autoScrub = true;
   bool _scrubBusy = false;
+  List<ScrubHistoryEntry> _scrubHistory = []; // [Blue 令 2026-10-17] 除痕歷史
 
   @override
   void initState() {
@@ -88,12 +90,23 @@ class _DataPathOverviewCardState extends State<DataPathOverviewCard> {
       );
       if (ok == true) {
         final freed = await TraceScrubber.instance.purge(items);
+        // [Blue 令 2026-10-17] 除痕歷史——手動一鍵除痕也記錄
+        await ScrubHistoryStore.instance.record(
+          trigger: 'manual',
+          files: items.length,
+          bytes: freed,
+          items: [
+            for (final it in items)
+              {'label': it.label, 'bytes': it.bytes},
+          ],
+        );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
                 content: Text(
                     '已清除 ${items.length} 檔／${(freed / 1024).toStringAsFixed(0)}KB')),
           );
+          await _load(); // [Blue 令] 刷新除痕歷史
         }
       }
     } finally {
@@ -102,6 +115,7 @@ class _DataPathOverviewCardState extends State<DataPathOverviewCard> {
   }
 
   Future<void> _load() async {
+    _scrubHistory = await ScrubHistoryStore.instance.load(limit: 14);
     final raw = await DataPathGate.instance.recent(limit: 500);
     // UI 側過濾 7 天（ledger 90 天環形，recent 拉最近 500 筆足夠總覽）
     final weekAgo = DateTime.now().subtract(const Duration(days: 7));
@@ -291,6 +305,48 @@ class _DataPathOverviewCardState extends State<DataPathOverviewCard> {
                 ),
               ],
             ),
+            // [Blue 令 2026-10-17] 除痕歷史——什麼時候清了什麼、清了多大
+            if (_scrubHistory.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              SelectableText('除痕歷史（最近 ${_scrubHistory.length} 次）',
+                  style: TierStyle.of(context, Tier.listItemTitle)
+                      .toTextStyle()),
+              const SizedBox(height: 4),
+              ..._scrubHistory.map((h) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 96,
+                          child: Text(
+                              '${h.ts.month.toString().padLeft(2, '0')}/${h.ts.day.toString().padLeft(2, '0')} ${h.ts.hour.toString().padLeft(2, '0')}:${h.ts.minute.toString().padLeft(2, '0')}',
+                              style: TierStyle.of(context, Tier.listItemMeta)
+                                  .toTextStyle()
+                                  .copyWith(color: colors.textMuted)),
+                        ),
+                        SizedBox(
+                          width: 36,
+                          child: Text(h.trigger == 'manual' ? '手動' : '自動',
+                              style: TierStyle.of(context, Tier.listItemMeta)
+                                  .toTextStyle()
+                                  .copyWith(
+                                      color: h.trigger == 'manual'
+                                          ? colors.accentMiro
+                                          : colors.textMuted)),
+                        ),
+                        Expanded(
+                          child: Text(
+                              '${h.files} 檔・${(h.bytes / 1024).toStringAsFixed(0)}KB'
+                              '（${h.items.map((i) => i['label']).take(3).join('、')}${h.items.length > 3 ? ' 等' : ''}）',
+                              overflow: TextOverflow.ellipsis,
+                              style: TierStyle.of(context, Tier.listItemMeta)
+                                  .toTextStyle()
+                                  .copyWith(color: colors.textMuted)),
+                        ),
+                      ],
+                    ),
+                  )),
+            ],
             const SizedBox(height: 8),
             SelectableText(
               '🟢 本地封閉迴路（資料不出這台機器）　🟡 你的金鑰直連 provider（橋樑不經手）　🔴 已攔截（白名單外，請求未發出）',

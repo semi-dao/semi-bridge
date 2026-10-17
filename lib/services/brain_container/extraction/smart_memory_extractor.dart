@@ -290,6 +290,15 @@ class SmartMemoryExtractor {
   Future<_ApiConfig?> _getApiConfig() async {
     // [教練 Agent 2026-07-30] 先檢查本地 Ollama server 是否可用（3 秒 timeout）
     final localAvailable = await _checkLocalServer();
+    // [T7④ 2026-10-16 盲測 401 根治] localOnly（斷網血管）：
+    // 本地不可用時直接放棄萃取（背景記憶可丟），絕不打雲。
+    // 病例：E4B 推論佔滿 llama-server → /v1/models 3 秒 timeout →
+    // fallback 打 gateway（z.ai）＋過期 openai token → 401 錯誤
+    // 冒泡成主回覆（Q1/Q5/Q7/Q13 四題全滅的根因）。
+    if (!localAvailable && await StorageService.getLocalOnly()) {
+      debugPrint('[SmartMemoryExtractor] localOnly 且本地不可用——跳過萃取（不打雲）');
+      return null;
+    }
     if (localAvailable) {
       final localModel = await StorageService.getLocalModelName();
       debugPrint('[SmartMemoryExtractor] 使用本地模型做記憶提取: ${localModel ?? "llama3.1:8b"}');
@@ -327,6 +336,9 @@ class SmartMemoryExtractor {
 
   /// [教練 Agent 2026-07-30] 檢查本地 Ollama server 是否可用。
   /// 送 GET /v1/models，3 秒 timeout——回傳 true 代表可用。
+  /// [T7④ 2026-10-16 盲測 401 根治] 三處支援：
+  /// ① 優先 local_model_endpoint（18789 llama-server——我們不是 Ollama）
+  /// ② localOnly 模式：本地不可用直接 return null（斷網血管不打雲）
   static Future<bool> _checkLocalServer() async {
     try {
       final probeDio = Dio(BaseOptions(

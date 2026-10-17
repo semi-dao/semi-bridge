@@ -4,7 +4,7 @@
 > **日期**：2026-08-08
 > **盟約**：使用者 與教練 Agent
 > **基礎**：Vadim Zeland《Reality Transurfing Steps I-V》+ 2026-06 至 08 月真實開發實踐
-> **前身**：內部版 core-structure-transurfing-engine.md（v1.3，2026-06-03，未隨開源發佈）
+> **前身**：`/Volumes/DATA/橋樑計劃/02-架構設計/core-structure-transurfing-engine.md`（v1.3，2026-06-03）
 > **狀態**：從架構設計文件升級為大腦系統運轉核心
 
 ---
@@ -108,7 +108,7 @@
 **橋的實例**（2026-08-08 留下的）：
 | 水流 | 記號 | 橋（從哪個門回來） |
 |---|---|---|
-| 設計蒸餾 | `DESIGN.md` + session history | 從「設計」門進來 |
+| 設計蒸餾 + Active Theory | `DESIGN.md` + session history | 從「設計」門進來 |
 | P3 泛用任務證據 | `IMAGE_TASK_AND_ASSET_PHASE_PLAN.md` P3 行 | 從「canvas 功能」或「subagent」門進來 |
 | SQLite close race | `brain_database.dart` TODO | 從「穩定性」門進來 |
 | 手機 responsive | `AGENTS.md` responsive 條目 | 從「手機版」門進來 |
@@ -254,7 +254,7 @@ Agent 自主推進（內在意圖執行）
 
 | 門 | 水流 | 橋 |
 |---|---|---|
-| 設計門 | 設計蒸餾 → 第六個 Bridge 原則 | `DESIGN.md` 蒸餾矩陣 |
+| 設計門 | Active Theory 蒸餾 → 第六個 Bridge 原則 | `DESIGN.md` 蒸餾矩陣 |
 | 功能門 | P3 canvas diff + subagent evidence | roadmap P3 行 |
 | 穩定性門 | SQLite close race + writer drain | `brain_database.dart` TODO |
 | 手機門 | Responsive 地基 | `AGENTS.md` |

@@ -28,6 +28,10 @@
 	<true/>
 	<key>com.apple.security.files.removable-volumes</key>
 	<true/>
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+	<array>
+		<string>$(PROJECT_DIR)/</string>
+	</array>
 	<key>com.apple.security.keychain-access-groups</key>
 	<array>
 		<string>$(AppIdentifierPrefix)farm.semiwasabi.bridgeApp</string>

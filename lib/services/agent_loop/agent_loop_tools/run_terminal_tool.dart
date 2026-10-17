@@ -13,7 +13,7 @@ import 'dart:io';
 import '../agent_tool.dart';
 import '../../../core/dev_paths.dart';
 
-final _projectRoot = resolveDevPath('~/Developer/bridge_app');
+const _projectRoot = '<HOME>/Developer/bridge_app';
 
 /// 允許的指令前綴白名單
 const _allowedCommands = [

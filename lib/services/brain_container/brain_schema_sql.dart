@@ -17,7 +17,7 @@
 // superseded_by：矛盾消解——新事實取代舊事實（舊記憶指向新記憶，留審計不刪）。
 // expires_at 已存在但零使用：本版起寫入端可標記臨時事實到期日，
 // 讀取端一律過濾（temporal filtering——supermemory 借鏡）。
-const String kBrainSchemaVersion = '19';
+const String kBrainSchemaVersion = '20';
 
 /// 所有 CREATE TABLE 語句。
 ///
@@ -212,7 +212,8 @@ const List<String> brainCreateTableStatements = [
     embedding     BLOB,
     created_at    TEXT DEFAULT (datetime('now')),
     is_archived   INTEGER DEFAULT 0,
-    layer         TEXT
+    layer         TEXT,
+    embed_model_version TEXT  -- [小葵 2026-10-15 T6] 向量血型（D1）
   )
   ''',
 
@@ -263,7 +264,10 @@ const List<String> brainCreateTableStatements = [
     file_hash       TEXT,
     display_title   TEXT,
     origin_kind     TEXT,
-    topic_cluster   TEXT
+    topic_cluster   TEXT,
+    -- [小葵 2026-10-15 T0／D5] 向量血型：embed 模型版本一等欄位。
+    -- 舊 DB 由 from_v19_to_v20 後的 PRAGMA 確保補欄（見 brain_database.dart）。
+    embed_model_version TEXT
   )
   ''',
 
@@ -513,6 +517,31 @@ const Map<String, List<String>> brainMigrations = {
   //   hermes_conversation → L8；hermes_migration → 按內容特徵；
   //   persona_card/identity → L2；lesson → L6；milestone → L5；
   //   pattern → L6；skill → L6；import_marker → L4
+  // [小葵 2026-10-15 T0／Fable V3 斷鏈④] v19 → v20：向量血型欄位。
+  // asset_index.embed_model_version——embed 模型版本是一等公民（D5）：
+  // 換模型 = migration + 重嵌 + 頭重訓三件套，缺一不上線。
+  // 注意：live DB 曾手動 ALTER 過此欄（2026-10-15），migration 對已存在欄位會炸——
+  // 改用 PRAGMA 檢查式確保（見 brain_database.dart _ensureEmbedModelVersionColumn）。
+  'from_v19_to_v20': [
+    // [小葵 2026-10-15 T3] correction_events 建表入正典 migration——
+    // 原本在 CorrectionCatcher._ensureTable（用到才建）；BeliefGate 的
+    // fail-open 依賴此表查證據，表晚建＝gate 白白放行。IF NOT EXISTS 冪等。
+    '''
+    CREATE TABLE IF NOT EXISTS correction_events (
+      id                 TEXT PRIMARY KEY,
+      conversation_id    TEXT NOT NULL,
+      message_id         TEXT NOT NULL,
+      kind               TEXT NOT NULL,
+      hit_pattern        TEXT NOT NULL,
+      user_text          TEXT NOT NULL,
+      assistant_context  TEXT NOT NULL DEFAULT '',
+      created_at         INTEGER NOT NULL,
+      ref_turn_id        TEXT
+    )
+    ''',
+    'CREATE INDEX IF NOT EXISTS idx_correction_conv ON correction_events(conversation_id)',
+    'CREATE INDEX IF NOT EXISTS idx_correction_kind ON correction_events(kind)',
+  ],
   'from_v18_to_v19': [
     "ALTER TABLE agent_memories ADD COLUMN layer TEXT",
     "CREATE INDEX IF NOT EXISTS idx_agent_memories_layer ON agent_memories(layer)",
@@ -790,6 +819,10 @@ const Map<String, List<String>> brainMigrations = {
     // 新索引：按房間查詢 + 按專案查詢
     'CREATE INDEX IF NOT EXISTS idx_asset_index_room ON asset_index(room)',
     'CREATE INDEX IF NOT EXISTS idx_asset_index_project ON asset_index(project_id)',
+    // [小葵 2026-10-14 Blue 報案 vault 開頁 10-20s] covering index——
+    // embedding blob（每行 3KB）把 room/title 擠到分散頁面，vault 查詢
+    // 回表隨機讀 67k 次=6.5-7.8s。覆蓋索引後 0.03s（260 倍）。
+    'CREATE INDEX IF NOT EXISTS idx_asset_vault_cover ON asset_index(file_path, room, title, classification_confidence, id, audience)',
   ],
   // [教練 Agent 2026-07-31] v9: memories_fts 全文搜尋 + asset_index file_hash
   'from_v8_to_v9': [

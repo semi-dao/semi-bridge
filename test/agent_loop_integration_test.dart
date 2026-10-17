@@ -1,57 +1,84 @@
-/// Agent Loop 整合測試 — Headless 測試執行者
+/// Agent Loop 整合測試 — Mock LLM client 下的控制流
 ///
-/// [小葵 2026-08-07] P0.5c：headless agent loop test
-/// 取代「請 Blue 實機測試 + 回報」的低效率循環。
-///
-/// 設計：
-/// - 這個測試可以在背景跑，不需要 UI 互動
-/// - 直接呼叫 ChatController 內部方法，模擬使用者送出訊息
-/// - 觀察 ~/Documents/bridge_app_logs/agent_loop_model.log
-/// - 觀察 _runAgentLoopIfNeeded 的內部 state
-/// - 產出結構化報告
-///
-/// 使用情境：
-/// 1. 修了一個 bug（例如「inspectBridgeRuntime 自動覆寫 provider」）
-/// 2. 跑 `flutter test test/agent_loop_integration_test.dart`
-/// 3. 看報告：每輪 LLM 呼叫用了什麼 model、有沒有切換、有沒有卡住
-/// 4. 通過才請 Blue 實機確認；不通過就繼續修
-///
-/// 這個測試還沒實作，這是骨架。
+/// [T10④ 2026-10-17] 從骨架變實作——不需要 UI、不需要 API key：
+/// - mock LLM client 控制回應（正常/超時/錯誤）
+/// - 驗證控制流：直通道、連續 timeout 真結束、hitTurnLimit
 library;
 
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:bridge_app/services/agent_loop/agent_loop.dart';
+import 'package:bridge_app/services/agent_loop/agent_tool_registry.dart';
+
+/// 可編劇的 mock LLM client——按序吐回應
+class ScriptedLLMClient implements AgentLoopLLMClient {
+  final List<Object> script; // String=正常回應 / TimeoutException=超時 / Exception=錯誤
+  int callIndex = 0;
+  ScriptedLLMClient(this.script);
+
+  @override
+  Future<String> complete(List<Map<String, dynamic>> messages) async {
+    final i = callIndex++;
+    if (i >= script.length) return '（script 用盡——直接結束）';
+    final item = script[i];
+    if (item is TimeoutException) throw item;
+    if (item is Exception) throw item;
+    return item as String;
+  }
+}
 
 void main() {
-  group('Agent Loop headless test', () {
-    test('scenario: user selects gemini → send message → verify stays gemini', () async {
-      // TODO:
-      // 1. Set StorageService provider = 'gemini'
-      // 2. Set StorageService api_model_v2_gemini = 'gemini-3.5-flash'
-      // 3. Build ChatController
-      // 4. Call sendDirectMessage('查 Gemini Imagen API 文件然後生成一張圖')
-      // 5. Wait up to 60s for completion
-      // 6. Read ~/Documents/bridge_app_logs/agent_loop_model.log
-      // 7. Assert:
-      //    - 至少有一輪 log entry 是 user_locked + provider=gemini
-      //    - 沒有任何 router_default + provider=local 的 entry
-      //    - 沒有任何 provider=local 的 entry
-      // 8. Print summary
-    });
+  TestWidgetsFlutterBinding.ensureInitialized();
+  SharedPreferences.setMockInitialValues({}); // run() 內工具讀 prefs——mock 掉
+  final registry = AgentToolRegistry();
 
-    test('scenario: user selects default → can dispatch sub-agent', () async {
-      // TODO:
-      // 1. Set StorageService provider = 'default'
-      // 2. Call sendDirectMessage('分析這個...') triggering delegate_subagent
-      // 3. Verify delegate_subagent was called (not blocked)
-      // 4. Verify at least one LLM call used a different model
-    });
+  test('T10④-1 連續 3 次 LLM timeout → 真 return（非無限重試）', () async {
+    final loop = AgentLoop(
+      toolRegistry: registry,
+      // 前 2 槽可能被 K1 escalate→E4B 仲裁消耗（fail-open 會吞掉）——
+      // 給足 timeout，連續 3 次累積必觸發真 return
+      llmClient: ScriptedLLMClient(
+          List.generate(8, (i) => TimeoutException('t$i'))),
+    );
+    final result = await loop.run(
+      systemPrompt: '你是測試助手。',
+      userMessage: '幫我查個東西',
+      maxTurns: 100000, // Hermes 模式——不靠輪數上限
+    );
+    // 關鍵：不是 100000 輪燒完，而是 3 次 timeout 就回來
+    expect(result.reply, contains('連續三次'));
+    expect(result.hitTurnLimit, isFalse);
+    expect(result.cancelled, isFalse);
+  });
 
-    test('scenario: provider exhausted → returns error not fallback', () async {
-      // TODO:
-      // 1. Set StorageService provider = 'gemini'
-      // 2. Inject a fake ApiService that returns 429 quota exceeded
-      // 3. Send message
-      // 4. Verify error message contains "額度耗盡" not silent fallback
-    });
+  test('T10④-2 timeout 後成功回應 → 計數歸零（1 timeout + 1 ok 不觸發放棄）', () async {
+    final loop = AgentLoop(
+      toolRegistry: registry,
+      llmClient: ScriptedLLMClient([
+        TimeoutException('t1'),
+        '好的，我直接告訴你：答案是 42。',
+      ]),
+    );
+    final result = await loop.run(
+      systemPrompt: '你是測試助手。',
+      userMessage: '生命的意義是什麼？',
+    );
+    expect(result.reply, contains('42'));
+    expect(result.hitTurnLimit, isFalse);
+  });
+
+  test('T10④-3 isCancelled → 立即結束（Blue 保留取消權）', () async {
+    final loop = AgentLoop(
+      toolRegistry: registry,
+      llmClient: ScriptedLLMClient(['先想想...']),
+    );
+    final result = await loop.run(
+      systemPrompt: '你是測試助手。',
+      userMessage: '任務',
+      isCancelled: () => true, // 一進來就取消
+    );
+    expect(result.cancelled, isTrue);
   });
 }

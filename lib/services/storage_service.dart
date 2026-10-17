@@ -392,6 +392,31 @@ class StorageService {
     return prefs.getString(_keyLocalModelEndpoint);
   }
 
+  // [T7④ 2026-10-16 編織線 D7] localOnly 一等設定（M6 斷網模式）——
+  // true 時 resolveDefault 永不回雲端、MemoryGuard red 改拒答不上雲
+  // [T7④ 根修 2026-10-16 深夜] 啟動快取——盲測實證：App 冷啟動第一輪
+  // SharedPreferences 尚未載入完成，getLocalOnly 短暫回 false → 首輪打雲
+  // 401（Q1 病例三連）。首次成功讀取後快取在 static，寫入同步更新，
+  // 冷啟動窗口從此讀不到 false。
+  static bool? _localOnlyCache;
+
+  static Future<bool> getLocalOnly() async {
+    if (_localOnlyCache != null) return _localOnlyCache!;
+    final prefs = await SharedPreferences.getInstance();
+    _localOnlyCache = prefs.getBool('local_only_mode') ?? false;
+    return _localOnlyCache!;
+  }
+
+  static Future<void> saveLocalOnly(bool v) async {
+    _localOnlyCache = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('local_only_mode', v);
+  }
+
+  /// 測試用：清快取
+  @visibleForTesting
+  static void debugClearLocalOnlyCache() => _localOnlyCache = null;
+
   // [Blue 令 2026-10-05] 本地模型閒置自動卸載開關（預設開）
   static Future<bool> getLocalModelIdleUnloadEnabled() async {
     final prefs = await SharedPreferences.getInstance();

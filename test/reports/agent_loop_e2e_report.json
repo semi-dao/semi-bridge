@@ -1,0 +1,28 @@
+[
+  {
+    "testName": "gemini_lock_simple_chat",
+    "scenario": "使用者選 Gemini，送簡單訊息，驗證全程用 Gemini",
+    "providerSetting": "gemini",
+    "userMessage": "你好，請用一句話介紹自己",
+    "stages": [],
+    "finalReply": null,
+    "turnCount": 0,
+    "elapsedMs": null,
+    "passed": false,
+    "failureReason": "GEMINI_API_KEY 未設定",
+    "timestamp": "2026-10-17T13:41:26.474487"
+  },
+  {
+    "testName": "gemini_lock_web_search",
+    "scenario": "使用者選 Gemini，要求搜尋，驗證不切到 local",
+    "providerSetting": "gemini",
+    "userMessage": "請幫我查一下今天是幾月幾號",
+    "stages": [],
+    "finalReply": null,
+    "turnCount": 0,
+    "elapsedMs": null,
+    "passed": false,
+    "failureReason": "GEMINI_API_KEY 未設定",
+    "timestamp": "2026-10-17T13:41:27.102973"
+  }
+]

@@ -282,8 +282,21 @@ class ConversationStore {
     }
   }
 
+  /// [2026-10-16 盲測並發事故] 寫入互斥鎖——_rotateBackup 與 writeAsString
+  /// 不是原子的：兩個 save() 交錯（備份A→備份B→寫A→寫B 或 0-byte 競態）
+  /// 會產出 0-byte 備份甚至清空主檔。全 App 對話寫入序列化。
+  static Future<void> _writeLock = Future.value();
+
   static Future<void> _writeAll(List<Conversation> conversations) async {
+    final task = _writeLock.then((_) => _writeAllInner(conversations));
+    _writeLock = task.catchError((_) {}); // 鎖不住也要解鎖
+    return task;
+  }
+
+  static Future<void> _writeAllInner(List<Conversation> conversations) async {
     final file = await _storageFile();
+    // [2026-10-16] 內容空保護——序列化結果空字串/空列表一律拒寫
+    // （守門員依賴讀到舊檔；舊檔若已被競態清空，這裡是最後一道網）
     conversations.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     // [小葵 2026-09-21 P0] 寫入守門員——防「空列表覆寫」資料事故。
@@ -315,10 +328,21 @@ class ConversationStore {
     // [教練 Agent 2026-08-02] 寫入前先備份（保留最近 10 版）
     await _rotateBackup(file);
 
-    await file.writeAsString(
-      jsonEncode(conversations.map((c) => c.toJson()).toList()),
-      flush: true,
-    );
+    final payload =
+        jsonEncode(conversations.map((c) => c.toJson()).toList());
+    if (payload.length < 3) {
+      // '[]' ——寫入等於清空。但若本 session 有明確刪除記錄
+      // （_explicitlyDeleted），空列表是使用者意圖（刪到剩 0），放行；
+      // 否則視為異常清空，拒寫保留現場。
+      final intentionalEmpty = _explicitlyDeleted.isNotEmpty;
+      if (!intentionalEmpty) {
+        debugPrint('[ConversationStore] 🚫 空列表寫入被拒（防清空）');
+        return;
+      }
+      debugPrint('[ConversationStore] 空列表寫入放行——'
+          '本 session 有明確刪除記錄（${_explicitlyDeleted.length} 筆）');
+    }
+    await file.writeAsString(payload, flush: true);
 
     final prefs = await SharedPreferences.getInstance();
     if (prefs.containsKey(_keyConversations)) {

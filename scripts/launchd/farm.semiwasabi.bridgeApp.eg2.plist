@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>farm.semiwasabi.bridgeApp.eg2</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string><HOME>/Library/Application Support/Bridge/LocalRuntime/runtime/bin/llama-server</string>
+        <string>-m</string>
+        <string><HOME>/Library/Application Support/Bridge/LocalRuntime/models/embeddinggemma-2-Q8_0.gguf</string>
+        <string>--mmproj</string>
+        <string><HOME>/Library/Application Support/Bridge/LocalRuntime/models/mmproj-eg2-Q8_0.gguf</string>
+        <string>--embedding</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>18890</string>
+        <string>-c</string>
+        <string>4096</string>
+        <string>-ub</string>
+        <string>2048</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LLAMA_MEDIA_MARKER</key>
+        <string>&lt;__media__&gt;</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/eg2_server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/eg2_server.log</string>
+</dict>
+</plist>

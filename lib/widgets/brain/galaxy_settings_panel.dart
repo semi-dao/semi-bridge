@@ -127,20 +127,20 @@ class _GalaxySettingsPanelState extends State<GalaxySettingsPanel> {
 
   String? _readToken() {
     try {
-      final f = File(resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token'));
+      final f = File('<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token');
       if (f.existsSync()) return f.readAsStringSync().trim();
     } catch (_) {}
     return null;
   }
 
   Map<String, dynamic> _persistFile(String name) {
-    final dir = resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp');
+    final dir = '<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp';
     return {'path': '$dir/galaxy_settings_$name.json'};
   }
 
   Future<void> _loadPersisted() async {
     try {
-      final dir = Directory(resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp'));
+      final dir = Directory('<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp');
       final vFile = File('${dir.path}/galaxy_settings_values.json');
       final hFile = File('${dir.path}/galaxy_settings_hidden.json');
       if (vFile.existsSync()) {
@@ -156,7 +156,7 @@ class _GalaxySettingsPanelState extends State<GalaxySettingsPanel> {
 
   Future<void> _persistAndPush() async {
     try {
-      final dir = resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp');
+      final dir = '<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp';
       File('$dir/galaxy_settings_values.json').writeAsStringSync(jsonEncode(_values));
       File('$dir/galaxy_settings_hidden.json').writeAsStringSync(jsonEncode(_hidden.toList()));
       // 推送到 gateway（webview 1 秒內拉到）

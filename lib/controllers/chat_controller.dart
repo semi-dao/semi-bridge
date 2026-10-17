@@ -116,6 +116,7 @@ import '../services/entity_graph/entity_graph_service.dart';
 import '../services/agent_loop/agent_loop_tools/flutter_self_capture_executor.dart';
 import '../services/agent_loop/agent_loop_tools/mac_screen_capture_executor.dart'; // 保留 import 避免 breaking，但不再使用
 import '../services/agent_loop/agent_loop_prompt_builder.dart';
+import '../services/agent_loop/m2_persona_service.dart'; // [T4②] M2 語氣層
 import '../services/agent_loop/production_agent_loop_llm_client.dart';
 
 // [教練 Agent 2026-07-30 Phase 4] 自訂調用原則
@@ -132,6 +133,9 @@ import '../services/causal/time_sense_service.dart'; // [時間感 L2] 相遇時
 import '../services/life_tree/life_tree_store.dart'; // [2026-10-05] 對話自動裁決夢卡
 import '../services/agent_loop/agent_loop_tools/tool_seek_tool.dart'
     show CompassToolSeekTool; // [小葵 2026-10-01] 本地士兵配備
+import '../services/correction_catcher.dart'; // [小葵 2026-10-14 M3] 修正捕手
+import '../services/calibration_breaker.dart'; // [小葵 2026-10-14 M3] 校準熔斷
+import '../services/brain_container/event_ledger.dart'; // [小葵 2026-10-14 M3] reaction 落盤
 
 /// [以利沙 Sprint 8 Step 1 2026-06-24]
 /// ChatController 骨架。
@@ -761,6 +765,37 @@ class ChatController extends ChangeNotifier {
     onScrollToBottom?.call();
   }
 
+  /// [T4③ 2026-10-16 編織線] 開乾淨新對話（盲測/評測用）——
+  /// 空白 conversation、重置 session store，回傳新對話 id
+  Future<String> startFreshConversation({String? title}) async {
+    // [2026-10-16 盲測事故防呆] 不信任記憶體 list——先從磁碟拉最新
+    // （controller 剛啟動未 loadConversations 時 _conversations 是空的）
+    try {
+      final all = await ConversationStore.getAll();
+      if (all.length > _conversations.length) {
+        _conversations = all;
+      }
+    } catch (_) {}
+    final now = DateTime.now();
+    final newConv = Conversation(
+      id: '${now.millisecondsSinceEpoch}',
+      title: title ?? '對話 ${now.month}/${now.day}',
+      createdAt: now,
+      updatedAt: now,
+      messages: const [],
+      companionId: _activeCompanion?.id,
+    );
+    await ConversationStore.save(newConv);
+    await ConversationStore.setCurrentId(newConv.id);
+    _conversations = [newConv, ..._conversations];
+    _currentConversation = newConv;
+    _agentLoop?.resetSessionStore();
+    _brainReflection = null;
+    notifyListeners();
+    onScrollToBottom?.call();
+    return newConv.id;
+  }
+
   /// [教練 Agent 2026-08-03] 延伸話題專用：建立新對話並注入指定上下文，不會被覆蓋。
   /// 流程：直接建立帶 messages 的新 Conversation → 存 → 設為 currentConversation。
   /// 與 switchConversation 不同：本方法不透過「先保存當前對話」邏輯，確保新對話
@@ -845,7 +880,9 @@ class ChatController extends ChangeNotifier {
     final companionId = _activeCompanion?.id;
     final all = await ConversationStore.getAll();
     var conversations = all
-        .where((c) => c.type == ConversationType.general)
+        .where((c) =>
+            c.type == ConversationType.general ||
+            c.type == ConversationType.proactive)
         .toList();
     // [2026-08-27 共視修復] 多人格時代：對話不再只屬於一位夥伴。
     // 過濾條件改為「對話歸屬夥伴 OR 對話內有該夥伴發言 OR 無歸屬」——
@@ -1740,8 +1777,13 @@ class ChatController extends ChangeNotifier {
     // 現在：先讀使用者選的 provider，如果使用者選了雲端 → isLocal = false；
     //   如果使用者沒選或選 local → 才看 ProviderRouter.instance.current。
     final userProvider = await StorageService.getProvider();
-    // [教練 Agent 2026-07-30] 「預設」模式 → 走動態路由，不算使用者指定雲端
+    // [T7④ 補刀 2026-10-16] localOnly（斷網血管）一票否決「明選雲端」——
+    // 盲測實證：使用者 storage 存 provider=openai（token 已失效），
+    // userWantsCloud 分支跳過 ProviderRouter 直取 openai → localOnly 被繞過。
+    // 斷網模式的精神：沒有雲，明選也要 fallback 本地（告知 reason）。
+    final localOnlyMode = await StorageService.getLocalOnly();
     final userWantsCloud =
+        !localOnlyMode &&
         userProvider != null &&
         userProvider != 'local' &&
         userProvider != 'default';
@@ -1878,10 +1920,22 @@ class ChatController extends ChangeNotifier {
       }
     }
 
+    // [T4② 2026-10-16 編織線] M2 語氣層注入——companionPersona 之後掛
+    // 語氣資產（cloud 85K / e4b 12K 依 ProviderRouter 路由結果選版）。
+    // fail-open：資產載入失敗不擋對話。local 走 _buildLocalPrompt 不吃這段。
+    String personaWithTone = companionPersona ?? '';
+    // [T4②] local 也注入——e4b 版只有 12K（32K ctx 塞得下），靈魂不分雲端本地
+    final m2 = await M2PersonaService.instance.personaForCurrentRoute();
+    if (m2 != null && m2.isNotEmpty) {
+      personaWithTone = personaWithTone.isEmpty
+          ? m2
+          : '$personaWithTone\n\n---\n$m2';
+    }
+
     final systemPrompt = AgentLoopPromptBuilder.build(
       budgetEye: budgetEyeText,
       timelineSection: await _buildTimelineSection(),
-      companionPersona: companionPersona,
+      companionPersona: personaWithTone,
       toolRegistry: _agentToolRegistry!,
       contextMemory: contextMemory,
       activeProjectDoorTitle: _activeProjectDoor?.title,
@@ -1980,6 +2034,34 @@ class ChatController extends ChangeNotifier {
   /// [教練 Agent 2026-07-22] Phase 5 互動式教學
   /// 直接在對話框注入一條 assistant 訊息（不經過 LLM）。
   /// 用於範本引導教學——Agent 一步步帶領使用者。
+  /// [Blue 令 2026-10-17] 主動回應頻道——羅盤/夢的主動發話住獨立 session。
+  /// 切到（或建立）proactive 類型對話；不混入使用者當前的對話討論串。
+  /// 建立後 _currentConversation 指向它，injectAssistantMessage 落在同一
+  /// 個 session；使用者的其他對話不受影響。
+  Future<void> openOrCreateProactiveSession() async {
+    try {
+      // [Blue 令 2026-10-17] 每次主動開話＝一個新對話——回覆後使用者
+      // 可能展開新的討論串，共用 session 會洗板。不復用舊的。
+      final now = DateTime.now();
+      final conv = Conversation.create(
+        title: '主動回應 ${now.month}/${now.day}',
+        companionId: _activeCompanion?.id,
+      ).copyWith(type: ConversationType.proactive, updatedAt: now);
+      await ConversationStore.save(conv);
+      // [Blue 病例 2026-10-17] 必須加進 _conversations——只設
+      // _currentConversation 的話，使用者一點其他對話 reload 列表，
+      // proactive session 從 UI 消失（磁碟在但看不到＝丟了）。
+      if (!_conversations.any((c) => c.id == conv.id)) {
+        _conversations = [conv, ..._conversations];
+      }
+      _currentConversation = conv;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('[ChatController] proactive session 建立失敗（fail-open '
+          '退回當前對話）: $e');
+    }
+  }
+
   Future<void> injectAssistantMessage(
     String content, {
     Map<String, dynamic>? metadata,
@@ -1989,11 +2071,20 @@ class ChatController extends ChangeNotifier {
     }
     if (_currentConversation == null) return;
 
+    // [指紋定律 2026-10-16 Blue] 中間觀察泡泡也簽名——
+    // 病例：18:42「我好累」回覆 kind=loop_observation 無 speaker 無 model，
+    // 對話列表指紋消失、回覆自稱 AI、無模型署名——三違規一次修。
+    final routed = ProviderRouter.instance.current;
+    final routedModel = routed == null
+        ? null
+        : await ApiService.defaultModelFor(routed.providerId);
     final msg = Message(
       id: 'tutorial-${DateTime.now().microsecondsSinceEpoch}',
       role: 'assistant',
       content: content,
       timestamp: DateTime.now(),
+      speakerId: _activeCompanion?.id ?? 'native-agent',
+      model: routedModel, // 簽名：這則觀察由哪個模型說的
       metadata: metadata ?? {'kind': 'tutorial'},
     );
 
@@ -4049,6 +4140,40 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  /// [小葵 2026-10-14 M3-第三刀] 糾正→reaction→熔斷評估 接線。
+  /// appendReaction 原本在生產環境從未被呼叫（校準訊號源死線）——
+  /// 糾正＝明確負反應，落 'corrected' reaction；隨後評估熔斷。
+  /// [小葵 2026-10-15 T2/D3] 隱式接受接線——上一輪 turn 補 accepted reaction。
+  /// 條件：上一輪尚無任何 reaction（appendReaction 冪等去重）＋非糾正訊息。
+  /// 之後若使用者真的糾正（同輪稍後 detect 到），appendReaction 會因
+  /// accepted 先佔而拒絕——糾正訊號不可被隱式接受吞掉，順序設計：
+  /// detect 先跑、hit==null 才補 accepted。
+  Future<void> _wireImplicitAccept() async {
+    try {
+      final turnId = EventLedger.instance.lastTurnId();
+      if (turnId != null) {
+        EventLedger.instance.appendReaction(turnId, 'accepted');
+      }
+    } catch (_) {
+      // fail-quiet：隱式訊號失敗絕不影響對話
+    }
+  }
+
+  Future<void> _wireCorrectionToBreaker() async {
+    try {
+      final turnId = EventLedger.instance.lastTurnId();
+      if (turnId != null) {
+        final ok = EventLedger.instance.appendReaction(turnId, 'corrected');
+        if (ok) {
+          debugPrint('[M3] 糾正落 reaction（turn=$turnId）→ 熔斷評估');
+          await CalibrationBreaker.instance.evaluate();
+        }
+      }
+    } catch (e) {
+      debugPrint('[M3] 接線失敗（fail-quiet）: $e');
+    }
+  }
+
   // [以利沙 Sprint 8 Step 6 2026-06-24]
   AgentMotivationSnapshot fallbackAgentMotivationSnapshot() {
     final agentName = _activeCompanion?.name.trim();
@@ -5305,7 +5430,7 @@ class ChatController extends ChangeNotifier {
       content: content,
       timestamp: DateTime.now(),
       // [以利沙 P0 修復十四輪 2026-06-27] 記錄發言者 companion.id
-      speakerId: _activeCompanion?.id,
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
       metadata: metadata,
     );
     final updated = conv.copyWith(
@@ -5825,7 +5950,7 @@ class ChatController extends ChangeNotifier {
       role: 'assistant',
       content: '這次橋樑動作需要你確認。',
       timestamp: DateTime.now(),
-      speakerId: _activeCompanion?.id, // [以利沙 P0 修復十五輪 2026-06-27]
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名（原以利沙 P0）
       bridgeActions: [
         action.copyWith(
           requiresConfirmation: true,
@@ -5904,7 +6029,7 @@ class ChatController extends ChangeNotifier {
           ? result.message
           : '${result.message}\n\n$evidence',
       timestamp: DateTime.now(),
-      speakerId: _activeCompanion?.id, // [以利沙 P0 修復十五輪 2026-06-27]
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名（原以利沙 P0）
       imagePath: result.metadata?['kind'] == 'document'
           ? null
           : result.mediaUrl,
@@ -6487,7 +6612,7 @@ class ChatController extends ChangeNotifier {
       role: 'assistant',
       content: '✅ ${draft.name} 已生效，內建調用模式已自動棄用。',
       timestamp: DateTime.now(),
-      speakerId: _activeCompanion?.id,
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
     );
     final conv = _currentConversation!;
     _currentConversation = conv.copyWith(
@@ -6521,7 +6646,7 @@ class ChatController extends ChangeNotifier {
           '- 「回答太長了」\n'
           '- 「要有創意一點」',
       timestamp: DateTime.now(),
-      speakerId: _activeCompanion?.id,
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
     );
     final conv = _currentConversation!;
     _currentConversation = conv.copyWith(
@@ -6545,7 +6670,7 @@ class ChatController extends ChangeNotifier {
           '📝 ${draft.description}\n\n'
           '（確認對話框未注入，請到設定頁面手動啟用）',
       timestamp: DateTime.now(),
-      speakerId: _activeCompanion?.id,
+      speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
     );
     final conv = _currentConversation!;
     _currentConversation = conv.copyWith(
@@ -6575,7 +6700,7 @@ class ChatController extends ChangeNotifier {
       if (cid == null || cid.isEmpty) return null;
       final t = await TimeSenseService.instance.timelineFor(cid);
       if (t == null) return null;
-      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——家庭提案 L4）
+      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——家人提案 L4）
       final base = TimeSenseService.buildTimelineSection(t);
       final milestones = TimeSenseService.buildMilestoneSection(t);
       if (base == null) return milestones;
@@ -7069,6 +7194,45 @@ $base
 
     final normalized = text.toLowerCase();
 
+    // [小葵 2026-10-14 M3] 修正捕手——Blue 的糾正信號自動落盤成標籤
+    // （回饋閉環地基：寧漏勿誤、只記不動、冪等。失敗不影響對話主流程）
+    if (text.isNotEmpty) {
+      String? prevAssistant;
+      final msgs = _currentConversation?.messages.toList() ?? <Message>[];
+      for (final m in msgs.reversed) {
+        if (m.role == 'assistant' && m.content.trim().isNotEmpty) {
+          prevAssistant = m.content;
+          break;
+        }
+      }
+      final hit = CorrectionCatcher.detect(text, prevAssistant);
+      // [小葵 2026-10-15 T2/D3] 隱式接受——非糾正的新一輪＝對上一輪的 accepted。
+      // 沒有這個訊號源，onlineCalibration 只看得到 corrected，每桶 acc 恆 0 →
+      // 必誤熔（Fable V3 斷鏈①）。隱式訊號可能誤差（話題切換≠接受），
+      // 但「零 accepted 來源」比「帶噪 accepted」更糟——D3 原則。
+      if (hit == null) {
+        unawaited(_wireImplicitAccept());
+      }
+      if (hit != null) {
+        final convId = _currentConversation?.id ?? 'unknown';
+        final msgId =
+            '${DateTime.now().millisecondsSinceEpoch}_correction';
+        unawaited(CorrectionCatcher.instance.record(
+          conversationId: convId,
+          messageId: msgId,
+          userText: text,
+          assistantContext: prevAssistant ?? '',
+          kind: hit.kind,
+          hitPattern: hit.hit,
+          refTurnId: EventLedger.instance.lastTurnId(), // [小葵 2026-10-15 T1/D4] 被糾正輪的鑰匙
+        ));
+        // [小葵 2026-10-14 M3-第三刀] 糾正＝負反應——接活校準訊號源：
+        // appendReaction 落 event_ledger（原本生產環境從未呼叫，死線）→
+        // CalibrationBreaker.evaluate()（信心區正確率跌破地板→熔斷降級）
+        unawaited(_wireCorrectionToBreaker());
+      }
+    }
+
     // [教練 Agent 2026-08-08] Transurfing：偵測話題切換 + 自動恢復
     if (text.isNotEmpty) {
       final engine = TransurfingEngine.instance;
@@ -7151,7 +7315,7 @@ $base
           role: 'assistant',
           content: '已取消專案「$undoneTitle」。我們回到刚才的對話，你可以重新描述你想做的事，我會幫你正確建立。',
           timestamp: DateTime.now(),
-          speakerId: _activeCompanion?.id,
+          speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
         );
         final conv = _currentConversation!;
         final updatedConv = conv.copyWith(
@@ -8035,7 +8199,7 @@ $base
           content: cleanReplyText,
           timestamp: DateTime.now(),
           model: textReceipt?.model, // P0.5：僅顯示這輪實際 LLM receipt
-          speakerId: _activeCompanion?.id,
+          speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名
           imagePath: mediaUrl,
           mediaAssets: allMediaAssets, // [教練 Agent 2026-08-21] 死命令——全部資產送出
           metadata: assistantMetadata,
@@ -8106,7 +8270,7 @@ $base
         tokens: response.totalTokens,
         model: response.model,
         bridgeActions: response.bridgeActions,
-        speakerId: _activeCompanion?.id, // [以利沙 P0 修復十五輪 2026-06-27]
+        speakerId: _activeCompanion?.id ?? 'native-agent', // [指紋定律 2026-10-16 Blue] 原生 Agent 也有指紋，永不匿名（原以利沙 P0）
         quickReplies: response.quickReplies, // [教練 Agent 2026-06-29] 快速選項
       );
 

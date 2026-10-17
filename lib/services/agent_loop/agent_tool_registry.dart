@@ -18,6 +18,10 @@ import 'dart:async' show unawaited;
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'agent_loop_tools/bridge_action_tool.dart';
 import 'agent_loop_tools/memory_search_tool.dart';
+import 'agent_loop_tools/memory_write_tool.dart';
+import 'package:bridge_app/models/brain_container/memory_source.dart';
+import 'package:bridge_app/services/brain_container/brain_container_service.dart';
+import 'package:bridge_app/services/brain_container/brain_database.dart'; // [T3②] L4 直寫 agent_memories
 import 'agent_loop_tools/use_move_tool.dart'; // [Blue 拍板] 招式工具
 import 'agent_loop_tools/compass_tools_agent.dart';
 import 'agent_loop_tools/compass_seek_agent_tool.dart';
@@ -95,6 +99,50 @@ class AgentToolRegistry {
 
     // 大腦容器檢索
     tools.add(MemorySearchTool(brainContainerService));
+    // [T3② 2026-10-17] memory_write——L4 必過 BeliefGate（≥3 證據），
+    // agent 路徑 manualOverride 永遠 false；L0 走腦容器寫入管線。
+    tools.add(MemoryWriteTool(
+      // L0：腦容器標準寫入管線（嵌入+房間分類+連結偵測）
+      onL0Write: (content, tags) async {
+        try {
+          final svc = BrainContainerService.instance;
+          if (!svc.isInitialized) return false;
+          return await svc.writeMemory(
+            content: content,
+            agent: 'bridge_agent',
+            source: MemorySource.chat, // agent 寫入標記為 chat 來源（enum 無 agent 值）
+            tags: tags,
+          );
+        } catch (_) {
+          return false;
+        }
+      },
+      // L4：信念層——過 BeliefGate 後寫 agent_memories(layer='L4')
+      onL4Write: (content, tags) async {
+        try {
+          final svc = BrainContainerService.instance;
+          if (!svc.isInitialized) return false;
+          final db = BrainDatabase.instance.db;
+          final id =
+              'l4_${DateTime.now().millisecondsSinceEpoch}_${content.hashCode.toRadixString(36)}';
+          db.execute(
+            "INSERT INTO agent_memories (id, title, content, tags, memory_type, "
+            "embed_model_version, layer) VALUES (?, ?, ?, ?, ?, ?, 'L4')",
+            [
+              id,
+              content.length > 60 ? content.substring(0, 60) : content,
+              content,
+              tags.join(','),
+              'belief',
+              '', // 信念層不走向量檢索—— BeliefGate 證據鏈才是真相源
+            ],
+          );
+          return true;
+        } catch (_) {
+          return false;
+        }
+      },
+    ));
     // 🥋 [Blue 拍板 2026-09-12] 招式工具——對話中使出/查詢訓練AI夥伴錄的招式
     tools.add(UseMoveTool());
     tools.add(ListMovesTool());

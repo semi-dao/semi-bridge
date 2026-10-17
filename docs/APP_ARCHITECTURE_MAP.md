@@ -18,9 +18,9 @@
 | 對話泡泡內容/樣式 | `screens/chat/widgets/message_bubble.dart` | 主對話視窗 |
 | 對話泡泡模型名稱 | `message_bubble.dart` L542 + `canvas_chat_panel.dart` L859 + `desktop_chat_panel.dart` L765, L910 | **三個地方都要改**，用 `resolveShortModelName()` |
 | 視窗最小尺寸 | `main.dart` L21 (`window_manager`) + `MainFlutterWindow.swift` L47 (`self.minSize`) | **兩端都要改**，Dart 端會覆蓋 Swift |
-| 本地模型 server 啟動 | `MainFlutterWindow.swift` `startLocalRuntimeServer()` L1401 | spawn llama-server 的地方 |
+| 本地模型 server 啟動 | `MainFlutterWindow.swift` `startLocalRuntimeServer()` L1505 | spawn llama-server 的地方 |
 | 本地模型健康檢查 | `local_model_runtime_service.dart` `_withBridgeRuntimeHealth()` L476 | Dart 端輪詢 |
-| 本地模型狀態恢復 | `MainFlutterWindow.swift` `restoreLocalRuntimeState()` L2103 | APP 啟動時讀 `runtime-state.json` |
+| 本地模型狀態恢復 | `MainFlutterWindow.swift` `restoreLocalRuntimeState()` L2362 | APP 啟動時讀 `runtime-state.json` |
 | 模型名稱精簡邏輯 | `local_model_runtime_service.dart` `resolveShortModelName()` L692 | 所有模型名解析的源頭 |
 | API 呼叫（對話） | `api_service.dart` `sendMessage()` L186 | non-streaming，`stream: false` |
 | API 呼叫（輕量） | `api_service.dart` `completeWithReceipt()` L709 | 定義在 L709（不是 L701 那是呼叫處） |
@@ -217,7 +217,7 @@ ChatController.sendMessage()
 APP 啟動
   └─ Flutter 端呼叫 MethodChannel("bridge_desktop_shell") action:"status"
       └─ Swift: applyLocalRuntimeAction(action:"status")
-          └─ restoreLocalRuntimeState() L2120
+          └─ restoreLocalRuntimeState() L2362
               ├─ 讀 runtime-state.json
               ├─ 如果 phase=running → isPort18789Alive() socket 檢查
               │   └─ 如果 port 死了 → 降級為 installed
@@ -225,7 +225,7 @@ APP 啟動
 
 用戶點「啟動」或 auto-start
   └─ action:"startServer"
-      └─ startLocalRuntimeServer(modelId:) L1401
+      └─ startLocalRuntimeServer(modelId:) L1505
           ├─ removeQuarantineFromBin() — 移除 quarantine
           ├─ localRuntimePreflight() — 找 llama-server binary + model
           ├─ Process.run(llama-server, -m model --port 18789 -ngl 99 ...)
@@ -242,8 +242,8 @@ APP 啟動
 **關鍵檔案：**
 | 檔案 | 職責 |
 |---|---|
-| `MainFlutterWindow.swift` L1401 | `startLocalRuntimeServer()` — spawn |
-| `MainFlutterWindow.swift` L2103 | `restoreLocalRuntimeState()` — 啟動時恢復 |
+| `MainFlutterWindow.swift` L1505 | `startLocalRuntimeServer()` — spawn |
+| `MainFlutterWindow.swift` L2362 | `restoreLocalRuntimeState()` — 啟動時恢復 |
 | `local_model_runtime_service.dart` | Dart 端管理 + 健康檢查 |
 | `runtime-state.json` | 持久化狀態（phase, modelId, running） |
 

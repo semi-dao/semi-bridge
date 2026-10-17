@@ -13,11 +13,10 @@ tool/fix_const_widget_bridge_safe.py
   3. 中間包含 "BridgeDSColors.of(context)" → 拿掉這個 const
 """
 
-import os
 import re
 from pathlib import Path
 
-PROJECT_ROOT = Path(os.environ.get("BRIDGE_APP_HOME", str(Path.home() / "Developer" / "bridge_app")))
+PROJECT_ROOT = Path("<HOME>/Developer/bridge_app")
 
 FILES = [
     "lib/screens/companion_list_screen.dart",

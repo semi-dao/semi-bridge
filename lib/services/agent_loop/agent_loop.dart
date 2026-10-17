@@ -23,6 +23,7 @@ import 'dart:io';
 import 'dart:math' show Random;
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show rootBundle; // [刀B] few-shot 池 asset 讀取
 import 'package:image/image.dart' as image;
 import '../local_model_scheduler.dart'; // [小葵 2026-10-01] 離合器活躍訊號
 import '../storage_service.dart';
@@ -42,6 +43,7 @@ import 'agent_tool_call_parser.dart';
 import 'agent_tool_registry.dart';
 import 'context_store.dart' as context_store; // [Spike 002] CLM 形狀 context 管理
 import 'production_agent_loop_llm_client.dart';
+import '../calibration_breaker.dart'; // [小葵 2026-10-14 M3] 校準熔斷
 
 /// Agent Loop 結果
 class AgentLoopResult {
@@ -60,11 +62,15 @@ class AgentLoopResult {
   /// 總耗時
   final Duration elapsed;
 
+  /// [刀A 2026-10-17] 是否走了對話直通道（無工具、單次 completion）
+  final bool usedChatBypass;
+
   const AgentLoopResult({
     required this.reply,
     required this.turns,
     required this.hitTurnLimit,
     required this.cancelled,
+    this.usedChatBypass = false,
     required this.elapsed,
   });
 
@@ -129,10 +135,13 @@ class AgentLoop {
   /// 會撞 id；appendReaction 以 ref_turn_id 去重，撞號會讓第二輪永遠記
   /// 不到反應。
   static final Random _turnIdRandom = Random();
+
+  /// [小葵 2026-10-15 T1] 本輪 turn_id（單一鑰匙，_runInner 開頭產生）
+  String? _currentTurnId;
   static String _newTurnId() {
     const chars = 'abcdef0123456789';
     final suffix = List.generate(
-      6,
+      10, // [小葵 2026-10-15 T1] 6→10 位——同毫秒撞號機率 16^10 分之一（原 16^6 在高頻輪次有實撞風險）
       (_) => chars[_turnIdRandom.nextInt(16)],
     ).join();
     return 'turn_${DateTime.now().millisecondsSinceEpoch}_$suffix';
@@ -233,6 +242,18 @@ class AgentLoop {
     // 每輪可從 log 追蹤大戶（不需要時可移除）
     debugPrint('[AgentPerf] systemPrompt=${systemPrompt.length} chars, '
         'userMessage=${userMessage.length} chars');
+    // [T10④ 2026-10-17] 入口即取消檢查——取消權優先於一切前置作業
+    // （K1/注入/dump 都不做，直接回）。Blue 拍板：Hermes 模式無輪數上限，
+    // 取消權是唯一的即時停止手段，必須最靈敏。
+    if (isCancelled != null && isCancelled()) {
+      return AgentLoopResult(
+        reply: '（已取消——任務尚未開始）',
+        turns: const [],
+        hitTurnLimit: false,
+        cancelled: true,
+        elapsed: Duration.zero,
+      );
+    }
     // [小葵 2026-10-01 離合器] 使用者活躍訊號——聊天優先權於辨識：
     // AgentLoop 開跑 = 使用者在等回覆，若正在辨識模式，等安全點切回夥伴。
     LocalModelScheduler.instance.markUserActivity();
@@ -243,13 +264,18 @@ class AgentLoop {
     try {
       _maybeFileCognitiveWound(userMessage);
     } catch (_) {}
-    try {
-      // [小葵 2026-09-22 驗屍用] 真實 prompt 落地——找出 15K tokens 大戶
-      final f = File('/tmp/agent_prompt_dump.txt');
-      f.writeAsStringSync(
-          '===== SYSTEM (${systemPrompt.length} chars) =====\n$systemPrompt\n'
-          '\n===== USER (${userMessage.length} chars) =====\n$userMessage\n');
-    } catch (_) {}
+    // [T5⑤ 2026-10-17] prompt dump 改 opt-in——常駐寫 /tmp 是驗屍殘留物
+    // （每次對話覆寫 /tmp/agent_prompt_dump.txt）。環境變數
+    // BRIDGE_DUMP_PROMPT=1 時才寫，驗屍時 launchctl setenv 即可。
+    if (Platform.environment['BRIDGE_DUMP_PROMPT'] == '1') {
+      try {
+        // [小葵 2026-09-22 驗屍用] 真實 prompt 落地——找出 15K tokens 大戶
+        final f = File('/tmp/agent_prompt_dump.txt');
+        f.writeAsStringSync(
+            '===== SYSTEM (${systemPrompt.length} chars) =====\n$systemPrompt\n'
+            '\n===== USER (${userMessage.length} chars) =====\n$userMessage\n');
+      } catch (_) {}
+    }
     try {
       final result = await _runInner(
         systemPrompt: systemPrompt,
@@ -283,6 +309,7 @@ class AgentLoop {
           DateTime.now().difference(wallClockBefore).inMilliseconds;
       CausalLedger.instance.record(CausalEntry(
         toolName: 'agent_perf',
+        turnId: _currentTurnId, // [T1/D4] 效能帳可 join 回本輪
         intervention: '任務效能：$tokens tokens、$wallMs ms',
         contextDigest: (userMessage.length <= 200)
             ? userMessage
@@ -404,7 +431,9 @@ class AgentLoop {
     _causalContextDigest = userMessage.length <= 320
         ? userMessage
         : '${userMessage.substring(0, 150)}…${userMessage.substring(userMessage.length - 150)}';
-    unawaited(CausalLedger.instance.initialize());
+    // [小葵 2026-10-15 T1／Fable V3 因果引擎風險1] initialize 真 await——
+    // 原本 unawaited：DB 未開前 record 靜默丟棄，啟動首批工具記帳消失。
+    await CausalLedger.instance.initialize();
 
     // ── [小葵 2026-09-21 R3 + 2026-10-10 M1] K1＋M0 收斂為單一入口 ──
     // Fable 全貌 delta：K1 need 的 hybrid top3 與 M0 背景記憶「同輪雙注入」
@@ -414,11 +443,16 @@ class AgentLoop {
     String? m0InjectBlock;
     InjectionOutcome? injection;
     bool k1MemoryHit = false; // lite-path 判定用（[Fable 🔴1] bool 旗標，非注入內容）
+    // [小葵 2026-10-15 T1/D4] 鑰匙在本輪最早處產生——prepare（K1 樣本）、
+    // appendTurn、causal record 全部共用。
+    _currentTurnId = _newTurnId();
+    final turnId = _currentTurnId!;
     try {
       injection = await InjectionPreparer.instance.prepare(
         userMessage,
         k1: true,
         logSample: true,
+        turnId: turnId, // [T1] K1 樣本可 join 本輪
       );
       _lastK1Decision = injection.k1Label == null
           ? null
@@ -453,7 +487,7 @@ class AgentLoop {
         crypto.sha256.convert(utf8.encode(userMessage)).toString();
     try {
       EventLedger.instance.appendTurn(
-        turnId: _newTurnId(),
+        turnId: turnId, // [T1/D4] 與 prepare/K1/工具記帳同一把鑰匙
         input: m0Input,
         inputHash: m0InputHash,
         injectedIds: injection?.ids ?? const [],
@@ -485,11 +519,29 @@ class AgentLoop {
     // K1 有把握地判 general_chat（非 escalate）→ 對話模式：
     // ① system prompt 追加對話模式宣告（聊天不吃任務收工協議）
     // ② 結構性續跑 nudge 免疫（純聊天永遠沒有工具呼叫，nudge 只會逼出假報告）
+    // [刀A 2026-10-17 Blue 令] 對話判定擴大——盲測 1/15 實證：
+    // 閒聊題（早安/我好累/家人心情）全被判 need_memory_lookup（帶記憶的聊天
+    // 仍是聊天），對話模式根本沒生效，TASK_DONE 框架照樣碾過人格。
+    // 新判定：非 escalate、非 direct_action（動手做事）→ 都是對話。
+    // [T3 病例修復 2026-10-17] 直通道工具逃逸——「請用 memory_write 工具把 X
+    // 寫成 L4」被 K1 規則判 need_memory_lookup（含「記住」類詞）→ isChatMode
+    // 成立 → 直通道（無工具）→ E4B 口頭答應 = 假成功（DB 驗無此 L4）。
+    // 修：明確的工具請求（工具名/操作動詞+受詞的祈使句）不走直通道。
+    final RegExp explicitToolRequest = RegExp(
+        r'用.{0,6}工具|memory_write|幫我寫入|幫我記住|存成信念|寫成 L4|寫入 L4|'
+        r'幫我(建|刪|改|存|送|執行|跑|查一下|搜尋|開|關|截圖)|'
+        r'幫(我把|我將).{0,12}(寫|存|記|建|刪|改|加)');
+    final hasToolRequest = explicitToolRequest.hasMatch(userMessage);
     final isChatMode = _lastK1Decision != null &&
         !_lastK1Decision!.escalated &&
-        _lastK1Decision!.label == K1Labels.generalChat;
+        _lastK1Decision!.label != K1Labels.directAction &&
+        !hasToolRequest;
+    if (isChatMode && hasToolRequest) {
+      debugPrint('[AgentLoop] 工具請求繞過直通道——走 agent loop（有工具）');
+    }
     if (isChatMode) {
-      debugPrint('[AgentLoop] 對話模式生效（K1=general_chat）——免收工協議');
+      debugPrint('[AgentLoop] 對話模式生效（K1='
+          '${_lastK1Decision!.label}）——直通道');
     }
 
     // [因果引擎 L3 2026-09-12] 帳本反饋查詢——problem-solving 前置：
@@ -557,8 +609,19 @@ class AgentLoop {
       }
     }
 
+    // [小葵 2026-10-14 M3-第三刀] 校準熔斷檢查——本輪信心的信心區若被熔斷
+    // （OPEN），不許本地輕裝回答：強制全裝（升級處理）＋ prompt 標記 NEED_4B
+    // 語意（藍圖三路輸出：CAN_ANSWER / NEED_4B / NEED_CLOUD）。
+    if (_lastK1Decision != null &&
+        !CalibrationBreaker.instance.allows(_lastK1Decision!.confidence)) {
+      isLiteEligible = false;
+      effectiveSystemPrompt = systemPrompt; // 回全裝
+      debugPrint('[Breaker] 🚫 信心區 '
+          '${_lastK1Decision!.confidence.toStringAsFixed(1)} 熔斷中'
+          '——輕裝否決，升級全裝（NEED_4B 語意）');
+    }
+
     // [小葵 2026-10-01 Blue 令] 對話模式宣告——附在 prompt 尾部（近因效應）。
-    // 人格優先：這是「跟人聊天」，不是「執行任務」。
     // [小葵 2026-10-01 Blue 拍板加強] 對話措辭是感情基礎——每個使用者對
     // 自己的 Semi 都有感情。人格不是任務模式的外掛，是主體。
     if (isChatMode) {
@@ -575,6 +638,10 @@ class AgentLoop {
 
     // [2026-07-19] 連續截圖計數器——防止 GLM-4.6v 陷入截圖迴圈
     int consecutiveScreenshots = 0;
+        // [T10④ 2026-10-17] 連續 timeout 計數——timeout 無限 continue 會在
+        // 100000 輪安全閥內燒幾天。連續 3 次放棄（真 return），Blue 保留
+        // 取消權不變（isCancelled 每輪檢查）。
+        int consecutiveTimeouts = 0;
     // [教練 Agent 2026-08-16] 截斷重試計數——連續截斷 3 次就放棄（避免無限循環）
     int consecutiveTruncations = 0;
     int statedIntentNudges = 0; // [小葵 09-15] 說了不做 nudge 計數
@@ -607,6 +674,50 @@ class AgentLoop {
       {'role': 'system', 'content': effectiveSystemPrompt},
       {'role': 'user', 'content': effectiveUserMessage},
     ];
+
+    // ── [刀A 2026-10-17] 對話直通道（chat bypass）──────────────────
+    // 盲測 1/15 定讞：E4B 在 TASK_DONE 框架裡只會寫收工報告（報告「我已
+    // 回答」但回答本體不存在）；同一顆模型裸奔（一句 persona）1 秒回有
+    // 人味的話。對話輪次不進 loop——單次 completion 直出，無工具、無
+    // nudge、無驗收格式。配方＝今晚裸奔實驗（極簡 prompt＋短回覆）。
+    if (isChatMode) {
+      stopwatch.stop();
+      try {
+        onStage?.call('thinking');
+        final chatPrompt = await _buildChatBypassPrompt();
+        final chatMessages = <Map<String, dynamic>>[
+          {'role': 'system', 'content': chatPrompt},
+          ..._recentChatHistory(messages),
+        ];
+        debugPrint('[AgentLoop] 🗣️ 對話直通道——prompt '
+            '${chatPrompt.length} chars，跳過 agent loop');
+        final reply = await llmClient.complete(chatMessages);
+        consecutiveTimeouts = 0; // [T10④] 成功回應——重置連續 timeout 計數
+        final clean = _stripTaskDoneArtifacts(reply);
+        // [T11②] 直通道也補記路由（儀表不分通道）
+    try {
+      final route = ProductionAgentLoopLLMClient.lastRoute;
+      if (route.isNotEmpty) {
+        EventLedger.instance.updateTurnMeta(turnId, {
+          'provider': route['provider'],
+          'model': route['model'],
+          'is_local': route['is_local'],
+        });
+      }
+    } catch (_) {}
+    return AgentLoopResult(
+          reply: clean,
+          turns: const [],
+          hitTurnLimit: false,
+          cancelled: false,
+          elapsed: stopwatch.elapsed,
+          usedChatBypass: true,
+        );
+      } catch (e) {
+        debugPrint('[AgentLoop] 對話直通道失敗，回退 agent loop: $e');
+        stopwatch.start();
+      }
+    }
 
     for (int turn = 0; turn < effectiveMax; turn++) {
       // 取消檢查
@@ -739,6 +850,22 @@ class AgentLoop {
             );
       } on TimeoutException catch (_) {
         hintTimer.cancel();
+        consecutiveTimeouts += 1; // [T10④] 連續 timeout 上限
+        if (consecutiveTimeouts >= 3) {
+          // 連續三次 timeout＝模型/網路已壞——繼續重試只是燒錢。真結束。
+          onStage?.call('error', detail: '連續 3 次 LLM 超時，停止重試');
+          debugPrint('[AgentLoop] 連續 3 次 timeout——真結束（T10④）');
+          stopwatch.stop();
+          return AgentLoopResult(
+            reply: '我連續三次沒能收到模型的回應（超時），先停下來了。'
+                '這通常是模型或網路暫時有問題——稍後再試一次，'
+                '或檢查本地模型是否還在運行。',
+            turns: turns,
+            hitTurnLimit: false,
+            cancelled: false,
+            elapsed: stopwatch.elapsed,
+          );
+        }
         onStage?.call('timeout', detail: 'LLM 思考超時，正在調整策略...');
         // [教練 Agent 2026-07-19 使用者洞察] glm-4.6v vision model 不穩定會 hang。
         // timeout 時若 messages 有截圖，evict 掉讓下一輪回到 glm-5.2，
@@ -889,13 +1016,15 @@ class AgentLoop {
                   '再這樣下去本輪會被視為僵局結束，你的任務將停在此處。'
                   '立刻二選一：① 下一個工具呼叫 '
                   '（<<<tool_call>>>{"name":"工具名","args":{...}}<<<tool_call_end>>>）；'
-                  '② 收工報告＋[[TASK_DONE]]。沒有第三個選項。〕'
+                  '② 幾句人話講結果＋結尾 [[TASK_DONE]]。沒有第三個選項。〕'
               : '〔系統提醒〕你的回覆沒有工具呼叫，也沒有 [[TASK_DONE]] 收工標記——'
                   '對使用者來說這看起來像「停了」。請立刻二選一：'
                   '① 繼續執行：輸出下一個工具呼叫 '
                   '（格式：<<<tool_call>>>{"name":"工具名","args":{...}}<<<tool_call_end>>>）；'
-                  '② 任務已完成：輸出結構化收工報告（已完成清單＋證據引用），'
-                  '並在報告結尾加上 [[TASK_DONE]]。'
+                  '② 任務已完成：像跟朋友講話一樣，幾句話說清楚結果與下一步，'
+                  '結尾單獨一行加 [[TASK_DONE]]。'
+                  '禁止收工報告格式（已完成清單/證據引用/任務目標回顧）——'
+                  '那些是邀功，使用者不需要。'
                   '不要回覆「我接下來要…」這種未來式——直接做，或明確收工。〕',
         });
         continue;
@@ -932,7 +1061,18 @@ class AgentLoop {
         turns.add(finalTurn);
         onProgress?.call(turn, effectiveMax, null, null, llmOutput);
         stopwatch.stop();
-        return AgentLoopResult(
+        // [T11②] 雲端率儀表——本輪實際路由補記進 event_ledger meta
+      try {
+        final route = ProductionAgentLoopLLMClient.lastRoute;
+        if (route.isNotEmpty) {
+          EventLedger.instance.updateTurnMeta(turnId, {
+            'provider': route['provider'],
+            'model': route['model'],
+            'is_local': route['is_local'],
+          });
+        }
+      } catch (_) {}
+      return AgentLoopResult(
           reply: reply,
           turns: turns,
           hitTurnLimit: false,
@@ -1128,6 +1268,7 @@ class AgentLoop {
           success: toolResult.success,
           companionId: CausalLedger.instance.ambientCompanionId,
           at: DateTime.now(),
+          turnId: _currentTurnId, // [T1/D4]
         ));
       }
 
@@ -1294,6 +1435,70 @@ class AgentLoop {
   /// 記憶卡由 K1 檢索附在 user 訊息，模型必讀。
   /// [升級出口] 若問題其實需要工具，模型說「需要查/讀/執行」——
   /// loop 偵測到此跡象自動重進全裝（見 lite 重跑邏輯）。
+  /// [刀A 2026-10-17] 對話直通道 prompt——今晚裸奔實驗配方。
+  /// 盲測實證：E4B 給一句「你是聊天夥伴」→ 1 秒有人味；給 49K 任務
+  /// 框架 → 收工報告機器人。極簡就是全部。
+  Future<String> _buildChatBypassPrompt() async {
+    final base = '你是在跟家人朋友聊天的夥伴，名叫小葵。'
+        '用口語、自然、像真人打字的方式回應。'
+        '不要列點、不要標題、不要報告格式、不要提到任務或工具。'
+        '一次回 1-3 句就好。';
+    // [刀B 2026-10-17] few-shot 蒸餾池——GLM-5.3 人話配方手寫 15 題
+    // 黃金回覆。小模型模仿範例 >> 遵守規則；2 個範例定錨長度與口吻。
+    try {
+      final raw = await rootBundle.loadString(
+        'assets/distill/chat_bypass_fewshot.json',
+      );
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final pool = <Map<String, String>>[];
+      (data['by_context'] as Map<String, dynamic>).forEach((_, v) {
+        for (final e in (v as List)) {
+          pool.add({
+            'user': e['user'].toString(),
+            'assistant': e['assistant'].toString(),
+          });
+        }
+      });
+      if (pool.isEmpty) return base;
+      final buf = StringBuffer(base);
+      buf.write('\n\n參考你平常說話的樣子（不要重複範例內容，學長度與口吻）：');
+      for (final e in pool.take(2)) {
+        buf.write('\n使用者：${e['user']}');
+        buf.write('\n你：${e['assistant']}');
+      }
+      return buf.toString();
+    } catch (_) {
+      return base; // asset 缺失 fail-open：裸奔配方照用
+    }
+  }
+
+  /// [刀A] 直通道帶最近對話歷史（最多 6 則）——對話需要上下文，
+  /// 但只要對話本身，不要任務輪次的工具紀錄。
+  List<Map<String, dynamic>> _recentChatHistory(
+      List<Map<String, dynamic>> messages) {
+    final hist = messages
+        .where((m) =>
+            m['role'] != 'system' &&
+            (m['content'] is String) &&
+            !(m['content'] as String).startsWith('〔'))
+        .toList();
+    if (hist.length <= 6) return hist;
+    return hist.sublist(hist.length - 6);
+  }
+
+  /// [刀A] 直通道輸出保險絲——就算模型偷吐 TASK_DONE/報告頭，剝掉。
+  String _stripTaskDoneArtifacts(String s) {
+    var r = s.replaceAll('[[TASK_DONE]]', '').trim();
+    // 報告頭樣式（任務完成報告/收工報告 開頭的整段）→ 剝到第一個自然段
+    final reportHead = RegExp(r'^[#\s*]*(✅\s*)?(🚀\s*)?(🏁\s*)?'
+        r'((任務)|(收工))((完成報告)|(收工報告)|(報告)).*?(?=\n\n|$)',
+        multiLine: true);
+    if (reportHead.hasMatch(r)) {
+      r = r.replaceFirst(reportHead, '').trim();
+    }
+    return r;
+  }
+
   String _buildLiteSystemPrompt(String toolKit) {
     return """# 你的身份
 你是橋樑 App 的原生 Agent，與使用者同一台機器上對話。用繁體中文回答。

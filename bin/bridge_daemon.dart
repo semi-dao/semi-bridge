@@ -252,14 +252,47 @@ class BridgeDaemon {
           .map((s) => s.trim())
           .where((s) => s.isNotEmpty)
           .toList();
-      // 有活躍連線 → 有人用 → 歸零
-      final conn = await Process.run('/bin/sh', [
-        '-c',
-        'lsof -nP -iTCP:18789 2>/dev/null | grep ESTABLISHED | wc -l',
-      ]);
-      final active = int.tryParse(conn.stdout.toString().trim()) ?? 0;
+      // [2026-09-28 修 v2] per-pid 動態檢查：
+      // 1. 找出該 llama-server 進程「正在監聽的 port」（不再寫死 18789）
+      // 2. 查有無任何進程連向這些 port（任何狀態——llama.cpp 的 HTTP 連線
+      //    生命週期與請求綁定，server 側 lsof 常看不到 ESTABLISHED）
+      // 教訓：12B bench 三死就是因為舊版寫死 18789，18790 永遠「無連線」被誤殺。
+      Future<bool> hasActiveConnection(String pid) async {
+        final listen = await Process.run('/bin/sh', [
+          '-c',
+          "lsof -nP -iTCP -sTCP:LISTEN -a -p $pid 2>/dev/null | awk '{print \$9}' | grep -oE '[0-9]+\$' | sort -u",
+        ]);
+        final ports = listen.stdout
+            .toString()
+            .split('\n')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+        if (ports.isEmpty) return false; // 找不到監聽 port → 視為無連線
+        // 用 Dart 端精確過濾取代 shell grep regex（避免 $ 插值衝突）：
+        // lsof NAME 欄格式「127.0.0.1:52042->127.0.0.1:18789」或「*:18789」
+        final allConn = await Process.run('/bin/sh', [
+          '-c',
+          'lsof -nP -iTCP 2>/dev/null',
+        ]);
+        final lines = allConn.stdout.toString().split('\n');
+        for (final p in ports) {
+          final suffix = ':$p';
+          final hit = lines.any((l) {
+            if (l.contains('LISTEN')) return false;
+            // NAME 欄含 ->suffix 結尾（client → server）或 suffix-> 開頭（server 端）
+            final idx = l.indexOf('->');
+            return idx >= 0 &&
+                (l.substring(idx).startsWith(suffix) ||
+                    l.contains('$suffix->'));
+          });
+          if (hit) return true;
+        }
+        return false;
+      }
       for (final pidStr in pids) {
-        if (active > 0) {
+        if (await hasActiveConnection(pidStr)) {
+          // 有活躍連線 → 有人用 → 歸零
           _orphanIdleStrikes.remove(pidStr);
           continue;
         }

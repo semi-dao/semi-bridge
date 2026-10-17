@@ -5,8 +5,13 @@
 // 設計文件: semicanvas-design.md §2.2-2.4
 
 import 'dart:async';
+import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:dio/dio.dart';
 import 'package:bridge_app/models/entity_graph/entity.dart';
 import 'package:bridge_app/services/semicanvas/workflow_executor.dart';
+import 'package:bridge_app/services/capability/capability_executor.dart'; // [T10①] vision/characterLock headless
 import 'package:bridge_app/services/vault/vault_service.dart'; // [教練 Agent 2026-08-16] knowledge 節點檢索
 import 'package:bridge_app/services/routines/system_routine_store.dart'; // [Blue 拍板] 招式
 import 'package:bridge_app/services/routines/system_routine_player.dart'; // [Blue 拍板] 招式
@@ -184,14 +189,134 @@ class WorkflowNodeAdapters {
           output: '排程: ${params['scheduleType'] ?? 'daily'} ${params['time'] ?? ''}',
         );
       case WorkflowNodeType.vision:
+        // [T10① 2026-10-17 headless 執行器] vision 收編——與畫布原生同路
+        // （CapabilityExecutor.instance，不需 UI）。原本排程路徑直接失敗
+        // 「請使用畫布原生執行器」，schedule_runs.jsonl 30 筆全是這個病。
+        return _executeVision(nodeId, params, upstreamData);
       case WorkflowNodeType.characterLock:
-        // 請使用畫布原生執行器
-        return NodeExecutionResult(
-          nodeId: nodeId,
-          success: false,
-          errorMessage: '請使用畫布原生執行器',
-        );
+        // [T10①] characterLock 收編——上游參考圖＋prompt 生成風格一致圖
+        return _executeCharacterLock(nodeId, params, upstreamData);
     }
+  }
+
+  /// [T10①] Vision 節點 headless 執行——邏輯移植自 canvas_v2_workspace
+  /// （1769-1852 行），走 CapabilityExecutor 與原生同路。
+  Future<NodeExecutionResult> _executeVision(
+    String nodeId,
+    Map<String, dynamic> params,
+    UpstreamData upstreamData,
+  ) async {
+    final promptText = params['prompt']?.toString() ?? '描述這張圖片';
+    final serviceId = params['serviceId']?.toString();
+    final base64Image = upstreamData.firstBase64Image;
+    final imageUrl = upstreamData.firstImageUrl;
+
+    // 原圖直通：無上游連線時 params['image'] 檔案路徑＝源頭
+    Uint8List? passthroughImage;
+    if (base64Image == null && imageUrl == null) {
+      final localPath = params['image']?.toString();
+      if (localPath != null && localPath.isNotEmpty) {
+        try {
+          passthroughImage = await File(localPath).readAsBytes();
+        } catch (_) {
+          passthroughImage = null;
+        }
+      }
+    }
+    if (base64Image == null && imageUrl == null && passthroughImage == null) {
+      return NodeExecutionResult.failure(
+          nodeId, 'Vision 節點需要上游有圖片輸入，請連接 ImageGen 或 Input 節點');
+    }
+
+    if (serviceId != null && serviceId.isNotEmpty) {
+      String b64 = base64Image ?? '';
+      if (b64.isEmpty && imageUrl != null) {
+        try {
+          final imgResp = await Dio().get<List<int>>(imageUrl,
+              options: Options(responseType: ResponseType.bytes));
+          b64 = base64.encode(imgResp.data ?? []);
+        } catch (e) {
+          return NodeExecutionResult.failure(nodeId, '下載圖片失敗: $e');
+        }
+      }
+      final capResult = await CapabilityExecutor.instance.analyzeImage(
+        serviceId: serviceId,
+        prompt: promptText,
+        base64Image: b64,
+      );
+      if (capResult.success) {
+        return NodeExecutionResult.withImage(nodeId, capResult.text ?? '',
+            imageData: passthroughImage);
+      }
+      return NodeExecutionResult.failure(
+          nodeId, capResult.error ?? '圖片理解失敗');
+    }
+
+    // 無 serviceId——原圖照樣直通（與畫布原生同款 fallback）
+    if (passthroughImage != null) {
+      return NodeExecutionResult.withImage(
+          nodeId, '（未選服務——原圖直通，未分析）', imageData: passthroughImage);
+    }
+    return NodeExecutionResult.failure(nodeId, '請在節點設定中選擇「服務」');
+  }
+
+  /// [T10①] CharacterLock 節點 headless 執行——上游參考圖＋prompt 圖生圖
+  Future<NodeExecutionResult> _executeCharacterLock(
+    String nodeId,
+    Map<String, dynamic> params,
+    UpstreamData upstreamData,
+  ) async {
+    // prompt 模板插值（{input}/{upstream} → 上游文字）
+    final promptRaw = params['prompt']?.toString() ?? '';
+    final upstreamText = upstreamData.combinedText;
+    var promptText = promptRaw;
+    if (promptRaw.contains('{input}') || promptRaw.contains('{upstream}')) {
+      promptText = promptRaw
+          .replaceAll('{input}', upstreamText)
+          .replaceAll('{upstream}', upstreamText);
+    }
+    final serviceId = params['serviceId']?.toString();
+    final size = params['size']?.toString();
+
+    final base64Ref = upstreamData.firstBase64Image;
+    final imageUrl = upstreamData.firstImageUrl;
+    if (base64Ref == null && imageUrl == null) {
+      return NodeExecutionResult.failure(nodeId, '角色一致性節點需要上游有參考圖片');
+    }
+
+    String b64Ref = base64Ref ?? '';
+    if (b64Ref.isEmpty && imageUrl != null) {
+      try {
+        final imgResp = await Dio().get<List<int>>(imageUrl,
+            options: Options(responseType: ResponseType.bytes));
+        b64Ref = base64.encode(imgResp.data ?? []);
+      } catch (e) {
+        return NodeExecutionResult.failure(nodeId, '下載參考圖失敗: $e');
+      }
+    }
+
+    if (serviceId != null && serviceId.isNotEmpty) {
+      final capResult =
+          await CapabilityExecutor.instance.generateImageWithReference(
+        serviceId: serviceId,
+        prompt: promptText,
+        base64ReferenceImage: b64Ref,
+        size: size,
+      );
+      if (capResult.success) {
+        return NodeExecutionResult.withImage(
+          nodeId,
+          capResult.localFilePath != null
+              ? '角色一致性圖片已生成\n路徑: ${capResult.localFilePath}'
+              : '角色一致性圖片已生成',
+          imageData: capResult.imageData,
+          imageUrl: capResult.imageUrl,
+        );
+      }
+      return NodeExecutionResult.failure(
+          nodeId, capResult.error ?? '角色一致性生成失敗');
+    }
+    return NodeExecutionResult.failure(nodeId, '請在節點設定中選擇「服務」');
   }
 
   /// LLM 節點 — 呼叫 LLM 進行推論

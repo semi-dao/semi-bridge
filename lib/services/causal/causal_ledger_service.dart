@@ -126,6 +126,7 @@ class CausalEntry {
   final bool success;
   final String? companionId;
   final DateTime at;
+  final String? turnId; // [小葵 2026-10-15 T1/D4] 五本記錄共同鑰匙
 
   const CausalEntry({
     this.id,
@@ -136,6 +137,7 @@ class CausalEntry {
     required this.success,
     this.companionId,
     required this.at,
+    this.turnId,
   });
 }
 
@@ -179,14 +181,30 @@ class CausalLedger {
           observed_outcome TEXT NOT NULL,
           success INTEGER NOT NULL,
           companion_id TEXT,
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          turn_id TEXT  -- [小葵 2026-10-15 T1/D4] 五本記錄共同鑰匙
         )
       ''');
+      // [小葵 2026-10-15 T1] 舊表冪等補欄（live DB 已存在表——CREATE IF NOT EXISTS 不會加新欄）
+      final causalCols =
+          _db!.select('PRAGMA table_info(agent_causal_ledger)');
+      if (!causalCols.any((c) => c['name'] == 'turn_id')) {
+        _db!.execute(
+            'ALTER TABLE agent_causal_ledger ADD COLUMN turn_id TEXT');
+      }
+      _db!.execute(
+          'CREATE INDEX IF NOT EXISTS idx_causal_turn ON agent_causal_ledger(turn_id)');
       _db!.execute(
           'CREATE INDEX IF NOT EXISTS idx_causal_tool ON agent_causal_ledger(tool_name)');
       _db!.execute(
           'CREATE INDEX IF NOT EXISTS idx_causal_at ON agent_causal_ledger(created_at)');
       // 環形緩衝——同 BudgetLedger：足夠反哺、不無限長大
+      // [小葵 2026-10-15 T1／Fable V3 因果風險2] agent_perf 與 k1_gatekeeper
+      // 是每輪必記的「心跳帳」——不佔 2000 筆工具史環形名額（原本每輪 2 筆
+      // 會把真工具史推出環外）。心跳帳只留 500 筆。
+      _db!.execute(
+          'DELETE FROM agent_causal_ledger WHERE tool_name IN (\'agent_perf\',\'k1_gatekeeper\') '
+          'AND id <= (SELECT MAX(id) FROM agent_causal_ledger) - 500');
       _db!.execute('DELETE FROM agent_causal_ledger WHERE id <= '
           '(SELECT MAX(id) FROM agent_causal_ledger) - 2000');
     } catch (e) {
@@ -213,8 +231,8 @@ class CausalLedger {
     try {
       db.execute(
         'INSERT INTO agent_causal_ledger '
-        '(tool_name, intervention, context_digest, observed_outcome, success, companion_id, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        '(tool_name, intervention, context_digest, observed_outcome, success, companion_id, created_at, turn_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [
           entry.toolName,
           entry.intervention.substring(0, entry.intervention.length > 500 ? 500 : entry.intervention.length),
@@ -223,6 +241,7 @@ class CausalLedger {
           entry.success ? 1 : 0,
           entry.companionId,
           entry.at.toIso8601String(),
+          entry.turnId, // [T1/D4] 與 event_ledger/correction_events 等可 join
         ],
       );
     } catch (e) {

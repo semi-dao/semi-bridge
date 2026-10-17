@@ -11,12 +11,10 @@
 //  5. 回寫 topic_terms（品種→物種關聯——從同層兄弟資料夾推導）
 
 import 'dart:convert';
-
-import 'package:dio/dio.dart';
 import 'dart:io';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
+import 'package:crypto/crypto.dart' as crypto;
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../brain_container/brain_database.dart';
@@ -24,6 +22,45 @@ import '../brain_container/brain_database.dart';
 class VectorSketchService {
   VectorSketchService._();
   static final VectorSketchService instance = VectorSketchService._();
+
+  // ═════════════════════════════════════════════════════════
+  // [小葵 2026-10-14 Blue 拍板「素描浪費修復」] 反重複工四問——
+  // 「輸入沒變跳過」的兩個純邏輯件（可測、無 DB 依賴）。
+  // ═════════════════════════════════════════════ brain_meta key
+  static const _distillFpKey = 'vector_sketch_distill_fingerprint';
+
+  /// 依賴樹/建置產物——不值得 LLM 分類、也永不會被 LLM 消化
+  /// （2026-10-14 實證：2,355 個 NULL 群全卡在這類路徑＝無限重試迴圈）。
+  /// 大小寫不敏感；路徑任一段命中即垃圾。
+  /// [小葵 2026-10-14] 從 @visibleForTesting 升格公開 API——
+  /// 已是四層共用規則（素描/fastScan/vault 列表/星系），不該再是測試限定。
+  static bool isJunkFolder(String folderPath) {
+    final segs = folderPath.split('/').map((s) => s.toLowerCase()).toList();
+    for (final s in segs) {
+      if (s == 'venv' || s.startsWith('venv')) return true; // venv / venv311
+      if (s == 'site-packages') return true;
+      if (s == 'node_modules' || s == '__pycache__' || s == '.git') return true;
+      if (s == 'pods' || s == '.dart_tool' || s == 'ephemeral') return true;
+      if (s.endsWith('.xcodeproj') || s.endsWith('.xcworkspace')) return true;
+    }
+    // [小葵 2026-10-14 Blue 報案大腦圖譜橘星二波段] 04-備份底下的封存 build
+    // 產物（.pcm/.dia/.d/.scan 共 1.7 萬顆橘星）——build/macos 組合特徵。
+    // 注意：只認 'build/macos' 與 'Build/Products' 組合，不認單獨 'build'
+    // （自己的 repo build/ 也是 junk 但 vault roots 不含 repo，這裡從寬）。
+    final lower = folderPath.toLowerCase();
+    if (lower.contains('/build/macos/') || lower.startsWith('build/macos/') ||
+        lower.contains('build/products/')) return true;
+    return false;
+  }
+
+  /// 蒸餾輸入指紋：未分類（非垃圾）清單排序 hash＋總資產數。
+  /// 輸入沒變 → LLM 蒸餾整段跳過（腦節流）。
+  @visibleForTesting
+  static String distillFingerprint(List<String> unclassified, int totalAssets) {
+    final joined = ([...unclassified]..sort()).join('\u0000');
+    final bytes = utf8.encode('$joined\u0000$totalAssets');
+    return crypto.sha1.convert(bytes).toString();
+  }
 
   static const _sketchPath =
       '06_AI協作與知識庫/向量資料素描.md'; // 寫到知識庫根（記憶區）
@@ -139,12 +176,7 @@ class VectorSketchService {
       debugPrint('[VectorSketch] memories 寫入失敗: $e');
     }
     try {
-      // [小葵 2026-09-25 開源整備] 原寫死 ~/Developer/bridge_app/docs/——
-      // 開發者機器沒這路徑，會憑空創目錄。改寫到使用者自己的 AppSupport
-      // 知識庫（跨平台、無中文檔名 git 混亂），repo 的 docs/ 只留匯出範本。
-      final supportDir = await getApplicationSupportDirectory();
-      final f = File(p.join(supportDir.path, 'sketch', 'vector_sketch.md'));
-      await f.create(recursive: true);
+      final f = File('<HOME>/Developer/bridge_app/docs/向量資料素描.md');
       await f.writeAsString(md);
       debugPrint('[VectorSketch] ✅ 素描寫檔 ${f.path}');
     } catch (e) {
@@ -236,11 +268,50 @@ class VectorSketchService {
         "WHERE category IS NULL OR category = ''")) {
       unclassified.add(row['folder_path'] as String);
     }
+
+    // [小葵 2026-10-14 反重複工] 垃圾過濾——依賴樹/建置產物永不送 LLM，
+    // 規則層直接標「系統依賴檔案」消化掉（2,355 個 NULL 群的無限重試源頭）。
+    var junkMarked = 0;
+    unclassified.removeWhere((g) {
+      if (!isJunkFolder(g)) return false;
+      db.execute(
+        "UPDATE folder_origin SET category = '系統依賴檔案' "
+        "WHERE folder_path = ? AND (category IS NULL OR category = '')",
+        [g],
+      );
+      junkMarked++;
+      return true;
+    });
+    if (junkMarked > 0) {
+      debugPrint('[VectorSketch] 垃圾過濾：$junkMarked 群標「系統依賴檔案」（不送 LLM）');
+    }
+
     if (unclassified.isEmpty) return;
+
+    // [小葵 2026-10-14 反重複工] 指紋快取——輸入沒變整段跳過
+    //（之前：每次增量匯入都全量重送 LLM＝E4B 連忙數小時的元兇）。
+    final totalAssets =
+        db.select('SELECT COUNT(*) AS n FROM asset_index').first['n'] as int;
+    final fp = distillFingerprint(unclassified.toList(), totalAssets);
+    final prevFpRow = db.select(
+      "SELECT value FROM brain_meta WHERE key = ?",
+      [_distillFpKey],
+    );
+    if (prevFpRow.isNotEmpty && prevFpRow.first['value'] == fp) {
+      debugPrint('[VectorSketch] 蒸餾指紋未變，跳過 LLM（${unclassified.length} 群維持待分類）');
+      return;
+    }
+
     debugPrint('[VectorSketch] LLM 蒸餾：${unclassified.length} 群待分類');
 
     const batchSize = 10;
     for (var i = 0; i < unclassified.length; i += batchSize) {
+      // [小葵 2026-10-14 反重複工] 負載感知——滿載就中止本輪且不存指紋，
+      // 下次匯入自然重試（避免跟使用者對話/盲測搶 slot）。
+      if (!await _llmHasCapacity()) {
+        debugPrint('[VectorSketch] E4B 滿載，中止本輪蒸餾（指紋不存，下次重試）');
+        return;
+      }
       final batch = unclassified.skip(i).take(batchSize).toList();
       // [小葵 2026-09-09] 既有 folder_origin 行不在本輪 groups map——
       // groups[g]! 直接炸（null check）被外層 fail-open 吞掉。防 null。
@@ -304,6 +375,33 @@ class VectorSketchService {
         debugPrint('[VectorSketch] LLM 批次失敗（跳過續跑）: $e');
       }
       await Future.delayed(const Duration(milliseconds: 500));
+    }
+
+    // 蒸餾跑完才存指紋（中途滿載中止/失敗都不存——下次自然重試）
+    db.execute(
+      "INSERT OR REPLACE INTO brain_meta (key, value, updated_at) "
+      "VALUES (?, ?, ?)",
+      [_distillFpKey, fp, DateTime.now().toIso8601String()],
+    );
+  }
+
+  /// [小葵 2026-10-14 反重複工] 負載感知——本地 E4B 有沒有空。
+  /// 查 /slots：閒置 slot ≥1 才接活；查不到（server 不在）也回 false。
+  Future<bool> _llmHasCapacity() async {
+    try {
+      final resp = await Dio().get(
+        'http://127.0.0.1:18789/slots',
+        options: Options(
+          sendTimeout: const Duration(seconds: 5),
+          receiveTimeout: const Duration(seconds: 5),
+        ),
+      );
+      if (resp.statusCode != 200) return false;
+      final slots = (resp.data as List).cast<Map<String, dynamic>>();
+      final idle = slots.where((s) => s['is_processing'] != true).length;
+      return idle >= 1;
+    } catch (_) {
+      return false;
     }
   }
 

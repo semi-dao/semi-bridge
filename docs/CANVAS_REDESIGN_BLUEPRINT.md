@@ -1,9 +1,5 @@
 # V2 畫布改版工程藍圖 v1.0（2026-08-15）
 
-![畫布工作流實例：角色設定圖組](screenshots/canvas-workflow.webp)
-
-<sub>真實工作流截圖：角色描述 → 風格參考 → 角色拼接 → Vision 分析 → 多視角生成 → 設定圖組輸出。9 節點、13 連線，Agent 對測試結果的自我檢查也在右側對話裡。</sub>
-
 > 依據：三路深度體檢（互動層/controller/節點執行）× ComfyUI 架構研究 × 使用者痛點 × 2026 節點編輯器趨勢
 
 ## 體檢發現總覽
@@ -62,7 +58,7 @@
 | 刪節點保留連線 | Keep all links（自動 rewire） | 🔴 值得抄 |
 | Ctrl+G | 群組 frame | 🔴（Phase 4+） |
 
-**極客大神優化提案**（2026 檢閱：React Flow 12 / ComfyUI Nodes 2.0 / 業界畫布慣例）：
+**極客大神優化提案**（2026 檢閱：React Flow 12 / ComfyUI Nodes 2.0 / Figma-Miro 慣例）：
 
 | 提案 | 來源 | 採用決定 |
 |---|---|---|
@@ -70,7 +66,7 @@
 | **Easy Connect（整節點邊緣可接線）** | React Flow 官方範例 | 📌 評估中——節點整條左/右邊都是把手，不再只有小圓點 |
 | Delete Middle Node（刪中間節點自動 rewire） | React Flow 官方範例 | ✅ 已在校準表（同 ComfyUI Keep all links） |
 | Helper Lines 對齊線＋吸附 | React Flow Pro | 📌 Phase 2 排隊（排版整齊感） |
-| Space 按住平移（業界標準） | 畫布工具慣例 | ✅ 補進快捷鍵批次 |
+| Space 按住平移（Figma/Miro 標準） | Figma 慣例 | ✅ 補進快捷鍵批次 |
 | Mini Map 小地圖 | ComfyUI 2026 前端 | 📌 大畫布導航用，Phase 4 |
 | Subgraph 子圖（選取打包成超級節點） | ComfyUI 穩定版 | 📌 Phase 4+（等同我們 subWorkflow 節點的 UI 化） |
 | **Linear Mode 線性模式**（畫布↔清單雙視圖） | ComfyUI Nodes 2.0 路線圖 | 💡 長期——我們的 chat_panel 已是雛形，未來可做「畫布⇄對話」同步切換 |

@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import '../brain_container/embedding/embedding_service.dart';
 import '../causal/causal_ledger_service.dart';
 import 'decision_head.dart';
+import '../api_service.dart'; // [T5①] escalate zero-shot 走路由層（localOnly→E4B）
 
 /// K1 守門員
 class K1Gatekeeper {
@@ -104,11 +105,58 @@ class K1Gatekeeper {
     return d;
   }
 
+  /// [T5① 2026-10-17] escalate 有去處——E4B zero-shot 判 lookup/skip。
+  /// 線性頭不自信（conf<0.7 或 margin 薄）或沒頭時，用一次 LLM 判斷
+  /// 「這句話需不需要查記憶」，結果 source=escalate_llm 落帳。
+  /// 失敗 fail-open：保守查記憶（need_memory_lookup）——寧可多查，
+  /// 不可漏查。
+  Future<K1Decision> escalateResolve(String message,
+      {String? turnId}) async {
+    try {
+      final reply = await ApiService.complete(
+        systemPrompt: '你是分類器。判斷使用者這句話需要「查閱過去的記憶/歷史'
+            '紀錄」才能回答嗎？只想 yes 或 no。\n'
+            '例子：「我們上次去哪裡？」→ yes。「今天天氣真好」→ no。\n'
+            '「幫我記住…」→ yes。「你好嗎？」→ no。',
+        userPrompt: message,
+        extraApiParams: {'temperature': 0.0, 'max_tokens': 8},
+      );
+      final wants = reply.trim().toLowerCase().startsWith('y') ||
+          reply.contains('yes') ||
+          reply.contains('要') ||
+          reply.contains('需');
+      final d = K1Decision(
+        label: wants ? K1Labels.needMemoryLookup : K1Labels.generalChat,
+        confidence: 0.9,
+        margin: 0.8,
+        escalated: false,
+        source: 'escalate_llm',
+      );
+      logSample(message, d, outcome: 'escalate→LLM: $wants', turnId: turnId);
+      return d;
+    } catch (e) {
+      debugPrint('[K1] escalate zero-shot 失敗（fail-open 保守查記憶）: $e');
+      final d = const K1Decision(
+        label: K1Labels.needMemoryLookup,
+        confidence: 0.0,
+        margin: 0.0,
+        escalated: false,
+        source: 'escalate_failopen',
+      );
+      logSample(message, d, outcome: 'escalate→失敗保守', turnId: turnId);
+      return d;
+    }
+  }
+
   /// 樣本入 ledger（judge 事件——R3 樣本管線）
-  void logSample(String message, K1Decision d, {String? outcome}) {
+  /// [小葵 2026-10-15 T1/D4] turnId 參數——與 event_ledger 同輪可 join
+  /// （T2 自訓練迴路靠這個鍵把 K1 判斷 × 事後反應接起來）。
+  void logSample(String message, K1Decision d,
+      {String? outcome, String? turnId}) {
     try {
       CausalLedger.instance.record(CausalEntry(
         toolName: 'k1_gatekeeper',
+        turnId: turnId, // [T1/D4]
         intervention: 'K1 判斷：${d.label}（conf=${d.confidence.toStringAsFixed(2)} source=${d.source}）',
         contextDigest: message.substring(0, message.length > 300 ? 300 : message.length),
         observedOutcome: outcome ??

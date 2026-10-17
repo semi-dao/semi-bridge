@@ -13,14 +13,6 @@ __pycache__/
 .swiftpm/
 migrate_working_dir/
 
-# 內部工作區（開發機專用，不進 repo）
-/.hermes/
-/docs/specs/2026-09-21-morning-tea-web.md
-morning-tea/
-
-# 測試自動生成報告（跑測試會重寫）
-/test/reports/
-
 # IntelliJ related
 *.iml
 *.ipr
@@ -58,5 +50,31 @@ assets/fonts/_retired/
 # [小葵 2026-09-23] LiteRT dylib 從 build 產物複製（測試環境 fallback 路徑）——不進 git
 native/litert_lm/prebuilt/
 
-# Coverage/profile artifacts
-*.profraw
+# [小葵 2026-09-25] 向量素描自動生成檔——App 每次重嵌都會重寫，git 不追蹤（本體在 DB memories 表）
+docs/向量資料素描.md
+# [2026-10-06] 插槽運行期資料（App Support 才是正確落點；repo 內殘留是
+# 舊相對路徑 fallback 產物，勿入庫）
+/slots/
+
+# [小葵 2026-10-09] S線訓練環境重建（蕩機案後遺症）：venv 與上游原始碼 clone
+# 不入庫——訓練資料/腳本/設定才入庫。禁再放 /tmp（重啟即蒸發，10-09 實犯）。
+/training/.venv/
+/training/third_party/
+training/semi_s15/semi-checkpoint-v1/
+training/semi_s15/semi-checkpoint-v2/
+training/semi_s15/semi-checkpoint-v3/
+training/semi_s15/semi-checkpoint-v4/
+training/semi_s15/semi-checkpoint-v5/
+
+# Spike 沙盒不 commit 腦庫備份
+spikes/**/*.db
+spikes/**/*.db-shm
+spikes/**/*.db-wal
+
+# [小葵 2026-10-15] 訓練產物不入 repo（842MB safetensors 慘案）
+training/**/semi-checkpoint-*/
+training/**/*.safetensors
+
+# [V0.5 收官 2026-10-17] 訓練資產與 agent skills——不進開源 repo
+/training/
+/skills/

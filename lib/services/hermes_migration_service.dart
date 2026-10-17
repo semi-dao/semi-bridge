@@ -114,7 +114,7 @@ class ScanFindings {
 
 /// 大搬家服務——掃描 Hermes 目錄、產出遷移清單、執行搬遷
 class HermesMigrationService {
-  static final hermesHome = resolveDevPath('~/.hermes');
+  static const hermesHome = '<HOME>/.hermes';
 
   /// 掃描貨源，產出遷移清單（不寫任何東西）
   Future<List<MigrationItem>> scan() async {

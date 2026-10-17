@@ -71,7 +71,7 @@ void main() {
       SecondBrainFileEntry(
         id: 'second-brain-architecture',
         title: '第二大腦架構.md',
-        path: '/data/docs/第二大腦架構.md',
+        path: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
         room: SecondBrainRoom.projects,
         summary: '定義六大房間、AI Agent 共用記憶與檔案立體檢索。',
         tags: const ['第二大腦', '檔案索引'],
@@ -93,7 +93,7 @@ void main() {
     expect(trace.recalledMemories.single.sourceLabel, '第二大腦架構.md');
     expect(
       trace.recalledMemories.single.sourcePath,
-      '/data/docs/第二大腦架構.md',
+      '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
     );
     expect(trace.recalledMemories.single.tags, contains('計畫房間'));
     expect(
@@ -115,7 +115,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'generic-bridge',
           title: '正式橋總覽.md',
-          path: '/data/docs/正式橋總覽.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/正式橋總覽.md',
           room: SecondBrainRoom.bridges,
           summary: '正式橋能力 adapter 訊號中心。',
           indexedAt: DateTime(2026, 2),
@@ -126,7 +126,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'news-return-door',
           title: '新聞橋回流門.md',
-          path: '/data/docs/新聞橋回流門.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/新聞橋回流門.md',
           room: SecondBrainRoom.bridges,
           summary: '新聞橋 adapter 完成訊號會回到原本卡點。',
           tags: const ['新聞橋', 'adapter', '回流門'],

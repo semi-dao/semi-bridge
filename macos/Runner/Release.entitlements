@@ -40,6 +40,12 @@
 	<key>com.apple.security.files.removable-volumes</key>
 	<true/>
 
+	<!-- 外接硬碟存取（DB + 原始碼 + 農場資料都在 /Volumes/DATA） -->
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
+	<array>
+		<string>/Volumes/DATA/</string>
+	</array>
+
 	<!-- Keychain -->
 	<key>com.apple.security.keychain-access-groups</key>
 	<array>

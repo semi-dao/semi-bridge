@@ -30,6 +30,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
   final String? model;
+
+  /// [T11② 2026-10-17] 最近一次路由結果——雲端率儀表資料源。
+  /// AgentLoop 在輪次結束後讀取並 updateTurnMeta 進 event_ledger。
+  static Map<String, dynamic> lastRoute = {};
   ApiCompletionReceipt? _lastReceipt;
 
   /// [教練 Agent 2026-08-08] 輪數計數器——追蹤 complete() 被呼叫幾次
@@ -61,6 +65,14 @@ class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
     _callCount++;
     final userProvider = await StorageService.getProvider();
 
+    // [T7④ 補刀 2026-10-16] localOnly 否決明選雲端——與 chat_controller 同步
+    // （盲測實證：明選 openai+失效 token 繞過路由層，localOnly 必須全域一票否決）
+    if (await StorageService.getLocalOnly()) {
+      final localModel = await StorageService.getApiModel(provider: 'local');
+      _logTrace('local_only_veto', 'local', localModel ?? '');
+      return localModel;
+    }
+
     // 使用者明確選了雲端 provider → 鎖定（不套階梯）
     if (userProvider != null &&
         userProvider != 'local' &&
@@ -86,7 +98,7 @@ class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
       // [教練 Agent 2026-08-09] macOS 上 token 存在 SharedPreferences，不是 secure storage
       // key 格式：api_token_v2_<provider>，model 格式：api_model_<provider>
       final prefs = await SharedPreferences.getInstance();
-      final knownCloudProviders = ['glm', 'openai', 'kimi', 'gemini', 'claude'];
+      final knownCloudProviders = ProviderRouter.cloudFallbackOrder; // [T7⑤] 統一常數
       // 階梯模式首選：根據有 token 的 provider 順序，找第一個階梯裡有 key 的
       for (final pid in knownCloudProviders) {
         final token = prefs.getString('api_token_v2_$pid');
@@ -254,12 +266,62 @@ class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
 
     try {
       final result = await _completeInner(messages, resolvedModel);
+      // [T11②] 記錄實際路由（儀表資料源）
+      final provider = providerOfModel(resolvedModel);
+      lastRoute = {
+        'provider': provider,
+        'model': resolvedModel ?? 'auto',
+        'is_local': provider == 'local',
+        'ts': DateTime.now().millisecondsSinceEpoch,
+      };
       await PaidActionGate.settle(ledgerId, ok: true);
+      // [T7② 2026-10-16 編織線] 成功回饋階梯——連續失敗歸零（advance 原本接了線沒人通電）
+      _ladderFeedback(success: true, model: resolvedModel);
       return result;
     } catch (e) {
       await PaidActionGate.settle(ledgerId, ok: false, error: e.toString());
+      // [T7② 2026-10-16 編織線] 失敗回饋階梯——advance() 決定升一階或跳旗艦，
+      // 下一輪 _resolveModel() 讀 activeModel 自然吃到
+      _ladderFeedback(success: false, model: resolvedModel);
       rethrow;
     }
+  }
+
+  String? _lastRouteProvider;
+
+  /// [T11②] model 名 → provider 歸屬（儀表用，模糊前綴對映）
+  static String providerOfModel(String? m) {
+    if (m == null || m.isEmpty) return 'auto';
+    final s = m.toLowerCase();
+    if (s.startsWith('gpt') || s.startsWith('o1') || s.startsWith('o3')) return 'openai';
+    if (s.startsWith('gemini')) return 'gemini';
+    if (s.startsWith('claude')) return 'anthropic';
+    if (s.startsWith('glm')) return 'zai';
+    if (s.contains('e4b') || s.contains('gemma') || s.contains('k1') ||
+        s.contains('eg2') || s.contains('local')) return 'local';
+    return 'cloud';
+  }
+
+  // [T7② 2026-10-16 編織線] 階梯回饋通道——BrandLadderRouter.advance() 的唯一通電點
+  int _consecutiveLLMFailures = 0;
+  void _ladderFeedback({required bool success, String? model}) {
+    final routed = ProviderRouter.instance.current;
+    if (routed == null || routed.target != RoutedTarget.cloud) return; // local 無階梯
+    if (success) {
+      _consecutiveLLMFailures = 0;
+      return;
+    }
+    _consecutiveLLMFailures++;
+    final m = model ?? BrandLadderRouter.instance.activeModel;
+    if (m == null) return;
+    BrandLadderRouter.instance.advance(
+      resolvedProvider: routed.providerId,
+      currentModel: m,
+      signal: TaskSignal(
+        lastCallFailed: true,
+        consecutiveFailures: _consecutiveLLMFailures,
+      ),
+    );
   }
 
   Future<String> _completeInner(

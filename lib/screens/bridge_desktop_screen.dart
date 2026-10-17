@@ -4,7 +4,6 @@
 // 設計：xAI 氛圍 × Raycast 色彩 × Stripe 粒子 × Figma 動態 × Miro 無限畫布
 
 import '../app.dart'; // [D002 2026-08-10] appNavigatorKey
-import '../core/dev_paths.dart'; // [開源整備] 開發機路徑泛化
 import 'package:bridge_app/models/brain_container/memory_source.dart';
 import '../services/brain_revival_service.dart';
 import '../services/window_autofit_service.dart'; // [Blue 令 2026-10-05] 視窗自動適裝
@@ -108,6 +107,7 @@ import '../theme/tier_style.dart';
 import '../widgets/bridge_desktop_widgets.dart';
 import '../models/companion.dart';
 import '../widgets/brain_model_download_card.dart';
+import '../widgets/settings/embedding_model_store_card.dart';
 import '../widgets/local_llm_runtime_card.dart';
 import '../widgets/model_lab_card.dart';
 import '../widgets/system_activity_card.dart';
@@ -133,12 +133,12 @@ import '../widgets/canvas/v2/canvas_mcp_registry.dart';
 import '../screens/vault_screen.dart'; // [教練 Agent 2026-07-22] Phase 2 ④ 資料庫頁面
 import '../services/vault/vault_templates.dart'; // [教練 Agent 2026-07-23] 範本下拉選單
 
-import 'desktop/desktop_file_page.dart';
 import 'desktop/desktop_chat_panel.dart'; // [教練 Agent S22] 桌面原生聊天面板
 import 'desktop/settings/theme_settings_page.dart'; // [教練 Agent 2026-08-04] Phase E+：主題包設定
 import '../state/theme_provider.dart'; // [教練 Agent 2026-08-04] Phase E+：主題包 singleton
 import '../services/agent_loop/workflow_inspector.dart';
 import '../widgets/settings/db_location_card.dart';
+import '../widgets/settings/cloud_rate_card.dart'; // [T11②]
 import '../widgets/settings/watchdog_toggle_card.dart';
 import '../widgets/settings/data_path_overview_card.dart'; // [教練 Agent 2026-08-10] DB 路徑設定（從 settings_screen 抽出）
 import '../widgets/settings/brain_api_config_card.dart'; // [教練 Agent 2026-08-11] 主腦 API 設定（搬到金鑰匙系統）
@@ -238,6 +238,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
 
   // [Blue 拍板 2026-09-12] 訓練AI夥伴——唯一入口在首頁
   bool _isTrainingPage = false;
+
 
   // [教練 Agent 2026-08-04 Phase E+] 夥伴館內子頁面狀態（不切出去，全在 BridgeDesktop 內）
   // null = 在夥伴館列表
@@ -365,6 +366,10 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
       BrainRevivalService.instance
           .startWatch(LocalModelRuntimeService());
     });
+    // [T10② W5 2026-10-17] 排程觸發即時 toast——引擎廣播 → SnackBar。
+    // 成功/失敗都報（誠實原則）；App 不在前台時 ValueNotifier 保留最後一筆，
+    // 回前台 initState 重掛即漏接（簡化：本版只報 live 事件，歷史走 W4 時間線）。
+    AppScheduleEngine.lastRunDone.addListener(_onScheduleRunDone);
     // [隊友訊息流 C5 2026-09-08] 監聽任務狀態——派工/完成時刷新 sidebar
     // （〔任務〕畫布標記+活躍狀態）與恢復持久化任務
     TaskDispatcher.instance.addListener(_onTaskChanged);
@@ -641,7 +646,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     });
   }
 
-  /// [時間感 L4 2026-09-13] 相簿視圖——家的記憶按日子翻頁（家庭提案 L4）
+  /// [時間感 L4 2026-09-13] 相簿視圖——家的記憶按日子翻頁（家人提案 L4）
   void _openAlbum() {
     showDialog(
       context: context,
@@ -1122,6 +1127,20 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
       _persistentChatController.sendDirectMessage(message);
     };
 
+    // [T4③ 2026-10-16 編織線] 新開乾淨對話——盲測用（無污染上下文）
+    mcp.onNewConversation = () async {
+      try {
+        final id = await _persistentChatController.startFreshConversation(
+            title: '盲測 ${DateTime.now().month}/${DateTime.now().day}');
+        if (mounted) setState(() => _currentConversationId = id);
+        debugPrint('[MCP] new_conversation ✓ $id');
+        return true;
+      } catch (e) {
+        debugPrint('[MCP] new_conversation 失敗: $e');
+        return false;
+      }
+    };
+
     // [教練 Agent 2026-07-19] 模擬使用者在聊天框打字——觸發完整 sendMessage 流程
     // 外部（教練 Agent透過 HTTP）可以像使用者一樣發訊息給原生 Agent
     mcp.onSendUserMessage = (message) {
@@ -1207,11 +1226,14 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         page = 'companion';
       } else {
         switch (_activeCanvasIndex) {
+          // [小葵 2026-10-15 修正] 5-tab 時代映射（v262 大腦 tab 已除）：
+          // 0對話 1畫布 2專案 3向量資料庫 4系統。舊映射 case3=brain/case4=vault
+          // 是 6-tab 遺留——API 回報 page=brain 時其實人在 vault（誤導自動化）。
           case 0: page = 'chat'; break;
           case 1: page = 'canvas'; break;
-          case 3: page = 'brain'; break;
-          case 4: page = 'vault'; break;
-          case 5: page = 'system'; break;
+          case 2: page = 'project'; break;
+          case 3: page = 'vault'; break;
+          case 4: page = 'system'; break;
           default: page = 'unknown'; break;
         }
       }
@@ -1672,8 +1694,25 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     _startNativeAgentLoop();
   }
 
+  /// [T10② W5] 排程 toast handler
+  void _onScheduleRunDone() {
+    final payload = AppScheduleEngine.lastRunDone.value;
+    if (payload == null) return;
+    final ok = payload['success'] == true;
+    final title = payload['jobTitle']?.toString() ?? '排程任務';
+    final summary = payload['summary']?.toString() ?? '';
+    final ctx = context;
+    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 6),
+      content: Text(ok
+          ? '⏰ 排程完成：$title${summary.isEmpty ? '' : '——$summary'}'
+          : '⏰ 排程失敗：$title——$summary'),
+    ));
+  }
+
   @override
   void dispose() {
+    AppScheduleEngine.lastRunDone.removeListener(_onScheduleRunDone);
     // [隊友訊息流 C5] 解綁任務監聽
     TaskDispatcher.instance.removeListener(_onTaskChanged);
     // [無限插槽 C2 2026-10-06 移植] 解綁插槽註冊表監聽
@@ -3252,9 +3291,32 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                         _activeCanvasIndex == 0),
                     child: KeyedSubtree(
                       key: const ValueKey('chat_tab'),
-                      child: _activeCanvasIndex == 1
+                      // [vault 二修] index==3 同款留空殼——chat layout 的
+                      // _buildCanvasArea 不 build vault（vault_tab 層獨佔）
+                      child: (_activeCanvasIndex == 1 || _activeCanvasIndex == 3)
                           ? const SizedBox.shrink()
                           : _buildChatTabLayout(),
+                    ),
+                  ),
+                ),
+                // [小葵 2026-10-15 Blue 報案二修「切回 vault 仍重載」] vault_tab 保活層。
+                // 一修的保活殼掛在 'tab_3' KeyedSubtree 內——切走 tab 時該 subtree 整個
+                // 從樹上拔除=VaultScreen 照樣 dispose（Offstage 保不住 subtree 自身的死）；
+                // 且 chat_tab 保活層也會 build 一份 _buildCanvasArea=兩份 VaultScreen 競態。
+                // 正解：vault 比照 canvas_tab/chat_tab 在主 Stack 常駐，永不下樹。
+                Offstage(
+                  offstage: !(_isHomepage == false &&
+                      _isCompanionHall == false &&
+                      _isTrainingPage == false &&
+                      _activeCanvasIndex == 3),
+                  child: TickerMode(
+                    enabled: (_isHomepage == false &&
+                        _isCompanionHall == false &&
+                        _isTrainingPage == false &&
+                        _activeCanvasIndex == 3),
+                    child: KeyedSubtree(
+                      key: const ValueKey('vault_tab'),
+                      child: _buildVaultTabLayout(),
                     ),
                   ),
                 ),
@@ -3278,7 +3340,9 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                       }),
                     ),
                   )
-                else if (_activeCanvasIndex != 1 && _activeCanvasIndex != 0)
+                else if (_activeCanvasIndex != 1 &&
+                    _activeCanvasIndex != 0 &&
+                    _activeCanvasIndex != 3) // [vault_tab 保活層接管] index 3 不走此分支
                   KeyedSubtree(
                     key: ValueKey('tab_$_activeCanvasIndex'),
                     child: _buildChatTabLayout(),
@@ -3303,6 +3367,12 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   /// [小葵 2026-09-01] 對話 tab 佈局（保活版共用）——sidebar | canvasArea
   /// [W4.7 Blue 令 2026-10-09] 分割線改可拖曳（紫色把手）——
   /// 對話頁與畫布頁同一種手感
+  /// [小葵 2026-10-15 vault 二修] vault 專屬 layout——VaultScreen 自帶完整
+  /// UI（sidebar 在其內部），直接掛即可。常駐於主 Stack vault_tab 保活層。
+  Widget _buildVaultTabLayout() {
+    return const VaultScreen();
+  }
+
   Widget _buildChatTabLayout() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4721,16 +4791,21 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
       case 0: // 對話 — [教練 Agent 2026-08-16 使用者決策] 只留一般對話。
         // 專案畫布區段自對話頁 sidebar 退役——專案列表的家在畫布頁 sidebar，
         // 對話頁專心當對話列表，職責分明不再重複。
-        final generalConvs = _conversations.where((c) => !c.isProjectCanvas).toList();
+        // [Blue 令 2026-10-17] 兩層式側欄：一般對話/主動回應/回收桶三個
+        // 頂層分組；proactive 從一般列表排除（有自己的分組）。
+        final generalConvs = _conversations
+            .where((c) => !c.isProjectCanvas && c.type != ConversationType.proactive)
+            .toList();
+        final proactiveConvs = _conversations
+            .where((c) => c.type == ConversationType.proactive)
+            .toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
         return [
           // 💬 一般對話
           _sidebarSection('一般對話', [
             _sidebarItem('新增對話', Icons.add_rounded, false,
                 onTap: _createNewConversation),
-            // [時間感 L4 2026-09-13] 相簿——家的記憶按日子翻頁（家庭提案 L4）
-            _sidebarItem('相簿', Icons.auto_stories_outlined, false,
-                onTap: _openAlbum),
             ...generalConvs.map((c) {
               final isActive = c.id == _currentConversationId;
               // [小葵 2026-09-15 Blue 令] 參與者指紋章 glyph 列——刀 2 D2.5 的
@@ -4785,9 +4860,23 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                 ),
               );
             }),
-            // [小葵 2026-09-21] 回收桶——刪除≠銷毀（Blue 主權鐵則：絕不刪對話記憶）。
-            // 點開彈出清單、逐則還原。位置：對話列表最底。
-            _sidebarItem('回收桶', Icons.delete_outline, false,
+          ]),
+          // [Blue 令 2026-10-17] ✨ 主動回應——每次開話一個新對話（回覆後
+          // 使用者可能展開新討論串，同一 session 會洗板——所以不共用）。
+          _sidebarSection('主動回應', [
+            ...proactiveConvs.map((c) {
+              final isActive = c.id == _currentConversationId;
+              return _sidebarItem(
+                c.title.isEmpty ? '（未命名）' : c.title,
+                Icons.auto_awesome_outlined,
+                isActive,
+                onTap: () => _switchConversation(c.id),
+              );
+            }),
+          ]),
+          // ♻️ 回收桶——頂層第三分組（刪除≠銷毀，Blue 主權鐵則）
+          _sidebarSection('回收桶', [
+            _sidebarItem('已刪除對話', Icons.delete_outline, false,
                 onTap: _showTrashDialog),
           ]),
         ];
@@ -4829,12 +4918,6 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
             onTap: () => setState(() {
               _activeSystemPage =
                   _activeSystemPage == 'pairing' ? null : 'pairing';
-            })),
-        _sidebarItem('檔案總管', Icons.folder_outlined,
-            _activeSystemPage == 'files',
-            onTap: () => setState(() {
-              _activeSystemPage =
-                  _activeSystemPage == 'files' ? null : 'files';
             })),
         _sidebarItem('設定', Icons.settings_outlined,
             _activeSystemPage == 'settings',
@@ -5017,10 +5100,14 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   // ── Canvas Area (flex) ─────────────────────────────
   // 文字層級：頁標題 = L2 Heading-L / 卡片標題 = L3 Heading-M / 描述 = L8 Caption
 
+  /// [小葵 2026-10-15 vault 二修] 保活改由主 Stack 的 vault_tab 層負責
+  /// （見 build 內 Offstage(KeyedSubtree('vault_tab'))）——此方法回復單純內容鏈。
+  /// vault 不再從此掛載：chat layout 的 _buildCanvasArea 在 index==3 時回空殼，
+  /// 杜絕「chat_tab 保活層 + tab_3 subtree」雙份 VaultScreen 競態。
   Widget _buildCanvasArea() {
-    // 資料庫 tab（index 3）— Vault 頁面
+    // 資料庫 tab（index 3）— 保活層接管，這裡回空殼（防重複掛載）
     if (_activeCanvasIndex == 3) {
-      return const VaultScreen();
+      return const SizedBox.shrink();
     }
     // 系統 tab（index 4）
     if (_activeCanvasIndex == 4) {
@@ -5050,8 +5137,6 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                     () => setState(() => _activeSystemPage = 'model')),
                 _buildSystemCard('配對管理', '手機配對與 Gateway', Icons.phonelink_outlined,
                     () => setState(() => _activeSystemPage = 'pairing')),
-                _buildSystemCard('檔案總管', '檔案與資料夾管理', Icons.folder_outlined,
-                    () => setState(() => _activeSystemPage = 'files')),
                 _buildSystemCard('系統設定', 'Gateway、DB 路徑與外觀', Icons.settings_outlined,
                     () => setState(() => _activeSystemPage = 'settings')),
                 // [WS-3 2026-09-13] 大搬家——Hermes → 橋樑 App 遷移精靈
@@ -5065,17 +5150,6 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
       switch (_activeSystemPage) {
         case 'compass':
           return const CompassScreen();
-        case 'files':
-          return Container(
-            color: BridgeDSColors.of(context).canvas,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSystemPageHeader('檔案總管', 'macOS · 檔案與資料夾管理'),
-                Expanded(child: DesktopFilePage()),
-              ],
-            ),
-          );
         case 'capabilities':
           return Container(
             color: BridgeDSColors.of(context).canvas,
@@ -5102,9 +5176,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                 children: [
                   _buildSystemPageHeader('系統設定', 'Gateway · 模型 · 系統管理'),
                   SizedBox(height: BridgeDS.spaceXL),
-                  // [教練 Agent 2026-08-01] 引導到能力中心管理 API Key
-                  _buildCapabilityCenterHint(),
-                  SizedBox(height: BridgeDS.spaceMD),
+                  // [Blue 令 2026-10-17 #1] 與金鑰匙系統頁重複入口——移除
                   _buildSettingsTab(),
                 ],
               ),
@@ -5184,6 +5256,10 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                             ],
                           ),
                           SizedBox(height: BridgeDS.spaceMD),
+                          // [Blue 令 2026-10-16] 第一項陳述=最新消息——
+                          // 記憶模型商店（現役主力）在上，300M 離線備援在下
+                          const EmbeddingModelStoreCard(),
+                          const SizedBox(height: 16),
                           BrainModelDownloadCard(
                             onInstalled: () async {
                               final brain = BrainContainerService.instance;
@@ -5506,7 +5582,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   Future<void> _openBrainGalaxyWindow({String? focusAssetId}) async {
     String? token;
     try {
-      final f = File(resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token'));
+      final f = File('<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token');
       if (f.existsSync()) token = f.readAsStringSync().trim();
     } catch (_) {}
     var url = 'http://localhost:8420/galaxy?token=$token';
@@ -5658,46 +5734,6 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   // ── 設定 Tab ────────────────────────────────────────
 
   /// [教練 Agent 2026-08-01] 能力中心引導卡片
-  Widget _buildCapabilityCenterHint() {
-    return BridgeCard(
-      child: InkWell(
-        onTap: () => setState(() => _activeSystemPage = 'capabilities'),
-        borderRadius: BorderRadius.circular(BridgeDS.roundStandard),
-        child: Padding(
-          padding: const EdgeInsets.all(BridgeDS.spaceMD),
-          child: Row(
-            children: [
-              Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(
-                  color: BridgeDSColors.of(context).accentMiro.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.bolt_outlined,
-                    color: BridgeDSColors.of(context).accentMiro, size: 20),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('管理 API 金鑰與服務',
-                        style: TierStyle.of(context, Tier.cardHeroTitle).toTextStyle()),
-                    Text('前往金鑰匙系統開通圖片生成、影片、音樂等能力',
-                        style: BridgeDSColors.of(context).body
-                            .copyWith(color: BridgeDSColors.of(context).textTertiary)),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right,
-                  color: BridgeDSColors.of(context).textTertiary, size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildSettingsTab() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -5753,64 +5789,15 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         ),
         SizedBox(height: BridgeDS.spaceMD),
 
-        // 大腦模型設定
-        BridgeCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.psychology,
-                      color: BridgeDSColors.of(context).accentPurple, size: 16),
-                  const SizedBox(width: 8),
-                  SelectableText('大腦容器',
-                      style: TierStyle.of(context, Tier.cardHeroTitle).toTextStyle()),
-                  const Spacer(),
-                  BridgeStatusTag(
-                    label: _brainInitialized
-                        ? (_brainModelAvailable ? '模型已安裝' : 'Fallback')
-                        : '未初始化',
-                    type: _brainInitialized && _brainModelAvailable
-                        ? BridgeTagType.success
-                        : BridgeTagType.warn,
-                  ),
-                ],
-              ),
-              const SizedBox(height: BridgeDS.spaceMD),
-              _infoRow('狀態', _brainInitFailed
-                  ? '初始化失敗（sqlite-vec）'
-                  : _brainInitialized ? '已初始化' : '初始化中'),
-              _infoRow('嵌入模型',
-                  _brainModelAvailable ? 'EmbeddingGemma' : '零向量 fallback'),
-              _infoRow('記憶總數',
-                  '${_roomStats.values.fold(0, (a, b) => a + b)} 條'),
-              const SizedBox(height: BridgeDS.spaceMD),
-              // EmbeddingGemma 模型下載卡片
-              BrainModelDownloadCard(
-                onInstalled: () async {
-                  // 模型安裝完成 → 刷新大腦容器狀態
-                  final brain = BrainContainerService.instance;
-                  final stats = await brain.getRoomStats();
-                  if (mounted) {
-                    setState(() {
-                      _brainModelAvailable = brain.isModelAvailable;
-                      _roomStats = stats;
-                    });
-                  }
-                },
-              ),
-            ],
-          ),
-        ),
-
+        // [Blue 令 2026-10-17 #2] 大腦容器卡——與模型頁重複，移除
         SizedBox(height: BridgeDS.spaceMD),
 
         // [小葵 2026-10-02] 自我喚醒（防崩潰看門狗）開關——Watchdog v3 搭檔（Blue 案 10-01）
         const WatchdogToggleCard(),
         SizedBox(height: BridgeDS.spaceMD),
 
-        // [教練 Agent 2026-08-10] 大腦資料庫位置設定（從 settings_screen.dart 搬來）
-        const DbLocationCard(),
+        // [Blue 令 2026-10-17 #3] 大腦資料庫位置卡——向量 DB 設定已由 vault 頁取代，移除
+        const CloudRateCard(), // [T11②] 雲端率儀表——M6 驗收 ≤30%
         SizedBox(height: BridgeDS.spaceMD),
 
         // [資料主權 P0-c 2026-09-14] 資料路徑總覽——ledger 攤給使用者看（人機共視）
@@ -5818,195 +5805,13 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         SizedBox(height: BridgeDS.spaceMD),
 
         // Agent Loop + Skills 設定 (S21+S20)
-        BridgeCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.loop,
-                      color: BridgeDSColors.of(context).accentGreen, size: 16),
-                  const SizedBox(width: 8),
-                  SelectableText('Agent Loop 與 Skills',
-                      style: TierStyle.of(context, Tier.cardHeroTitle).toTextStyle()),
-                  Spacer(),
-                  BridgeStatusTag(
-                    label: _agentLoopEnabled ? '已啟用' : '關閉',
-                    type: _agentLoopEnabled
-                        ? BridgeTagType.success
-                        : BridgeTagType.info,
-                  ),
-                ],
-              ),
-              SizedBox(height: BridgeDS.spaceMD),
-              _infoRow('Agent Loop',
-                  _agentLoopEnabled ? '啟用（多輪工具呼叫）' : '關閉（一般對話）'),
-              _infoRow('最大輪數', '15（硬上限 30）'),
-              _infoRow('可用工具', '9 個（搜尋/記憶/圖片/文件/瀏覽器…）'),
-              _infoRow('Skills 系統', '已整合（程序記憶自動匹配）'),
-              SizedBox(height: BridgeDS.spaceMD),
-              Row(
-                children: [
-                  SelectableText('啟用 Agent Loop',
-                      style: TierStyle.of(context, Tier.cardBody).toTextStyle()),
-                  Spacer(),
-                  Switch(
-                    value: _agentLoopEnabled,
-                    onChanged: _toggleAgentLoop,
-                    activeThumbColor: BridgeDSColors.of(context).accentGreen,
-                  ),
-                ],
-              ),
-              SizedBox(height: 8),
-              SelectableText(
-                _agentLoopEnabled
-                    ? '已啟用 — AI 會自動判斷是否使用工具（搜尋、記憶、圖片等），無需手動切換。'
-                    : '已關閉 — AI 僅進行一般對話，不呼叫任何工具。如需 AI 自主查詢或操作，請開啟。',
-                style: BridgeDSColors.of(context).small.copyWith(
-                  color: _agentLoopEnabled
-                      ? BridgeDSColors.of(context).accentGreen
-                      : BridgeDSColors.of(context).textMuted,
-                  fontSize: 14,
-                ),
-              ),
-              SizedBox(height: BridgeDS.spaceMD),
-              // B4: 螢幕感知開關
-              Row(
-                children: [
-                  SelectableText('螢幕感知（screen_capture）',
-                      style: TierStyle.of(context, Tier.cardBody).toTextStyle()),
-                  Spacer(),
-                  Switch(
-                    value: _screenCaptureEnabled,
-                    onChanged: _toggleScreenCapture,
-                    activeThumbColor: BridgeDSColors.of(context).accentYellow,
-                  ),
-                ],
-              ),
-              SizedBox(height: 8),
-              SelectableText(
-                _screenCaptureEnabled
-                    ? '已啟用 — Agent 可截取指定視窗的螢幕截圖，用於觀察與理解您正在看的內容。'
-                    : '已關閉 — 預設關閉以保護隱私。啟用後 Agent 可自主截取指定視窗（非全螢幕）。',
-                style: BridgeDSColors.of(context).small.copyWith(
-                  color: _screenCaptureEnabled
-                      ? BridgeDSColors.of(context).accentYellow
-                      : BridgeDSColors.of(context).textMuted,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        SizedBox(height: BridgeDS.spaceMD),
-
-        // [教練 Agent 2026-07-30] 預設選型原則
-        BridgeCard(
-          child: Padding(
-            padding: const EdgeInsets.all(BridgeDS.spaceMD),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(Icons.policy_outlined, color: BridgeDSColors.of(context).accentPurple, size: 16),
-                    const SizedBox(width: 8),
-                    SelectableText('預設選型原則', style: TierStyle.of(context, Tier.cardHeroTitle).toTextStyle()),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                SelectableText(
-                  '在對話中說「太慢了，少跑幾輪」或「要有創意一點」就可以建立原則。\n選擇「預設」時會自動套用。',
-                  style: BridgeDSColors.of(context).small.copyWith(fontSize: 14, color: BridgeDSColors.of(context).textMuted),
-                ),
-                const SizedBox(height: BridgeDS.spaceMD),
-                _buildDefaultPolicyPanel(),
-              ],
-            ),
-          ),
-        ),
-
-        SizedBox(height: BridgeDS.spaceXXL),
+        // [Blue 令 2026-10-17 #5] Agent Loop 與 Skills 卡——移除
         _buildLogSection(),
       ],
     );
   }
 
   /// [教練 Agent 2026-07-30] 預設選型原則面板——從 ProviderProfileStore 讀取 policies
-  Widget _buildDefaultPolicyPanel() {
-    return FutureBuilder<List<CustomRoutingPolicy>>(
-      future: ProviderProfileStore.instance.getAllPolicies(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final policies = snapshot.data!;
-        final ds = BridgeDSColors.of(context);
-
-        if (policies.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
-              children: [
-                Icon(Icons.inbox_outlined, color: ds.textTertiary, size: 24),
-                const SizedBox(width: 8),
-                Text('尚無預設選型原則', style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: ds.textSecondary)),
-              ],
-            ),
-          );
-        }
-
-        return Column(
-          children: policies.map((p) {
-            final modelLabel = p.model ?? '全部模型';
-            return Card(
-              color: ds.surfaceElevated,
-              margin: const EdgeInsets.only(bottom: 8),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(
-                  color: p.isActive ? ds.accentGreen.withValues(alpha: 0.4) : ds.borderSubtle,
-                ),
-              ),
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                leading: Icon(
-                  p.isActive ? Icons.check_circle : Icons.circle_outlined,
-                  color: p.isActive ? ds.accentGreen : ds.textTertiary,
-                  size: 20,
-                ),
-                title: Text(
-                  p.name,
-                  style: TierStyle.of(context, Tier.cardCaptionBold).toTextStyle().copyWith(fontWeight: FontWeight.w700, color: ds.textPrimary),
-                ),
-                subtitle: Text(
-                  '${p.provider} / $modelLabel',
-                  style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: ds.textTertiary),
-                ),
-                trailing: p.isActive
-                    ? TextButton(
-                        onPressed: () async {
-                          await ProviderProfileStore.instance.deactivatePolicy(p.id);
-                          setState(() {});
-                        },
-                        child: Text('停用', style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: ds.accentRed)),
-                      )
-                    : TextButton(
-                        onPressed: () async {
-                          await ProviderProfileStore.instance.activatePolicy(p.id);
-                          setState(() {});
-                        },
-                        child: Text('啟用', style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: ds.accentGreen)),
-                      ),
-              ),
-            );
-          }).toList(),
-        );
-      },
-    );
-  }
-
   // ── 卡片標題 = L3 Heading-M (24px) ─────────────────
 
   Widget _buildPairingCard() {
@@ -7061,7 +6866,7 @@ class _DesktopUiActionExecutor implements UiActionExecutor {
         case 5:
           page = 'system';
           if (_screen._activeSystemPage == null) {
-            tappable.addAll(['模型下載', '配對管理', '檔案總管', '設定', '金鑰匙系統']);
+            tappable.addAll(['模型下載', '配對管理', '設定', '金鑰匙系統']);
             pageSummary = '系統選單';
           } else {
             tappable.add('返回系統');
@@ -7286,9 +7091,6 @@ class _DesktopUiActionExecutor implements UiActionExecutor {
           return true;
         case '配對管理':
           _screen.setState(() => _screen._activeSystemPage = 'pairing');
-          return true;
-        case '檔案總管':
-          _screen.setState(() => _screen._activeSystemPage = 'files');
           return true;
         case '設定':
           _screen.setState(() => _screen._activeSystemPage = 'settings');

@@ -38,10 +38,10 @@ import 'screens/companion_settings/voice_settings_screen.dart'; // [教練 Agent
 import 'screens/achievement_collection_screen.dart';
 import 'screens/semi_dao_review_coming_soon_screen.dart';
 import 'screens/brain_container_screen.dart';
-import 'screens/master_folder_manager_screen.dart';
 import 'widgets/bridge_shortcuts.dart';
 import 'services/brain_container/brain_container_service.dart';
 import 'services/compass/compass_bootstrap.dart'; // [羅盤 2026-09-06]
+import 'package:bridge_app/services/compass/compass_speaker.dart';
 import 'services/compass/compass_galaxy_bridge.dart';
 import 'services/compass/compass_heartbeat.dart';
 import 'services/life_tree/dream_scheduler.dart';
@@ -340,12 +340,6 @@ final _router = GoRouter(
       builder: (context, state) => const BrainContainerScreen(),
     ),
     GoRoute(
-      path: '/master-folders',
-      builder: (context, state) => MasterFolderManagerScreen(
-        returnTo: state.uri.queryParameters['returnTo'],
-      ),
-    ),
-    GoRoute(
       path: '/companion/soul',
       builder: (context, state) {
         final companionId = state.uri.queryParameters['id'] ?? '';
@@ -489,6 +483,23 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
     // [羅盤 2026-09-06] 羅盤系統啟動——store + 種子 + 規則快取
     //（fail-open：羅盤掛了不擋 App，渲染端有 fallback 種子值）
     unawaited(CompassBootstrap.instance.ensureInitialized());
+
+    // [T9③ 2026-10-17] 羅盤開口 M4——夢裡排隊的話，開 App 後沖出
+    // （走既有注入通道 injectAssistantMessage + kind:compass，不另建
+    // 聊天路徑；開口閘全在 CompassSpeaker——信心/額度/證據）
+    Timer(const Duration(seconds: 45), () {
+      if (!mounted) return;
+      CompassSpeaker.instance.onSpeak = (content, metadata) async {
+        // [Blue 令 2026-10-17] 主動回應走獨立頻道——不跑進既有對話討論串。
+        // 做法：當前 controller 切到 proactive 類型的 session（沒有就建），
+        // 注入後不自動切回——使用者自己決定何時看。
+        final controller = BridgeDesktopScreen.activeChatController.value;
+        if (controller == null) return;
+        await controller.openOrCreateProactiveSession();
+        await controller.injectAssistantMessage(content, metadata: metadata);
+      };
+      unawaited(CompassSpeaker.instance.flushQueue());
+    });
 
     // [羅盤 2026-09-06] 心跳層 + galaxy 規則匯出（背景跑）
     Timer(const Duration(seconds: 60), () {

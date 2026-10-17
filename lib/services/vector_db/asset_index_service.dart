@@ -27,6 +27,7 @@ import '../brain_container/brain_container_service.dart';
 import '../brain_container/embedding/embedding_service.dart';
 import '../brain_container/asset_content_reembed_service.dart'; // [小葵 2026-08-28] 新檔導入後內容補嵌
 import 'vision_embedding_pipeline.dart';
+import 'vector_sketch_service.dart'; // [小葵 2026-10-14] fastScan junk 跳過（isJunkFolder 共用）
 
 /// 檔案類型
 enum AssetKind {
@@ -670,6 +671,13 @@ class AssetIndexService {
           .toList();
 
       for (final mf in manifestFiles) {
+        // [小葵 2026-10-14 Blue 報案 fastScan 22s] 依賴樹 junk（venv/node_modules
+        // 等 30,126 筆＝44%）不做 stat——I/O 砍近半，外接碟上尤其有感。
+        // 規則與素描層/顯示層共用 isJunkFolder。
+        if (VectorSketchService.isJunkFolder(mf.path)) {
+          skippedCount++;
+          continue;
+        }
         final fullPath = '$root/${mf.path}';
         final file = File(fullPath);
 
@@ -1976,6 +1984,44 @@ class AssetIndexService {
   /// [recordIds] — 要修改的 AssetRecord id 列表
   /// [room] — 目標房間（FileRoom enum）
   /// 回傳成功更新的筆數
+  /// [Blue 令 2026-10-17] 批量加標籤——用戶手動貼標同步進 asset_index.tags，
+  /// 讓智慧搜尋（_filteredLibraryFiles 比對 record.tags）與 Agent 向量檢索
+  /// 都吃得到。既有標籤保留（聯集去重）。
+  int batchAddTags(List<String> recordIds, String label) {
+    if (!BrainContainerService.instance.isInitialized) return 0;
+    if (recordIds.isEmpty || label.trim().isEmpty) return 0;
+    final db = BrainDatabase.instance.db;
+    var updated = 0;
+    try {
+      db.execute('BEGIN');
+      for (final id in recordIds) {
+        final rows = db.select(
+          'SELECT tags FROM asset_index WHERE id = ?',
+          [id],
+        );
+        if (rows.isEmpty) continue;
+        List<dynamic> existing;
+        try {
+          existing = jsonDecode(rows.first['tags'] as String? ?? '[]') as List;
+        } catch (_) {
+          existing = [];
+        }
+        final merged = {...existing.map((e) => e.toString()), label.trim()};
+        db.execute(
+          'UPDATE asset_index SET tags = ? WHERE id = ?',
+          [jsonEncode(merged.toList()), id],
+        );
+        updated++;
+      }
+      db.execute('COMMIT');
+    } catch (e) {
+      db.execute('ROLLBACK');
+      debugPrint('[AssetIndex] batchAddTags 失敗: $e');
+      return 0;
+    }
+    return updated;
+  }
+
   int batchUpdateRoom(List<String> recordIds, FileRoom room) {
     if (!BrainContainerService.instance.isInitialized) return 0;
     if (recordIds.isEmpty) return 0;

@@ -183,7 +183,12 @@ class BrainDatabase {
     final dbVersion = result.first['value'] as String;
 
     // 版本相同 — 無需 migration
-    if (dbVersion == currentVersion) return;
+    if (dbVersion == currentVersion) {
+      _ensureEmbedModelVersionColumn(); // [小葵 2026-10-15 T0] v20 前手動 ALTER 過的 live DB
+      _ensureCorrectionEventsTable(); // [T3] 已標 v20 的 live DB 補建表
+      _ensureAgentMemoriesEmbedVersion(); // [T6] live DB 補血型欄
+      return;
+    }
 
     // 執行由舊版本到當前版本的所有 migration steps
     final dbVersionInt = int.tryParse(dbVersion) ?? 1;
@@ -202,6 +207,55 @@ class BrainDatabase {
       // 更新版本號
       _setMeta('schema_version', currentVersion);
     }
+    _ensureEmbedModelVersionColumn(); // [小葵 2026-10-15 T0] 冪等確保（見 schema v20 註解）
+    _ensureCorrectionEventsTable(); // [T3] 冪等確保
+    _ensureAgentMemoriesEmbedVersion(); // [T6] 冪等確保
+  }
+
+  /// [小葵 2026-10-15 T0／Fable V3 斷鏈④] asset_index.embed_model_version
+  /// 欄位確保（PRAGMA 檢查式，冪等）。背景：2026-10-15 live DB 曾手動 ALTER；
+  /// 若只走 from_v19_to_v20 的 ALTER 會對已存在欄位炸 duplicate column。
+  /// 新裝機／換 DB 路徑由此補欄，Eg2ReembedService 的 SELECT 不再 no such column。
+  void _ensureEmbedModelVersionColumn() {
+    final cols = _db!.select('PRAGMA table_info(asset_index)');
+    final has = cols.any((c) => c['name'] == 'embed_model_version');
+    if (!has) {
+      _db!.execute('ALTER TABLE asset_index ADD COLUMN embed_model_version TEXT');
+    }
+  }
+
+  /// [小葵 2026-10-15 T6] 冪等確保 agent_memories.embed_model_version 欄——
+  /// 舊表無此欄（DDL 只對新 DB 生效）；live DB 啟動補欄。
+  void _ensureAgentMemoriesEmbedVersion() {
+    final cols = _db!.select('PRAGMA table_info(agent_memories)');
+    if (!cols.any((c) => c['name'] == 'embed_model_version')) {
+      _db!.execute(
+          'ALTER TABLE agent_memories ADD COLUMN embed_model_version TEXT');
+    }
+  }
+
+  /// [小葵 2026-10-15 T3] 冪等確保 correction_events 表——
+  /// live DB 在 v20 空 migration 時代已標 schema_version=20，
+  /// T3 把建表放進 v20 steps 後 runner 對「已標版」跳過。
+  /// 啟動確保補針（IF NOT EXISTS 冪等；BeliefGate fail-open 依賴此表）。
+  void _ensureCorrectionEventsTable() {
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS correction_events (
+        id                 TEXT PRIMARY KEY,
+        conversation_id    TEXT NOT NULL,
+        message_id         TEXT NOT NULL,
+        kind               TEXT NOT NULL,
+        hit_pattern        TEXT NOT NULL,
+        user_text          TEXT NOT NULL,
+        assistant_context  TEXT NOT NULL DEFAULT '',
+        created_at         INTEGER NOT NULL,
+        ref_turn_id        TEXT
+      )
+    ''');
+    _db!.execute(
+        'CREATE INDEX IF NOT EXISTS idx_correction_conv ON correction_events(conversation_id)');
+    _db!.execute(
+        'CREATE INDEX IF NOT EXISTS idx_correction_kind ON correction_events(kind)');
   }
 
   /// vector_init（改善 5 → 2026-08-20 重寫）。
@@ -279,7 +333,7 @@ class BrainDatabase {
   /// 1. 使用者自訂路徑（SharedPreferences 'vault_db_directory'）— 安裝精靈設定
   /// 2. macOS: ApplicationSupportDirectory / iOS: ApplicationDocumentsDirectory
   ///
-  /// [教練 Agent 2026-07-22] Phase 1 ③ 支援 DB 路徑指定（如外接碟）
+  /// [教練 Agent 2026-07-22] Phase 1 ③ 支援 DB 路徑指定 /Volumes/DATA
   /// [教練 Agent 2026-08-02] 收斂：DB 路徑單一化 + 啟動驗證
   ///   - 檢查 DB 檔案是否存在且 size > 0
   ///   - 如果無效，fallback 到 ApplicationSupport 路徑
@@ -307,7 +361,7 @@ class BrainDatabase {
       final customDbFile = File('$customDir/$_dbFileName');
       if (!customDbFile.parent.existsSync()) {
         // [小葵 2026-09-12] 外接碟未掛載根治——自訂路徑的父目錄不存在時，
-        // 絕不 createSync（在外接碟上會 Permission denied 直接炸掉
+        // 絕不 createSync（在 /Volumes/DATA 上會 Permission denied 直接炸掉
         // 整個 BrainContainer 初始化，連本地 DB fallback 都沒機會跑）。
         // 改為：跳過自訂路徑 → fallback 預設路徑（本地 956MB DB 完好），
         // 碟掛回後自動回到自訂路徑。設定的意圖保留，不等於硬崩潰。

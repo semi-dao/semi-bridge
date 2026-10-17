@@ -1,6 +1,6 @@
 // dedup_service.dart
 // [小葵 2026-09-09 Blue 令] 實體去重——同一張照片在多個授權根有副本
-// （人名資料區/01_現況紀錄），分類層已合併但磁碟上占空間。
+// （阿川資料區/01_現況紀錄），分類層已合併但磁碟上占空間。
 //
 // 鐵則（Blue）：
 // - 檔案重複有它的意義——不主動刪除
@@ -29,7 +29,7 @@ class DedupService {
   /// 只掃圖片與影片（大檔才值得去重）。
   Future<List<DedupCandidate>> scan() async {
     final dbRoots = [
-      '/Volumes',
+      '/Volumes/DATA',
     ]; // TODO: 從授權根清單動態讀
     // 先從 brain_container 讀實際根——掃描 asset_index 的 folder_root
     final roots = <String>{};
@@ -82,7 +82,7 @@ class DedupService {
     final candidates = <DedupCandidate>[];
     for (final paths in byHash.values) {
       if (paths.length < 2) continue;
-      // 正典挑選：數字前綴根（01_現況紀錄…）優先於人名根（人名資料區）
+      // 正典挑選：數字前綴根（01_現況紀錄…）優先於人名根（阿川資料區）
       paths.sort((a, b) => _canonScore(b).compareTo(_canonScore(a)));
       final keep = paths.first;
       for (final dup in paths.skip(1)) {
@@ -100,9 +100,7 @@ class DedupService {
   int _canonScore(String path) {
     var s = 0;
     if (RegExp(r'/\d{2}_').hasMatch(path)) s += 10; // 數字前綴根=正典
-    if (RegExp('/[^/]*資料區/').hasMatch(path) || path.contains('備份')) {
-      s -= 5; // 人名根（X資料區）與備份根非正典
-    }
+    if (path.contains('阿川資料區') || path.contains('備份')) s -= 5;
     return s;
   }
 

@@ -109,6 +109,7 @@ docs/          # 設計規範、宣言、架構地圖
 - [開源宣言](docs/opensource/MANIFESTO_DRAFT.md) — 為何公開、相信什麼、不公開什麼
 - [🔧 Modding Guide](docs/opensource/MODDING_GUIDE.md) — 把這台車改成你的樣子（四層改裝）
 - [v0.4.0 開光 LightUp](docs/V040_AGENT_AS_USER_DESIGN_INPUTS.md) — Agent-as-User：7 個語意工具讓 Agent 成為真正的使用者
+- [v0.5.0 編織線收官](docs/RELEASE_NOTES_V0.5.md) — Vault 側欄三區架構（資料夾/標籤/素材池）＋素材池生命週期＋標籤同步向量庫＋縮圖雙層快取
 - [設計系統](docs/BRIDGE_TIER_SYSTEM.md) · [統合設計語言](docs/BRIDGE_UNIFIED_DESIGN_LANGUAGE.md)
 - [架構地圖](docs/APP_ARCHITECTURE_MAP.md)
 

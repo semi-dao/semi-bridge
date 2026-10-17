@@ -134,6 +134,31 @@ class CompassStore {
         value TEXT NOT NULL
       )
     ''');
+
+    // [T9① 2026-10-17] 心跳結果落地——不落 store 的觀測不算觀測（D9）
+    // （原本只在記憶體 _last，App 重啟＝觀測史失憶）
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS compass_health (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        organ_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary TEXT,
+        checked_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_compass_health_organ_time
+        ON compass_health(organ_id, checked_at DESC);
+    ''');
+  }
+
+  /// [T9①] 心跳結果寫入（heartbeat 每 tick 呼叫；fail-quiet）
+  void recordHealth(String organId, String status, String summary) {
+    try {
+      _db?.execute(
+        'INSERT INTO compass_health (organ_id, status, summary, checked_at) '
+        'VALUES (?, ?, ?, ?)',
+        [organId, status, summary, DateTime.now().toIso8601String()],
+      );
+    } catch (_) {}
   }
 
   /// [小葵 2026-09-10 Blue 羅盤強大功能令] meta 讀寫——intent 索引等

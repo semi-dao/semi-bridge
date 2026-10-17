@@ -40,11 +40,28 @@ class AgentGlyphSeed {
 
   /// ① 底色——HSL 色輪（避開過暗 S<30%、過亮 L>75%、過髒）
   Color get bg {
+    // [指紋定律 2026-10-16 Blue 令] 原生 Agent 底色鎖品牌紫
+    // （accentPurple 0xFF533AFD——大腦/向量專用紫）。圖案仍由 seed
+    // 決定（唯一性不變），色相在紫域 250-280° 內微調，飽和度亮度
+    // 對齊品牌紫的 HSL（249°, 98%, 60%），保證一眼認出「這是原生 Agent」
+    if (isNative) {
+      const brandPurple = Color(0xFF533AFD);
+      final bp = HSLColor.fromColor(brandPurple);
+      final hue = (250.0 + (h1 % 31).toDouble()).clamp(250.0, 280.0); // 250-280° 紫域
+      // 亮度在品牌紫 ±4% 內微調（單位是 0-1）
+      final light = (bp.lightness - 0.04 + ((h1 >> 12) % 9) / 100)
+          .clamp(0.30, 0.62);
+      return HSLColor.fromAHSL(1, hue, bp.saturation, light).toColor();
+    }
     final hue = (h1 % 360).toDouble();
     final sat = 45.0 + (h1 >> 9) % 35; // 45-80%
     final light = 38.0 + (h1 >> 14) % 22; // 38-60%
     return HSLColor.fromAHSL(1, hue, sat / 100, light / 100).toColor();
   }
+
+  /// [指紋定律] native-agent 系列（原生 Agent 身份）——品牌紫指紋
+  bool get isNative =>
+      name == '原生 Agent' || name.startsWith('native');
 
   /// ② 外框形狀
   AgentGlyphFrame get frame => AgentGlyphFrame.values[h2 % AgentGlyphFrame.values.length];

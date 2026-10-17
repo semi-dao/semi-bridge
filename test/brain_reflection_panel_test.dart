@@ -321,7 +321,7 @@ void main() {
           content: 'Door Decision Card 會保存主線、支線與待回流門。',
           room: 'Doors',
           sourceLabel: 'Door Decision Card.md',
-          sourcePath: '/data/docs/Door Decision Card.md',
+          sourcePath: '/Volumes/DATA/橋樑計劃/docs/Door Decision Card.md',
           reason: '因為這輪正在判斷門與回流。',
           retrievalSignals: ['關鍵字命中：門、回流', '房間命中：門房間'],
           tags: ['門房間', '主線', '橋樑能力'],
@@ -354,7 +354,7 @@ void main() {
                   SecondBrainMemoryFeedback.irrelevant,
             },
             secondBrainMemoryRoomOverrides: {
-              '/data/docs/Door Decision Card.md|Door Decision Card 會保存主線、支線與待回流門。':
+              '/Volumes/DATA/橋樑計劃/docs/Door Decision Card.md|Door Decision Card 會保存主線、支線與待回流門。':
                   SecondBrainRoom.bridges,
             },
             secondBrainAssociationFeedbacks: {
@@ -415,7 +415,7 @@ void main() {
           content: '定義六大房間、AI Agent 共用記憶與檔案立體檢索。',
           room: 'Projects',
           sourceLabel: '第二大腦架構.md',
-          sourcePath: '/data/docs/第二大腦架構.md',
+          sourcePath: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
           reason: '測試第二大腦資料夾匯入入口。',
           tags: ['計畫房間', '檔案索引'],
           trustScore: 82,
@@ -451,7 +451,7 @@ void main() {
       content: '正式橋能力與 adapter 規格。',
       room: 'Bridges',
       sourceLabel: '能力橋規格.md',
-      sourcePath: '/data/docs/能力橋規格.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
       reason: '測試撤回校正。',
       retrievalSignals: ['房間命中：橋樑房間', '使用者標記：之後常引用'],
       tags: ['橋樑房間', 'adapter'],
@@ -467,7 +467,7 @@ void main() {
             reflection: reflection,
             secondBrainTrace: trace,
             secondBrainMemoryFeedbacks: const {
-              '/data/docs/能力橋規格.md|正式橋能力與 adapter 規格。':
+              '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md|正式橋能力與 adapter 規格。':
                   SecondBrainMemoryFeedback.pin,
             },
             onUndoSecondBrainMemoryCorrection: (_) => undone = true,
@@ -497,7 +497,7 @@ void main() {
       content: '定義六大房間、AI Agent 共用記憶與檔案立體檢索。',
       room: 'Projects',
       sourceLabel: '第二大腦架構.md',
-      sourcePath: '/data/docs/第二大腦架構.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
       reason: '測試第二大腦調閱回饋。',
       tags: ['計畫房間', '檔案索引'],
       trustScore: 82,
@@ -512,7 +512,7 @@ void main() {
             reflection: reflection,
             secondBrainTrace: trace,
             secondBrainMemoryFeedbacks: const {
-              '/data/docs/第二大腦架構.md|定義六大房間、AI Agent 共用記憶與檔案立體檢索。':
+              '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md|定義六大房間、AI Agent 共用記憶與檔案立體檢索。':
                   SecondBrainMemoryFeedback.useful,
             },
             onSecondBrainMemoryFeedback: (memory, feedback) {
@@ -554,7 +554,7 @@ void main() {
       content: '正式橋能力與 adapter 規格。',
       room: 'Files',
       sourceLabel: '能力橋規格.md',
-      sourcePath: '/data/docs/能力橋規格.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
       reason: '測試房間校準。',
       tags: ['檔案房間', 'adapter'],
       trustScore: 70,
@@ -569,7 +569,7 @@ void main() {
             reflection: reflection,
             secondBrainTrace: trace,
             secondBrainMemoryRoomOverrides: const {
-              '/data/docs/能力橋規格.md|正式橋能力與 adapter 規格。':
+              '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md|正式橋能力與 adapter 規格。':
                   SecondBrainRoom.bridges,
             },
             onSecondBrainMemoryRoomMove: (memory, room) {
@@ -608,7 +608,7 @@ void main() {
       content: '正式橋能力與 adapter 規格。',
       room: 'Bridges',
       sourceLabel: '能力橋規格.md',
-      sourcePath: '/data/docs/能力橋規格.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
       reason: '測試來源操作。',
       tags: ['橋樑房間'],
       trustScore: 70,
@@ -655,7 +655,7 @@ void main() {
       content: '正式橋能力與 adapter 規格。',
       room: 'Bridges',
       sourceLabel: '能力橋規格.md',
-      sourcePath: '/data/docs/能力橋規格.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
       reason: '因為這輪正在處理正式橋能力，需要調閱 adapter 規格。',
       tags: ['橋樑房間', 'adapter'],
       trustScore: 70,
@@ -668,7 +668,7 @@ void main() {
           content: '新聞橋與網頁搜尋橋共用 adapter 完成訊號。',
           room: 'Bridges',
           sourceLabel: '新聞橋規格.md',
-          sourcePath: '/data/docs/新聞橋規格.md',
+          sourcePath: '/Volumes/DATA/橋樑計劃/docs/新聞橋規格.md',
           reason: '同一輪也需要確認能力完成後回到卡點。',
           tags: ['橋樑房間', 'adapter', '新聞'],
           trustScore: 68,
@@ -711,7 +711,7 @@ void main() {
     expect(find.text('記憶內容'), findsOneWidget);
     expect(find.text('正式橋能力與 adapter 規格。'), findsWidgets);
     expect(find.text('來源位置'), findsOneWidget);
-    expect(find.text('/data/docs/能力橋規格.md'), findsWidgets);
+    expect(find.text('/Volumes/DATA/橋樑計劃/docs/能力橋規格.md'), findsWidgets);
     expect(find.text('為什麼調閱'), findsWidgets);
     expect(find.text('橋樑房間、adapter'), findsWidgets);
     expect(find.text('記憶關聯圖'), findsOneWidget);

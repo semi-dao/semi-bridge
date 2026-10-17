@@ -11,6 +11,8 @@ import '../../life_tree/dream_reflection.dart'; // [小葵 2026-09-22] LLM 深�
 import '../../life_tree/global_notice_channel.dart';
 import 'package:flutter/foundation.dart';
 import '../../life_tree/life_tree_store.dart';
+import '../../memory_layer_service.dart'; // [T3] 分層寫入+BeliefGate
+import '../../belief_gate.dart'; // [T3] BeliefGateRejectedError
 
 class DreamOnceTool extends AgentTool {
   @override
@@ -96,6 +98,39 @@ class DreamOnceTool extends AgentTool {
                 topics: topics);
             if (deep.usedLlm) {
               deepThought = deep.reflection;
+              // [小葵 2026-10-15 T3] 深夢環境事實 → BeliefGate 通道。
+              // 偵測「環境/事實型」語句（規則版——寧漏勿誤），過 gate 寫 L4；
+              // 被拒降級 L7（belief_pending）——夢的斷言沒有 3 次證據很正常，
+              // 存證待驗，不硬寫信念。fail-open：任何失敗不影響夢報告。
+              try {
+                final fact = _extractEnvironmentFact(deep.reflection);
+                if (fact != null) {
+                  String memId;
+                  String layerNote;
+                  try {
+                    memId = await MemoryLayerService.instance.write(
+                      layer: MemoryLayer.l4Environment,
+                      title: fact,
+                      content: '深夢反思推論：${deep.reflection}',
+                      tags: 'dream,environment',
+                      memoryType: 'environment',
+                    );
+                    layerNote = 'L4（gate 通過）';
+                  } on BeliefGateRejectedError {
+                    memId = await MemoryLayerService.instance.write(
+                      layer: MemoryLayer.l7ProjectCold,
+                      title: '[待驗證] $fact',
+                      content: '深夢反思推論：${deep.reflection}',
+                      tags: 'dream,belief_pending',
+                      memoryType: 'environment',
+                    );
+                    layerNote = 'L7（證據不足待驗）';
+                  }
+                  debugPrint('[DreamOnce] 環境事實入庫 $layerNote：$fact');
+                }
+              } catch (e) {
+                debugPrint('[DreamOnce] 信念通道 fail-open: $e');
+              }
               // 深夢結論入生命樹（草稿卡——「想到了什麼」需人複驗）
               LifeTreeStore.instance.addDream(LifeTreeDream(
                 dreamSessionId: result.sessionId,
@@ -202,6 +237,23 @@ class DreamOnceTool extends AgentTool {
   }
 
   /// 深夢提醒白話化截斷（全域通知用）
+  /// [小葵 2026-10-15 T3] 萃取環境事實句——規則版（寧漏勿誤）。
+  /// 命中特徵：「需要/應該/必須/切記」＋環境名詞對象。回 null＝不是環境事實。
+  static String? _extractEnvironmentFact(String text) {
+    for (final line in text.split('\n')) {
+      final t = line.trim().replaceAll(RegExp(r'^[-*\d\.\s]+'), '');
+      if (t.length < 6 || t.length > 80) continue;
+      if (RegExp(r'(需要|應該|必須|切記|要注意|記得|依賴|喜好是|生長在)')
+              .hasMatch(t) &&
+          RegExp(r'(鹿角蕨|植物|澆水|光照|溫度|濕度|土壤|季節|路徑|埠|版本|'
+                  r'時區|排程|模型|API|DB|備份)')
+              .hasMatch(t)) {
+        return t.length > 60 ? t.substring(0, 60) : t;
+      }
+    }
+    return null;
+  }
+
   static String _clipForNotice(String s) {
     final t = s.replaceAll(RegExp(r'[{}<>]'), '').trim();
     final lines = t.split('\n').where((l) => l.trim().isNotEmpty).take(4);

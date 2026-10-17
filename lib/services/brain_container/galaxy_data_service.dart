@@ -17,6 +17,7 @@ import 'dart:isolate';
 import 'package:sqlite3/sqlite3.dart';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import '../vector_db/vector_sketch_service.dart'; // [小葵 2026-10-14] 星系 junk 過濾（第四層）
 import 'package:flutter/services.dart' show rootBundle;
 import 'brain_database.dart';
 import '../collab/swarm_campaign.dart'; // [TRIO M5a] 戰爭層
@@ -195,8 +196,13 @@ class GalaxyDataService {
       ];
 
       // ── 檔案星（asset_index 全量）──
+      // [小葵 2026-10-14 Blue 報案「橘色新星暴增」] venv 依賴樹 junk（.h 19,952+
+      // .py 19,510 顆）副檔名不在 EXT_COLOR 映射→落到預設橘 0xff9e6b——
+      // 四萬顆對人類無意義的橘星。junk 在 SQL 層直接排除（第四層過濾：
+      // 素描/顯示/fastScan 之後，星系層同規則 isJunkFolder）。
       final assetRows = db.select('''
         SELECT id,
+          file_path,
           replace(substr(file_path, 1, instr(file_path || '/', '/') - 1), '|', '_') AS top,
           COALESCE(NULLIF(file_ext, ''), 'x') AS ext,
           file_size AS sz,
@@ -207,7 +213,8 @@ class GalaxyDataService {
           CASE WHEN file_modified > 1600000000000 AND file_modified < 2000000000000
                THEN file_modified ELSE 0 END AS mt
         FROM asset_index
-      ''');
+      ''').where((r) =>
+          !VectorSketchService.isJunkFolder(r['file_path'] as String? ?? ''));
 
       // ── 佈局：優先吃預計算的 UMAP 佈局檔（id → x,y,z）──
       final layout = layoutIn; // [v194] main isolate 預載傳入（rootBundle 不能跨 isolate）

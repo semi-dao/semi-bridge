@@ -183,6 +183,8 @@ class ChatSidebar extends StatelessWidget {
 
   /// [刀 2] speakerId → 夥伴名（反查失敗退 '？'——顯示不炸）
   String _companionNameOf(String speakerId) {
+    // [指紋定律 2026-10-16 Blue] 原生 Agent 具名＋品牌紫指紋
+    if (speakerId == 'native-agent') return '原生 Agent';
     try {
       final c = CompanionStore().getById(speakerId);
       return c?.name ?? '未知夥伴';
@@ -213,6 +215,18 @@ class ChatSidebar extends StatelessWidget {
             .toList()
         : conversations;
 
+    // [Blue 令 2026-10-17] 主動回應獨立分組——羅盤/夢的開話 session
+    // 與一般對話分開列，確保訊息保存可見（不混入、不消失）。
+    final proactiveConversations = conversations
+        .where((conv) => conv.type == ConversationType.proactive)
+        .toList();
+    final nonProactiveGeneral = generalConversations
+        .where((conv) => conv.type != ConversationType.proactive)
+        .toList();
+    final nonProactiveProject = projectConversations
+        .where((conv) => conv.type != ConversationType.proactive)
+        .toList();
+
     return Container(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: SafeArea(
@@ -235,23 +249,32 @@ class ChatSidebar extends StatelessWidget {
             Expanded(
               child: ListView(
                 children: [
-                  if (projectConversations.isNotEmpty)
+                  if (proactiveConversations.isNotEmpty)
+                    _buildSectionHeader(
+                      context,
+                      icon: Icons.auto_awesome_outlined,
+                      title: '主動回應',
+                      count: proactiveConversations.length,
+                    ),
+                  for (final conv in proactiveConversations)
+                    _buildConversationTile(context, conv, isProject: false),
+                  if (nonProactiveProject.isNotEmpty)
                     _buildSectionHeader(
                       context,
                       icon: Icons.flag_circle_outlined,
                       title: '專案門',
-                      count: projectConversations.length,
+                      count: nonProactiveProject.length,
                     ),
-                  for (final conv in projectConversations)
+                  for (final conv in nonProactiveProject)
                     _buildConversationTile(context, conv, isProject: true),
-                  if (generalConversations.isNotEmpty)
+                  if (nonProactiveGeneral.isNotEmpty)
                     _buildSectionHeader(
                       context,
                       icon: Icons.chat_bubble_outline,
                       title: '一般對話',
-                      count: generalConversations.length,
+                      count: nonProactiveGeneral.length,
                     ),
-                  for (final conv in generalConversations)
+                  for (final conv in nonProactiveGeneral)
                     _buildConversationTile(context, conv, isProject: false),
                 ],
               ),

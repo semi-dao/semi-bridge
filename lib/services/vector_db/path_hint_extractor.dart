@@ -24,7 +24,7 @@ class PathHintExtractor {
 
   /// 從絕對路徑萃取提示詞。回傳空字串 = 無提示（直接用原 prompt）。
   ///
-  /// 範例：外接授權根/農場資料庫/01_現況紀錄/照片紀錄/營本部/2026-04-07/
+  /// 範例：/Volumes/DATA/農場資料庫/01_現況紀錄/照片紀錄/營本部/2026-04-07/
   ///       Blue陽台/象耳鹿角蕨母株/IMG_1781.jpeg
   ///  → 「象耳鹿角蕨」「母株」「Blue陽台」（數字段/日期段/流水段自動剔除）
   String extractHint(String absolutePath) {

@@ -4,6 +4,8 @@
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'; // [T6③] debugPrint
+
 import 'package:bridge_app/models/brain_container/memory.dart';
 import 'package:bridge_app/services/brain_container/brain_database.dart';
 import 'package:bridge_app/services/brain_container/persistence/memory_draft.dart';
@@ -41,6 +43,20 @@ class MemoryWriter {
       return true;
     }).toList();
     if (drafts.isEmpty) return results;
+
+    // [T6③/D5 2026-10-17] 拒收 mock-fallback 向量——混血型入庫 = 永遠搜不到
+    // 的死記憶（查詢側已過濾 eg2-300m-v1）。fallback 期寫入改為丟棄＋記錄，
+    // reindexFallbackMemories 會在 EG2 恢復後補嵌。
+    final rejected = drafts
+        .where((d) => d.vectorModelVersion == 'mock-fallback')
+        .length;
+    if (rejected > 0) {
+      // 全部都是 fallback = 連續期（EG2 掛了）——整批丟棄等重嵌，
+      // 不寫半套（部分 fallback 部分 eg2 的批次會造成記憶斷頭）。
+      debugPrint('[MemoryWriter] 🚫 拒收 $rejected 筆 mock-fallback 向量'
+          '（EG2 不可用期的記憶，待重嵌後再寫）');
+      return results;
+    }
 
     db.execute('BEGIN TRANSACTION');
     try {

@@ -8,14 +8,16 @@
 // - 直接讀取 CanvasController 的 state，零延遲同步
 // - 支援讀取（get_canvas_state）和操作（add_node, connect, execute）
 
+import 'package:bridge_app/screens/bridge_desktop_screen.dart' show BridgeDesktopScreen;
+import 'package:bridge_app/services/compass/compass_speaker.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:bridge_app/services/app_retina.dart'; // [教練 Agent 2026-08-22] 全域視網膜
-import '../core/dev_paths.dart'; // [開源整備] 開發機路徑泛化
 import 'package:bridge_app/services/macos_desktop_shell_channel.dart'; // [開光 P1] window_map 懸浮窗狀態
 import 'dart:io';
 import 'dart:math';
 import 'package:shelf/shelf.dart';
+import 'storage_service.dart'; // [T7④] localOnly 官方開關
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'life_tree/global_notice_channel.dart'; // [小葵 2026-09-21] 全域對話佇列
 import '../widgets/canvas/v2/canvas_mcp_registry.dart'; // [教練 Agent 2026-07-20] 渲染感應器
@@ -30,6 +32,7 @@ import 'package:bridge_app/models/entity_graph/entity.dart';
 import 'package:bridge_app/services/brain_container/brain_container_service.dart';
 import 'package:bridge_app/services/vector_db/hybrid_search_service.dart';
 import 'package:bridge_app/services/vector_db/identity_reembed_service.dart';
+import 'vector_db/eg2_reembed_service.dart';
 import 'package:bridge_app/services/vector_db/vector_sketch_service.dart';
 import 'package:bridge_app/services/vector_db/incremental_ingest_service.dart';
 import 'package:bridge_app/services/vector_db/asset_chunk_backfill_service.dart';
@@ -56,7 +59,7 @@ import 'package:bridge_app/services/decision/k1_gatekeeper.dart';
 /// - POST /execute      — 執行工作流
 /// - GET  /health       — 健康檢查
 class BridgeMcpServer {
-  late final Router _router; // [開光 P1.5]
+  Router? _router; // [T8④ 2026-10-17] 非 late final——start() 可重建（雙呼叫不炸）
   final Set<String> _dispatchedTools = {}; // [tools_health] 已 dispatch 過的工具
   static const int defaultPort = 8420;
 
@@ -228,6 +231,9 @@ class BridgeMcpServer {
   /// 回傳值：true = 已觸發，false = controller 未就緒
   bool Function(String message)? onSendUserMessage;
 
+  /// [T4③ 2026-10-16 編織線] 新開乾淨對話——盲測/評測需要無污染上下文
+  Future<bool> Function()? onNewConversation;
+
   /// [教練 Agent 2026-07-19] 派任務到畫布對話框——打到 CanvasChatPanel 的 ChatController
   /// 跟 onSendUserMessage 不同：這個打到畫布頁的 chat，讓 Agent 在畫布當下環境工作
   /// 人機共視的正確入口——原生 Agent看著當下畫面，不需要「切頁面截圖」
@@ -257,11 +263,28 @@ class BridgeMcpServer {
 
   bool get isRunning => _server != null;
 
+  /// [T8③] 三方一致測試用——工具面原始碼（與實作同源，測試鎖死不漂移）
+  static String get sourceForConsistencyTest {
+    final f = File('lib/services/bridge_mcp_server.dart');
+    return f.readAsStringSync();
+  }
+
+  bool _starting = false; // [T8④ 2026-10-17] 連按兩次 start() 不炸
+
   Future<void> start() async {
-    if (_server != null) return;
+    if (_server != null || _starting) return;
+    _starting = true;
+    try {
+      await _startInner();
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _startInner() async {
 
     final router = Router();
-    _router = router; // [開光 P1.5] 保存供 _proxyGet 同進程分派
+    _router = router; // [T8④] 保存供 _proxy 同進程分派
 
     router.get('/health', _handleHealth);
     router.get('/state', _handleGetState);
@@ -278,6 +301,8 @@ class BridgeMcpServer {
     router.post('/navigate_to_canvas', _handleNavigateToCanvas);
     router.post('/send_chat', _handleSendChat);
     router.post('/send_user_message', _handleSendUserMessage); // [教練 Agent 2026-07-19] 模擬使用者打字
+    router.post('/new_conversation', _handleNewConversation); // [T4③ 2026-10-16] 盲測乾淨上下文
+    router.post('/set_local_only', _handleSetLocalOnly); // [T7④ 2026-10-16] 盲測 localOnly 官方開關——App 內寫入 static 快取+prefs，跳過 plist 讀取謎團
     router.get('/global_notice', _handleGlobalNoticeClaim); // [小葵 2026-09-21] 全域對話佇列認領
     router.post('/send_canvas_message', _handleSendCanvasMessage); // [教練 Agent 2026-07-19] 派任務到畫布對話框
     router.post('/inject_message', _handleInjectMessage); // [教練 Agent 2026-07-19] 原生 Agent工作時插嘴
@@ -288,10 +313,36 @@ class BridgeMcpServer {
     router.post('/inject/enrich', _handleInjectEnrich); // [小葵 2026-10-10 M1] 注入管線單一入口（評測+線上同路徑）
     // [小葵 2026-10-13 K1 修復線] K1 頭訓練引導：POST /k1/train（body=標註 JSONL）
     router.post('/k1/train', _handleK1Train);
+    // [Blue 令 2026-10-17] 羅盤開口測試機制——樣本不足的環境也能驗證
+    // 主動回應頻道端到端（enqueue→閘→proactive session→注入）。
+    router.post('/compass/test_fire', (Request req) async {
+      final body = await req.readAsString();
+      String? msg;
+      try {
+        final j = jsonDecode(body);
+        if (j is Map<String, dynamic>) msg = j['message'] as String?;
+      } catch (_) {}
+      CompassSpeaker.instance.onSpeak ??= (content, metadata) async {
+        final controller = BridgeDesktopScreen.activeChatController.value;
+        if (controller == null) return;
+        await controller.openOrCreateProactiveSession();
+        await controller.injectAssistantMessage(content, metadata: metadata);
+      };
+      await CompassSpeaker.instance
+          .testFire(content: msg, reason: 'manual_test_fire');
+      return Response.ok(jsonEncode({
+        'success': true,
+        'hint': '已注入 proactive session——看 App 對話側欄「主動回應」',
+      }));
+    });
     router.get('/k1/head', _handleK1Head); // 查詢頭掛載狀態
   router.get('/identity_reembed', _handleIdentityReembed); // [小葵 2026-09-09] 身份重嵌進度/觸發
+    router.post('/identity_reembed', _handleIdentityReembed); // [T8⑤] 帶副作用——POST 為正道（GET 保留相容）
+    router.get('/eg2_reembed', _handleEg2Reembed); // [小葵 2026-10-15] EG2 全量重嵌進度/觸發
+    router.post('/eg2_reembed', _handleEg2Reembed); // [T8⑤] 帶副作用——POST 為正道（GET 保留相容）
   router.get('/vector_sketch', _handleVectorSketch); // [小葵 2026-09-09] 向量資料素描
   router.get('/rescan', _handleRescan); // [小葵 2026-09-09] 手動重掃（重匯入模擬）
+    router.post('/rescan', _handleRescan); // [T8⑤] 帶副作用——POST 為正道（GET 保留相容）
     router.get('/import_progress', _handleImportProgress); // [教練 Agent 2026-08-21] #10 背景導入進度
     router.get('/get_app_state', _handleGetAppState); // [教練 Agent 2026-07-19] 取得當前頁面狀態
     router.post('/brain_reindex', _handleBrainReindex); // [教練 Agent 2026-07-19] 重新嵌入 mock-fallback 記憶
@@ -685,6 +736,25 @@ class BridgeMcpServer {
     );
   }
 
+  /// [小葵 2026-10-15] GET /eg2_reembed?start=1 觸發；無參數=查進度
+  Future<Response> _handleEg2Reembed(Request request) async {
+    final start = (request.url.queryParameters['start'] ?? '') == '1';
+    if (start) {
+      Eg2ReembedService.instance.start(); // 背景跑，立即回
+    }
+    return Response.ok(
+      jsonEncode({
+        'running': Eg2ReembedService.instance.isRunning,
+        'done': Eg2ReembedService.instance.done,
+        'total': Eg2ReembedService.instance.total,
+        // [小葵 2026-10-15 T0] error 欄——失敗原因不再吞進 debugPrint
+        if (Eg2ReembedService.instance.lastError.isNotEmpty)
+          'error': Eg2ReembedService.instance.lastError,
+      }),
+      headers: _jsonHeaders,
+    );
+  }
+
   /// [教練 Agent 2026-08-21] 檢索鏈實測：GET /vector_search?q=...&limit=N
   /// 走 HybridSearchService（memories + asset_index + asset_chunks
   /// 三軌），回傳命中清單——遠端可直接驗證語義搜尋品質。
@@ -874,6 +944,34 @@ Future<Response> _handleInjectEnrich(Request request) async {
       return Response(500, body: jsonEncode({'error': e.toString()}),
           headers: _jsonHeaders);
     }
+  }
+
+  /// [T4③ 2026-10-16 編織線] 新開對話——回 {"success": true}
+  /// [T7④ 2026-10-16] localOnly 官方開關——body {"enabled": true/false}
+  /// 走 StorageService.saveLocalOnly（更新 static 快取＋prefs），
+  /// 回傳當前值。盲測鎖本地的可靠路徑。
+  Future<Response> _handleSetLocalOnly(Request request) async {
+    final body = await request.readAsString();
+    Map<String, dynamic> data = {};
+    try {
+      data = jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {}
+    final enabled = data['enabled'];
+    if (enabled is bool) {
+      await StorageService.saveLocalOnly(enabled);
+    }
+    final current = await StorageService.getLocalOnly();
+    return Response.ok(jsonEncode({'success': true, 'localOnly': current}),
+        headers: {'Content-Type': 'application/json'});
+  }
+
+  Future<Response> _handleNewConversation(Request request) async {
+    if (onNewConversation == null) {
+      return Response(503, body: jsonEncode({'error': 'new conversation handler not available'}),
+          headers: _jsonHeaders);
+    }
+    final ok = await onNewConversation!();
+    return Response.ok(jsonEncode({'success': ok}), headers: _jsonHeaders);
   }
 
   // [小葵 2026-09-21] 全域對話佇列認領——UI（Quick Assistant/主畫面）輪詢，
@@ -1092,9 +1190,23 @@ Future<Response> _handleInjectEnrich(Request request) async {
   }
 
   /// [開光 P1.5] 隱藏門代理——同進程直呼 handler（不走 loopback HTTP）
-  Future<Map<String, dynamic>> _proxyGet(String route) async {
-    final req = Request('GET', Uri.parse('http://127.0.0.1:8420$route'));
-    final res = await _router(req); // shelf router 直接分派
+  Future<Map<String, dynamic>> _proxyGet(String route) =>
+      _proxy('GET', route);
+
+  /// [T8② 2026-10-17] 泛用同進程代理——支援 POST 與 query（原本只 GET）。
+  /// route 帶 query（如 /galaxy_data?node=x）直接用；args 走 JSON body。
+  Future<Map<String, dynamic>> _proxy(String method, String route,
+      [Map<String, dynamic>? args]) async {
+    final router = _router;
+    if (router == null) return {'success': false, 'message': 'server 未啟動'};
+    final uri = Uri.parse('http://127.0.0.1:8420$route');
+    final req = args == null || args.isEmpty
+        ? Request(method, uri)
+        : Request(method, uri, body: jsonEncode(args));
+    if (args != null && args.isNotEmpty) {
+      req.change(headers: {'content-type': 'application/json'});
+    }
+    final res = await router(req); // shelf router 直接分派
     final body = await res.readAsString();
     try {
       return (jsonDecode(body) as Map).cast<String, dynamic>();
@@ -1536,6 +1648,17 @@ Future<Response> _handleInjectEnrich(Request request) async {
         'type': 'object',
         'properties': <String, dynamic>{},
         'additionalProperties': false,
+      },
+    },
+    {
+      'name': 'create_canvas',
+      'description': '建立新畫布，回傳 canvas id。[T8① 2026-10-17] '
+          '原隱藏 route 收編為官方工具',
+      'inputSchema': {
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'title': {'type': 'string', 'description': '畫布標題（可選）'},
+        },
       },
     },
     {
@@ -2235,6 +2358,10 @@ Future<Response> _handleInjectEnrich(Request request) async {
           if (onListCanvases == null) return error('List not available');
           return _jsonRpcResult(id, {'resultType': 'complete', 'canvases': onListCanvases!()});
 
+        case 'create_canvas': // [T8①] 隱藏門收編——同進程 POST 代理
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/create_canvas', args));
+
         case 'load_canvas':
           if (onLoadCanvas == null) return error('Load not available');
           onLoadCanvas!(args['canvasId'] as String);
@@ -2873,7 +3000,7 @@ requestAnimationFrame(loop);
 
 /// GET /avatar_engine.js — [小葵 2026-09-24 出道令] 懸浮小葵 WebGL 引擎
   Future<Response> _handleGetAvatarEngine(Request req) async {
-    final f = File(resolveDevPath('~/Developer/bridge_app/morning-tea/avatar_engine.js'));
+    final f = File('<HOME>/Developer/bridge_app/morning-tea/avatar_engine.js');
     if (!await f.exists()) {
       return Response(404, body: 'avatar_engine.js not found');
     }
@@ -2891,7 +3018,7 @@ requestAnimationFrame(loop);
       return Response(400, body: 'bad name');
     }
     final f = File(
-        resolveDevPath('~/Library/Containers/farm.semiwasabi.bridgeApp/Data/Documents/bridge_media/animations/$name'));
+        '<HOME>/Library/Containers/farm.semiwasabi.bridgeApp/Data/Documents/bridge_media/animations/$name');
     if (!await f.exists()) {
       return Response(404, body: 'not found');
     }
@@ -2907,7 +3034,7 @@ requestAnimationFrame(loop);
         '[hit] t=${DateTime.now().toIso8601String()} ua=${req.headers['user-agent'] ?? '?'}\n',
         mode: FileMode.append);
     try {
-      final f = File(resolveDevPath('~/Developer/bridge_app/assets/galaxy/vendor/three.module.js'));
+      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/vendor/three.module.js');
       if (!f.existsSync()) return Response(404);
       return Response.ok(f.readAsStringSync(), headers: {
         'Content-Type': 'application/javascript',
@@ -2921,7 +3048,7 @@ requestAnimationFrame(loop);
   /// GET /three.core.js — [v63] three r167+ 的第二個檔案（module 內部 import）
   Future<Response> _handleGetThreeCore(Request req) async {
     try {
-      final f = File(resolveDevPath('~/Developer/bridge_app/assets/galaxy/vendor/three.core.js'));
+      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/vendor/three.core.js');
       if (!f.existsSync()) return Response(404);
       return Response.ok(f.readAsStringSync(), headers: {
         'Content-Type': 'application/javascript',
@@ -2936,7 +3063,7 @@ requestAnimationFrame(loop);
   /// 頁面 runtime 也帶同一指紋；webview 若載到舊 DOM，兩者不符 → 頁面自動 reload
   // [v232] 星系參數——記憶體+磁碟持久化
   static Map<String, dynamic>? _galaxyParams;
-  static final _galaxyParamsPath = resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp/galaxy_params.json');
+  static const _galaxyParamsPath = '<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/galaxy_params.json';
   Map<String, dynamic> _loadGalaxyParams() {
     if (_galaxyParams != null) return _galaxyParams!;
     try {
@@ -3090,7 +3217,7 @@ requestAnimationFrame(loop);
 
   Future<Response> _handleGetGalaxyVersion(Request req) async {
     try {
-      final f = File(resolveDevPath('~/Developer/bridge_app/assets/galaxy/galaxy.html'));
+      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/galaxy.html');
       if (!f.existsSync()) return Response.ok('{"fp":""}', headers: _jsonHeaders);
       final m = RegExp(r"FINGERPRINT='([^']+)'").firstMatch(f.readAsStringSync());
       return Response.ok('{"fp":"${m?.group(1) ?? ''}"}', headers: _jsonHeaders);

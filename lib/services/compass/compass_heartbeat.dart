@@ -116,6 +116,16 @@ class CompassHeartbeat {
         checkedAt: DateTime.now(),
       );
       _last[entry.key] = merged;
+      // [T9① 2026-10-17] 心跳結果落 store（D9：不落 store 的觀測不算觀測）
+      try {
+        store.recordHealth(
+          entry.key,
+          merged.status.name,
+          merged.summary.length > 300
+              ? merged.summary.substring(0, 300)
+              : merged.summary,
+        );
+      } catch (_) {}
     }
   }
 

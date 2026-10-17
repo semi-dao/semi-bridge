@@ -61,7 +61,7 @@ class ReceiptHop {
 
 ### 4.2 UI：全局搜尋 overlay（Cmd+Shift+F 或頂部搜尋鈕）
 
-- 命令面板：輸入框 + 分域結果列（💬 對話 / 🧠 記憶 / 📁 資產 / 🚀 任務）
+- Raycast 風格命令面板：輸入框 + 分域結果列（💬 對話 / 🧠 記憶 / 📁 資產 / 🚀 任務）
 - 點結果 → hop 執行：對話域 `switchConversation + scrollToMessage`；資產域 `navigate brain`（asset 節點 focus）；任務域 `loadCanvasById(workCanvasId)`
 - 防抖 250ms + 各域上限 8，避免 UI 洪流
 

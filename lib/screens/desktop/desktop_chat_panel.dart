@@ -1124,7 +1124,10 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
                       : null;
                   // [2026-08-26 共視修復] 舊訊息無 speakerId——標「AI」不冒名
                   // （fallback 當前夥伴會讓切換後歷史泡泡集體變臉）。
-                  final name = speaker?.name ?? 'AI';
+                  // [指紋定律 2026-10-16 Blue] native-agent 具名＋品牌紫
+                  final name = msg.speakerId == 'native-agent'
+                      ? '原生 Agent'
+                      : (speaker?.name ?? 'AI');
                   // [小葵 2026-09-15 Blue 令] 指紋章頭像——AgentGlyph 取代首字圓圈
                   // （刀 2 D2.5 的指紋縮圖：同 ID 永遠同一張臉，身份的簽名在場）
                   return Column(
@@ -1297,7 +1300,10 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
                     ? CompanionStore().getById(msg.speakerId!)
                     : null;
                 // [2026-08-26 共視修復] 同上——無 speakerId 標「AI」不冒名
-                final name = speaker?.name ?? 'AI';
+                // [指紋定律 2026-10-16 Blue] native-agent 具名＋品牌紫
+                final name = msg.speakerId == 'native-agent'
+                    ? '原生 Agent'
+                    : (speaker?.name ?? 'AI');
                 // [小葵 2026-09-15 Blue 令] 指紋章頭像——AgentGlyph 取代首字圓圈
                 return Column(
                   mainAxisSize: MainAxisSize.min,

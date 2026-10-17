@@ -16,7 +16,7 @@ void main() {
       SecondBrainFileEntry(
         id: 'brain-architecture',
         title: '第二大腦架構.md',
-        path: '/data/docs/第二大腦架構.md',
+        path: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
         room: SecondBrainRoom.projects,
         summary: '定義六大房間、AI Agent 共用記憶與檔案立體檢索。',
         tags: const ['第二大腦', 'AI Agent', '檔案索引'],
@@ -29,7 +29,7 @@ void main() {
 
     expect(results, hasLength(1));
     expect(results.single.room, SecondBrainRoom.projects);
-    expect(results.single.path, contains('/data/docs'));
+    expect(results.single.path, contains('/Volumes/DATA/橋樑計劃/docs'));
     expect(results.single.tags, contains('檔案索引'));
   });
 
@@ -38,7 +38,7 @@ void main() {
     final entry = SecondBrainFileEntry(
       id: 'doors',
       title: '門與支線.md',
-      path: '/data/docs/門與支線.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/門與支線.md',
       room: SecondBrainRoom.doors,
       summary: '記錄主線、支線、待回流門。',
       tags: const ['門', '主線'],
@@ -59,7 +59,7 @@ void main() {
     final target = SecondBrainFileEntry(
       id: 'brain',
       title: '第二大腦架構.md',
-      path: '/data/docs/第二大腦架構.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
       room: SecondBrainRoom.projects,
       summary: '第二大腦 檔案索引 AI Agent 共用記憶。',
       tags: const ['第二大腦'],
@@ -69,7 +69,7 @@ void main() {
     final competitor = SecondBrainFileEntry(
       id: 'other',
       title: '其他索引.md',
-      path: '/data/docs/其他索引.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/其他索引.md',
       room: SecondBrainRoom.files,
       summary: '第二大腦 檔案索引 AI Agent 共用記憶。',
       tags: const ['第二大腦'],
@@ -84,7 +84,7 @@ void main() {
         content: '第二大腦 檔案索引 AI Agent 共用記憶。',
         room: 'Projects',
         sourceLabel: '第二大腦架構.md',
-        sourcePath: '/data/docs/第二大腦架構.md',
+        sourcePath: '/Volumes/DATA/橋樑計劃/docs/第二大腦架構.md',
         reason: '測試常引用。',
       ),
       SecondBrainMemoryFeedback.pin,
@@ -105,7 +105,7 @@ void main() {
     final entry = SecondBrainFileEntry(
       id: 'muted',
       title: '不要引用.md',
-      path: '/data/docs/不要引用.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/不要引用.md',
       room: SecondBrainRoom.files,
       summary: '第二大腦 檔案索引。',
       indexedAt: DateTime(2026),
@@ -117,7 +117,7 @@ void main() {
         content: '第二大腦 檔案索引。',
         room: 'Files',
         sourceLabel: '不要引用.md',
-        sourcePath: '/data/docs/不要引用.md',
+        sourcePath: '/Volumes/DATA/橋樑計劃/docs/不要引用.md',
         reason: '測試不要引用。',
       ),
       SecondBrainMemoryFeedback.mute,
@@ -136,7 +136,7 @@ void main() {
     final entry = SecondBrainFileEntry(
       id: 'undo',
       title: '撤回校正.md',
-      path: '/data/docs/撤回校正.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/撤回校正.md',
       room: SecondBrainRoom.bridges,
       summary: '校正回路與撤回。',
       indexedAt: DateTime(2026),
@@ -145,7 +145,7 @@ void main() {
       content: '校正回路與撤回。',
       room: 'Bridges',
       sourceLabel: '撤回校正.md',
-      sourcePath: '/data/docs/撤回校正.md',
+      sourcePath: '/Volumes/DATA/橋樑計劃/docs/撤回校正.md',
       reason: '測試撤回。',
     );
     await store.upsert(entry);
@@ -169,7 +169,7 @@ void main() {
     final entry = SecondBrainFileEntry(
       id: 'room-move',
       title: '能力橋規格.md',
-      path: '/data/docs/能力橋規格.md',
+      path: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
       room: SecondBrainRoom.files,
       summary: '正式橋能力與 adapter 規格。',
       indexedAt: DateTime(2026),
@@ -182,7 +182,7 @@ void main() {
         content: '正式橋能力與 adapter 規格。',
         room: 'Files',
         sourceLabel: '能力橋規格.md',
-        sourcePath: '/data/docs/能力橋規格.md',
+        sourcePath: '/Volumes/DATA/橋樑計劃/docs/能力橋規格.md',
         reason: '測試移動房間。',
       ),
       SecondBrainRoom.bridges,
@@ -202,7 +202,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'generic-bridge',
           title: '正式橋總覽.md',
-          path: '/data/docs/正式橋總覽.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/正式橋總覽.md',
           room: SecondBrainRoom.bridges,
           summary: '正式橋能力 adapter 訊號中心。',
           indexedAt: DateTime(2026, 2),
@@ -213,7 +213,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'news-return-door',
           title: '新聞橋回流門.md',
-          path: '/data/docs/新聞橋回流門.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/新聞橋回流門.md',
           room: SecondBrainRoom.bridges,
           summary: '新聞橋 adapter 完成訊號會回到原本卡點。',
           tags: const ['新聞橋', 'adapter', '回流門'],
@@ -242,7 +242,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'news-return-door',
           title: '新聞橋回流門.md',
-          path: '/data/docs/新聞橋回流門.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/新聞橋回流門.md',
           room: SecondBrainRoom.bridges,
           summary: '新聞橋 adapter 完成訊號會回到原本卡點。',
           tags: const ['新聞橋', 'adapter', '回流門'],
@@ -254,7 +254,7 @@ void main() {
         SecondBrainFileEntry(
           id: 'image-bridge',
           title: '圖片辨識橋.md',
-          path: '/data/docs/圖片辨識橋.md',
+          path: '/Volumes/DATA/橋樑計劃/docs/圖片辨識橋.md',
           room: SecondBrainRoom.bridges,
           summary: '圖片辨識橋 adapter 完成訊號。',
           tags: const ['圖片辨識橋', 'adapter'],

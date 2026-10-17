@@ -15,7 +15,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import '../core/dev_paths.dart';
 
 import 'agent_loop/agent_loop.dart';
 import 'agent_loop/agent_tool_registry.dart';
@@ -57,8 +56,8 @@ class NativeAgentLoop {
 - 沒有事做時保持安靜，不亂說話
 
 ## 專案路徑
-- 原始碼：bridge_app 專案根
-- 設計文件：橋樑計劃 02-架構設計/
+- 原始碼：<HOME>/Developer/bridge_app
+- 設計文件：/Volumes/DATA/橋樑計劃/02-架構設計/
 - App container：~/Library/Containers/farm.semiwasabi.bridgeApp/''';
 
   final AgentLoop _agentLoop;
@@ -540,7 +539,7 @@ class NativeAgentLoop {
           // 2. 找到 App binary 並重啟
           //    flutter run 模式下 binary 在專案目錄；容器模式下在 Resources/
           //    先試專案路徑，再試容器路徑
-          final projectPath = resolveDevPath('~/Developer/bridge_app');
+          const projectPath = '<HOME>/Developer/bridge_app';
           final appPath = '$projectPath/build/macos/Build/Products/Debug/bridge_app.app';
           debugPrint('[TaskChain] 準備重啟: $appPath');
 

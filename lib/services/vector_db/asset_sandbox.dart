@@ -161,13 +161,28 @@ class AssetSandbox {
 
   /// 從 SharedPreferences 載入資料夾清單（App 啟動時呼叫）
   Future<void> loadFromPrefs() async {
+    _rootPaths.clear();
     try {
       final prefs = await SharedPreferences.getInstance();
       final paths = prefs.getStringList(_prefsKey) ?? [];
-      _rootPaths.clear();
       _rootPaths.addAll(paths);
     } catch (e) {
       // SharedPreferences 不可用時靜默降級
+    }
+  }
+
+  /// [小葵 2026-10-16 Blue 令 UI 驗收抓包] prefs 載入競態——
+  /// App 重啟後 vault 立即開：_loadLibraryFiles 在 loadFromPrefs
+  /// 完成前跑 → sandbox 空根 → manifest 空 →「尚無資料」定格。
+  /// 並發呼叫共享同一個載入 Future；完成後保證有根。
+  Future<void>? _prefsLoadFuture;
+  Future<void> ensurePrefsLoaded() async {
+    _prefsLoadFuture ??= loadFromPrefs();
+    await _prefsLoadFuture;
+    // 空根重試一次（prefs 偶發延遲載入）——仍空就認命（真的沒匯入過）
+    if (_rootPaths.isEmpty) {
+      _prefsLoadFuture = loadFromPrefs();
+      await _prefsLoadFuture;
     }
   }
 

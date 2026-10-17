@@ -9,7 +9,7 @@ import '../agent_tool.dart';
 import '../../../core/dev_paths.dart';
 
 /// 專案根目錄——Agent 只能讀這個目錄底下的檔案
-final _projectRoot = resolveDevPath('~/Developer/bridge_app');
+const _projectRoot = '<HOME>/Developer/bridge_app';
 
 class ReadSourceFileTool extends AgentTool {
   @override

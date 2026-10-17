@@ -773,14 +773,21 @@ class VaultService {
 
   /// 取得資料庫總條目數。
   Future<int> getTotalEntryCount() async {
-    if (!_initialized) return 0;
-
+    // [小葵 2026-10-16 Blue 報案] 總條目語意＝向量庫全部內容——
+    // asset_index（活躍：排除 missing）＋ memories（未封存）。
+    // 原版只數 memories 且 _initialized 未設直接回 0（vault 底部
+    // 永遠「總共 0 條目」的假象）。
     try {
       final db = BrainDatabase.instance.db;
-      final rows = db.select(
+      final assets = db.select(
+        "SELECT COUNT(*) as count FROM asset_index "
+        "WHERE index_status != 'missing'",
+      );
+      final mems = db.select(
         'SELECT COUNT(*) as count FROM memories WHERE archived = 0',
       );
-      return (rows.first['count'] as int?) ?? 0;
+      return ((assets.first['count'] as int?) ?? 0) +
+          ((mems.first['count'] as int?) ?? 0);
     } catch (e) {
       return 0;
     }

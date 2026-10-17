@@ -8,7 +8,7 @@
 
 set -e
 
-APP_BUNDLE="${BRIDGE_APP_HOME:-$HOME/Developer/bridge_app}/build/macos/Build/Products/Release/bridge_app.app"
+APP_BUNDLE="<HOME>/Developer/bridge_app/build/macos/Build/Products/Release/bridge_app.app"
 FRAMEWORKS_DIR="$APP_BUNDLE/Contents/Frameworks"
 CACHE_DIR="$HOME/Library/Caches/flutter_gemma/native/macos_arm64"
 

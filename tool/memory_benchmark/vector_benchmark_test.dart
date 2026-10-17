@@ -45,17 +45,6 @@ void main() {
       return;
     }
 
-    // [小葵 2026-09-24 開源整備] LiteRtLm dylib 不隨 repo 散佈（30MB native 二進位，
-    // .gitignore 封鎖）。fresh clone 沒有它——skip 而不是炸，測試在裝好 dylib 的
-    // 環境自然恢復。
-    final dylib = File(
-        '${Directory.current.path}/native/litert_lm/prebuilt/macos_arm64/libLiteRtLm.dylib');
-    if (!dylib.existsSync()) {
-      // ignore: avoid_print
-      print('SKIP：LiteRtLm dylib 未安裝（見 native/litert_lm/prebuilt/README）');
-      return;
-    }
-
     final golden = jsonDecode(File(goldenPath).readAsStringSync())
         as Map<String, dynamic>;
     final corpus = (golden['corpus'] as List)

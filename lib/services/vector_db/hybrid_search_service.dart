@@ -739,6 +739,9 @@ class HybridSearchService {
         // [小葵 2026-09-22 v18 temporal filtering] 語意搜尋只走現行事實
         "AND m.superseded_by IS NULL "
         "AND (m.expires_at IS NULL OR m.expires_at > ?) "
+        // [小葵 2026-10-15 T6/D1] 血型過濾：只比對與查詢同血型的向量
+        //（查詢=eg2-300m-v1；異血型距離無意義——Fable 斷鏈④）
+        "AND m.vector_model_version = '${EmbeddingService.eg2ModelVersion}' "
         "ORDER BY v.distance ASC "
         "LIMIT ?",
         [vectorJson, k, DateTime.now().millisecondsSinceEpoch, limit],
@@ -793,7 +796,9 @@ class HybridSearchService {
         "FROM agent_memories m "
         "JOIN vector_full_scan('agent_memories', 'embedding', vector_as_f32(?), ?) AS v "
         "  ON m.rowid = v.rowid "
-        "WHERE m.is_archived = 0 AND m.embedding IS NOT NULL $ownerFilter "
+        "WHERE m.is_archived = 0 AND m.embedding IS NOT NULL "
+        // [小葵 2026-10-15 T6/D1] 血型過濾（agent_memories 同款）
+        "AND m.embed_model_version = '${EmbeddingService.eg2ModelVersion}' $ownerFilter "
         "ORDER BY v.distance ASC "
         "LIMIT ?",
         args,
@@ -844,6 +849,8 @@ class HybridSearchService {
           "JOIN vector_full_scan('asset_index', 'embedding', vector_as_f32(?), ?) AS v "
           "  ON a.rowid = v.rowid "
           "WHERE a.index_status = 'indexed' AND a.embedding IS NOT NULL "
+          // [小葵 2026-10-15 T6/D1] 血型過濾（同 memories 軌）
+          "  AND a.embed_model_version = '${EmbeddingService.eg2ModelVersion}' "
           "  AND (a.audience = 'general' OR ?) "
           "ORDER BY v.distance ASC "
           "LIMIT ?",
@@ -884,6 +891,9 @@ class HybridSearchService {
             "JOIN vector_full_scan('asset_chunks', 'embedding', vector_as_f32(?), ?) AS v "
             "  ON c.rowid = v.rowid "
             "WHERE c.embedding IS NOT NULL "
+            // [小葵 2026-10-15 T6/D1] 血型過濾（chunk 層 35 萬筆換血中——
+            // 未換完前 gemma 舊片不進結果，寧缺勿混）
+            "  AND c.model_version = '${EmbeddingService.eg2ModelVersion}' "
             "  AND (a.audience = 'general' OR ?) "
             "ORDER BY v.distance ASC "
             "LIMIT ?",

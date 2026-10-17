@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0a0f; font-family:"PingFang TC","Noto Sans TC",sans-serif; color:#e8e8f0; padding:32px; }
+  .label { color:#8a8aa0; font-size:12px; letter-spacing:2px; margin:28px 0 12px; text-transform:uppercase; }
+  .row { display:flex; gap:20px; flex-wrap:wrap; }
+
+  /* ── 首頁卡片 ── */
+  .hcard { width:300px; border-radius:14px; padding:22px; background:linear-gradient(160deg,#131320,#0e0e18); border:1px solid #262640; }
+  .hcard .icon { font-size:28px; }
+  .hcard h3 { font-size:16px; margin:10px 0 6px; font-weight:700; }
+  .hcard .stat { font-size:13px; color:#9f9fb8; line-height:1.7; }
+  .hcard .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:#5dd4a0; margin-right:6px; vertical-align:1px; }
+  .hcard .btn { display:inline-block; margin-top:14px; padding:7px 18px; background:#000; border:1.5px solid #8b5cf6; color:#fff; font-weight:700; border-radius:8px; font-size:13px; }
+  .hcard.empty { text-align:center; }
+  .hcard.empty .hint { font-size:13px; color:#8a8aa0; line-height:1.8; margin-top:8px; }
+
+  /* ── 管理頁 ── */
+  .page { width:900px; border-radius:16px; background:#0d0d16; border:1px solid #22223a; padding:26px; }
+  .page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .page-head h2 { font-size:19px; }
+  .addbtn { padding:9px 22px; background:#000; border:1.5px solid #8b5cf6; color:#fff; font-weight:700; border-radius:9px; font-size:14px; }
+
+  .catcard { border:1px solid #23233c; border-radius:13px; background:#11111d; margin-bottom:18px; overflow:hidden; }
+  .catcard-head { display:flex; justify-content:space-between; align-items:baseline; padding:14px 18px 10px; }
+  .catcard-head .name { font-size:15px; font-weight:700; }
+  .catcard-head .name .cnt { color:#8b5cf6; font-weight:400; margin-left:8px; font-size:13px; }
+  .catcard-head .desc { font-size:12px; color:#77778f; }
+  .slots { display:flex; gap:14px; padding:4px 18px 18px; flex-wrap:wrap; }
+
+  .slot { width:236px; border-radius:11px; background:#161624; border:1px solid #2a2a45; padding:14px; position:relative; }
+  .slot .nickname { font-size:16px; font-weight:800; color:#fff; }
+  .slot .origin { font-size:11px; color:#6c6c85; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .slot .meta { display:flex; gap:8px; align-items:center; margin-top:10px; font-size:11px; color:#9f9fb8; }
+  .badge-on { color:#5dd4a0; } .badge-off { color:#6c6c85; }
+  .perms { color:#8b5cf6; font-size:12px; }
+  .mem { margin-left:auto; color:#77778f; }
+  .slot .ops { display:flex; flex-wrap:nowrap; gap:5px; margin-top:12px; overflow:hidden; }
+  .op { padding:4px 9px; font-size:11px; line-height:1; white-space:nowrap; border-radius:6px; border:1px solid #2f2f4d; color:#c9c9dd; background:#0e0e18; cursor:pointer; }
+  .op.move { border-style:dashed; }
+  .op.un { color:#e08080; }
+  .cert { position:absolute; top:12px; right:12px; font-size:10px; padding:2px 7px; border-radius:20px; }
+  .cert.ok { background:rgba(91,212,160,.12); color:#5dd4a0; border:1px solid rgba(91,212,160,.35); }
+  .cert.no { background:rgba(224,160,80,.1); color:#e0a050; border:1px solid rgba(224,160,80,.3); }
+
+  /* ── 表單彈層 ── */
+  .dialog { width:460px; border-radius:14px; background:#10101c; border:1px solid #2c2c4a; padding:24px; box-shadow:0 18px 60px rgba(0,0,0,.6); }
+  .dialog h3 { font-size:16px; margin-bottom:6px; }
+  .dialog .sub { font-size:12px; color:#8a8aa0; margin-bottom:16px; line-height:1.6; }
+  .dialog input { width:100%; padding:12px 14px; background:#0a0a12; border:1.5px solid #33335a; border-radius:9px; color:#fff; font-size:14px; font-family:inherit; }
+  .dialog input:focus { outline:none; border-color:#8b5cf6; }
+  .dialog .actions { display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+  .btn-ghost { padding:9px 18px; border-radius:9px; border:1px solid #33335a; background:transparent; color:#9f9fb8; font-size:13px; }
+  .btn-primary { padding:9px 22px; background:#000; border:1.5px solid #8b5cf6; color:#fff; font-weight:700; border-radius:9px; font-size:13px; }
+  .flow { font-size:11.5px; color:#77778f; margin-top:14px; line-height:1.8; }
+  .flow b { color:#8b5cf6; }
+</style>
+</head>
+<body>
+
+<div class="label">① 首頁卡片區 —「插槽」卡在社群卡旁邊</div>
+<div class="row">
+  <div class="hcard">
+    <div class="icon">🧩</div>
+    <h3>插槽</h3>
+    <div class="stat"><span class="dot"></span>3 個運行中 ・ 1 個已停用</div>
+    <div class="btn">進入管理</div>
+  </div>
+  <div class="hcard empty">
+    <div class="icon">🚀</div>
+    <h3>社群市集</h3>
+    <div class="hint">即將上線<br>創作者分享的外掛・Skill・資產包</div>
+  </div>
+</div>
+
+<div class="label">② 空狀態（第一次使用）— 教學式引導</div>
+<div class="row">
+  <div class="hcard empty">
+    <div class="icon">🧩</div>
+    <h3>插槽</h3>
+    <div class="hint">貼上一個 GitHub 連結<br>讓開源程式住進你的橋樑</div>
+    <div class="btn">試一個範例 →</div>
+  </div>
+</div>
+
+<div class="label">③ 插槽管理頁 — 大卡分類 → 小卡插槽（Q-A:c 自動歸檔＋「搬家」）</div>
+<div class="page">
+  <div class="page-head">
+    <h2>插槽管理</h2>
+    <div class="addbtn">＋ 新增插槽</div>
+  </div>
+
+  <div class="catcard">
+    <div class="catcard-head">
+      <div class="name">🃏 Skill 類<span class="cnt">2</span></div>
+      <div class="desc">跑在沙箱裡的輕量技能 — 安裝時 grill-me 自動歸檔</div>
+    </div>
+    <div class="slots">
+      <div class="slot">
+        <span class="cert ok">✓ 認證</span>
+        <div class="nickname">轉檔快手</div>
+        <div class="origin">github.com/ffmpeg-wasm/ffmpeg.wasm</div>
+        <div class="meta"><span class="badge-on">● 運行中</span><span class="perms">🌐網</span><span class="mem">38MB</span></div>
+        <div class="ops"><span class="op">停用</span><span class="op">更新</span><span class="op move">⇄ 搬家</span><span class="op un">卸載</span></div>
+      </div>
+      <div class="slot">
+        <span class="cert no">未認證</span>
+        <div class="nickname">小畫家</div>
+        <div class="origin">github.com/jspaint/jspaint</div>
+        <div class="meta"><span class="badge-off">○ 已停用</span><span class="perms">🔒無權限</span><span class="mem">—</span></div>
+        <div class="ops"><span class="op">啟用</span><span class="op move">⇄ 搬家</span><span class="op un">卸載</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="catcard">
+    <div class="catcard-head">
+      <div class="name">🃏 CLI 工具類<span class="cnt">1</span></div>
+      <div class="desc">獨立執行序 — 吃資源，有看門狗守著</div>
+    </div>
+    <div class="slots">
+      <div class="slot">
+        <span class="cert no">未認證</span>
+        <div class="nickname">影片工廠</div>
+        <div class="origin">github.com/yt-dlp/yt-dlp</div>
+        <div class="meta"><span class="badge-on">● 運行中</span><span class="perms">🌐網 🔓檔</span><span class="mem">112MB</span></div>
+        <div class="ops"><span class="op">停用</span><span class="op">更新</span><span class="op move">⇄ 搬家</span><span class="op un">卸載</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="label">④「＋新增插槽」按下 → 小表單（Q-C:b）→ 送出才開懸浮對話 grill-me</div>
+<div class="row">
+  <div class="dialog">
+    <h3>🧩 新增插槽</h3>
+    <div class="sub">貼上你想用的開源程式 GitHub 連結，送出後小葵會跟你聊聊怎麼用它。</div>
+    <input type="text" placeholder="https://github.com/owner/repo" spellcheck="false">
+    <div class="actions">
+      <span class="btn-ghost">取消</span>
+      <span class="btn-primary">送出 → 開始對話</span>
+    </div>
+    <div class="flow">送出後：<b>懸浮對話窗</b> 彈出 → <b>grill-me</b> 聊需求 → 權限 <b>綠燈放行・黃紅點頭</b> → 安裝＋<b>紅隊測試</b> → 測試報告</div>
+  </div>
+</div>
+
+</body>
+</html>

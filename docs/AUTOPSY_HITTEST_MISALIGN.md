@@ -3,7 +3,7 @@
 **日期**: 2026-08-20
 **調查者**: Hermes Agent (驗屍模式 - 純調查不修改)
 **專案**: bridge_app (Flutter macOS)
-**路徑**: `$HOME/Developer/bridge_app`
+**路徑**: `<HOME>/Developer/bridge_app`
 
 ---
 

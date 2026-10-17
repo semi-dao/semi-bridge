@@ -31,7 +31,7 @@ String buildMetadataEmbedText(Map<String, Object?> row) {
   }
 
   // 路徑段落：去掉 folder_root 前綴與副檔名，每段都是語義線索
-  // （例：外接授權根/02-鹿角蕨/照顧筆記/IMG_2384.jpg
+  // （例：/Volumes/DATA/橋樑計劃/02-鹿角蕨/照顧筆記/IMG_2384.jpg
   //   → 「橋樑計劃 02-鹿角蕨 照顧筆記」）
   final folderRoot = (row['folder_root'] as String?) ?? '';
   final filePath = (row['file_path'] as String?) ?? '';

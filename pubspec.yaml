@@ -1,7 +1,7 @@
 name: bridge_app
 description: "橋樑計畫 - 個人 AI 入口"
 publish_to: 'none'
-version: 0.2.0+1
+version: 0.5.0+1
 
 environment:
   sdk: ^3.12.0
@@ -28,6 +28,8 @@ dependencies:
   
   # 導航與 UI
   go_router: ^14.8.1
+  desktop_multi_window: ^0.3.1
+  hotkey_manager: ^0.2.3
   flutter_markdown: ^0.7.7
   intl: ^0.20.2
   flutter_localizations:
@@ -101,9 +103,11 @@ flutter:
   assets:
     - assets/galaxy/
     - assets/skills/
+    - assets/distill/
     - assets/icons/
     - assets/theme_packs/
     - assets/companions/xiaoqiao/
+    - assets/persona/  # [T4① 2026-10-16 編織線] M2 語氣層——App 資產不是訓練產物（D6）
     - assets/companions/mimemi/
   fonts:
     - family: BridgeCJK

@@ -192,13 +192,24 @@ class _BrainModelDownloadCardState extends State<BrainModelDownloadCard> {
             ],
           ),
           SizedBox(height: 8),
-          Text(
-            'EmbeddingGemma 300M\n'
-            '讓夥伴的記憶從字串比對升級為語意理解。'
-            '模型在裝置上推論，不需聯網。',
-            style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textSecondary,
-              height: 1.4,),
-          ),
+          Builder(builder: (ctx) {
+            // [Blue 報案 2026-10-16 二修] 現役主力是 EG2 時，這張 tflite 卡
+            // 是備援身分——名稱與描述明確標示，不再冒充主力
+            final isEg2Active = EmbeddingService.instance.activeModelVersion ==
+                EmbeddingService.eg2ModelVersion;
+            return Text(
+              isEg2Active
+                  ? '現役主力：EG2 嵌入引擎（18890，eg2-300m-v1）——'
+                      '支援文字＋圖片語意搜尋。\n'
+                      '離線備援：EmbeddingGemma 300M——EG2 不可用時自動接手，'
+                      '裝置端推論，不需聯網。'
+                  : '現役主力：EmbeddingGemma 300M——'
+                      '讓夥伴的記憶從字串比對升級為語意理解。'
+                      '模型在裝置上推論，不需聯網。',
+              style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textSecondary,
+                height: 1.4,),
+            );
+          }),
           SizedBox(height: 16),
 
           // 已安裝：顯示資訊
@@ -311,7 +322,7 @@ class _BrainModelDownloadCardState extends State<BrainModelDownloadCard> {
         ),
         SizedBox(height: 8),
         Text(
-          '模型版本: ${EmbeddingService.currentModelVersion}\n'
+          '模型版本: ${EmbeddingService.instance.activeModelVersion}\n' /* [小葵 2026-10-16 審計修] 原寫死 300m 常數——EG2 上線時謊報；改真話 getter（EG2 優先） */
           '向量維度: ${EmbeddingService.vectorDimension} 維',
           style: TierStyle.of(context, Tier.cardBody).toTextStyle().copyWith(color: BridgeDSColors.of(context).textMuted,
             height: 1.4,),

@@ -99,7 +99,7 @@ class _GalaxyScreensaverOverlayState extends State<GalaxyScreensaverOverlay> {
     _chromeSaverAvailable = false;
     String? token;
     try {
-      final f = File(resolveDevPath('~/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token'));
+      final f = File('<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token');
       if (f.existsSync()) token = f.readAsStringSync().trim();
     } catch (_) {}
     final url = 'http://localhost:8420/galaxy?token=$token&saver=1';

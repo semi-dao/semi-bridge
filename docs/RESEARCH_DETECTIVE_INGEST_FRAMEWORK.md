@@ -1,7 +1,7 @@
 # 偵探式資料導入框架 — 研究報告
 
 > **文件性質**：純研究文件，無程式碼修改。
-> **專案**：橋樑 App（Flutter macOS 桌面 App，`$HOME/Developer/bridge_app`）
+> **專案**：橋樑 App（Flutter macOS 桌面 App，`<HOME>/Developer/bridge_app`）
 > **對象**：千千萬萬使用者的「個人第二大腦」資料導入設計
 > **作者**：研究子代理（指派於 2026-08-19）
 > **狀態**：設計參考；待主代理裁示後才能進入實作

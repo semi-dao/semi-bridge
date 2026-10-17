@@ -39,14 +39,14 @@
 
 ## 1. 設計哲學
 
-### 五種設計質地的融合
-| 質地 | 貢獻 | 體現在哪 |
+### 五套融合
+| 來源 | 貢獻 | 體現在哪 |
 |---|---|---|
-| 暗色科技氛圍 | canvas 深黑、accent 飽和色 | 沉浸基底 |
-| 雙環陰影、鍵盤優先 | ringShadow、command palette | 操作層 |
-| 數據視覺化深度 | dataElevated 藍調陰影 | 數據層 |
-| 動態色彩系統 | ThemeExtension + Tier 系統 | 主題架構 |
-| 無限畫布不跳頁 | 畫布 tab、區域切換動畫 | 導航體驗 |
+| **xAI** | 暗色科技氛圍 | canvas 深黑、accent 飽和色 |
+| **Raycast** | 雙環陰影、鍵盤優先 | ringShadow、command palette |
+| **Stripe** | 數據視覺化深度 | dataElevated 藍調陰影 |
+| **Figma** | 動態色彩系統 | ThemeExtension + Tier 系統 |
+| **Miro** | 無限畫布不跳頁 | 畫布 tab、區域切換動畫 |
 
 ### 核心鐵則
 1. **無限連續**——不跳頁，區域切換用動畫過渡
@@ -424,10 +424,10 @@ final bg = isSelected
 
 | Shadow Token | 用途 | 使用場景 |
 |---|---|---|
-| `ringShadow` | 雙環陰影 | 標準卡片、面板邊界 |
+| `ringShadow` | Raycast 雙環陰影 | 標準卡片、面板邊界 |
 | `level1` | 微弱浮起 | badge、chip |
 | `floating` | 浮動面板 | FAB、overlay menu |
-| `dataElevated` | 藍調陰影 | 大腦節點、數據卡片 |
+| `dataElevated` | Stripe 藍調陰影 | 大腦節點、數據卡片 |
 | `glowPurple` | 紫光暈 | 粒子節點、AI 夥伴 |
 | `glow使用者` | 藍光暈 | 互動焦點 |
 

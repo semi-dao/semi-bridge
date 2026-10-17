@@ -183,7 +183,7 @@ void main() {
       // [開光 P1 2026-09-26] 28 → 30：app_look + window_map
       // [開光 P3 2026-09-26] 32 → 34：app_permissions + window_control
       // [S1+S2 合併 2026-10-12] 48 → 43：app_look/app_tap 雙 schema 合併
-      expect(tools.length, 43);
+      expect(tools.length, 44); // [T8①] create_canvas 收編 43→44
 
       // 每個 tool 都必須有 inputSchema（JSON Schema 2020-12 結構）
       for (final t in tools) {
@@ -308,8 +308,9 @@ void main() {
         'app_look', 'window_map',
         'app_tap', 'canvas_zoom',
         'app_permissions', 'window_control',
+        'create_canvas', // [T8①] 收編
       ]));
-      expect(names.length, 43); // 三份清單漂移終結：一份 schema、一份 dispatch（S1+S2 合併後）
+      expect(names.length, 44); // [T8①] create_canvas 收編 43→44——三份清單漂移終結
     });
 
     test('開光：app_view（無 UI 測試環境）→ available:false 不炸', () async {

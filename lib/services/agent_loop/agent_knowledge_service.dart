@@ -393,6 +393,16 @@ class AgentKnowledgeService {
     return id;
   }
 
+  /// [小葵 2026-10-15 T3] 補寫記憶層——agent_save_memory 分層用。
+  /// createMemory 原本不帶 layer（NULL＝未分層舊資料）；指定層的工具
+  /// 呼叫在寫入後補上。冪等：直接 UPDATE。
+  void setMemoryLayer(String id, String layerCode) {
+    _db.execute(
+      'UPDATE agent_memories SET layer = ? WHERE id = ?',
+      [layerCode, id],
+    );
+  }
+
   /// [教練 Agent 2026-07-22] Phase H — 用 title 精確查詢完整記憶內容
   /// 用於人格卡等需要完整 JSON content 的場景。
   /// [A5 修復 2026-09-14] 記憶私有隔離——與 searchMemories 同標準：

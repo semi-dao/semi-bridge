@@ -7,7 +7,7 @@ void main() {
   final ext = PathHintExtractor.instance;
 
   test('農場案例：品種/地點從資料夾自動萃取', () {
-    const path = '/Volumes/farmdb/農場資料庫/01_現況紀錄/照片紀錄/營本部/2026-04-07/'
+    const path = '/Volumes/DATA/農場資料庫/01_現況紀錄/照片紀錄/營本部/2026-04-07/'
         'Blue陽台/象耳鹿角蕨母株/IMG_1781.jpeg';
     final hint = ext.extractHint(path);
     expect(hint, contains('象耳鹿角蕨母株'));
@@ -34,7 +34,7 @@ void main() {
     const base = '描述這張圖';
     expect(ext.buildPrompt(base, '/tmp/123.jpg'), base);
     final withHint = ext.buildPrompt(
-        base, '/Volumes/farmdb/農場資料庫/魔鬼辣椒/IMG_1.jpeg');
+        base, '/Volumes/DATA/農場資料庫/魔鬼辣椒/IMG_1.jpeg');
     expect(withHint, contains('路徑提示'));
     expect(withHint, contains('不可**寫畫面外項目')); // 防幻覺護欄
     expect(withHint, contains('魔鬼辣椒'));

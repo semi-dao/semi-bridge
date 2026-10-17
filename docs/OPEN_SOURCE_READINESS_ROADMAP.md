@@ -25,9 +25,9 @@
 
 ## Phase 1：隱私與可攜性（開源紅線，提早做、反覆掃）
 
-- [ ] **清除 24 處 hardcode `$HOME`**（17 檔，性質=開發機路徑：galaxy html、工具、服務）。改法：環境變數或設定檔 + 開發者本機 fallback。
+- [ ] **清除 24 處 hardcode `<HOME>`**（17 檔，性質=開發機路徑：galaxy html、工具、服務）。改法：環境變數或設定檔 + 開發者本機 fallback。
   - 基準：24 處 / 17 檔（2026-09-17）
-  - 重掃：`grep -rn '$HOME' lib --include='*.dart' | wc -l`
+  - 重掃：`grep -rn '<HOME>' lib --include='*.dart' | wc -l`
   - 熱點：`galaxy_settings_panel.dart`(4)、`bridge_mcp_server.dart`(4)、`restart_app_tool.dart`(2)
 - [ ] **兩條 Application Support 路徑統一**（`bridge_app/` vs `farm.semiwasabi.bridgeApp/`，後者 14 檔前者 1 檔）。歷史教訓：驗 DB 前要先 grep 服務寫哪條（09-12、09-14 踩過兩次）。
   - 重掃：`grep -rln "bridge_app/'" lib | wc -l` + `grep -rln 'farm.semiwasabi' lib | wc -l`

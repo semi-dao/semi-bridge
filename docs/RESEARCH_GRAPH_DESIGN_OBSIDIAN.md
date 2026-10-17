@@ -844,4 +844,4 @@ bridge_app 從「對話紀錄」「記憶片段」自動建構 metadata 的流�
 
 ---
 
-> **研究結束**。本報告為「純研究」性質，**未修改 bridge_app 任何程式碼**，僅寫入 `$HOME/Developer/bridge_app/docs/RESEARCH_GRAPH_DESIGN_OBSIDIAN.md` 一份文件。
+> **研究結束**。本報告為「純研究」性質，**未修改 bridge_app 任何程式碼**，僅寫入 `<HOME>/Developer/bridge_app/docs/RESEARCH_GRAPH_DESIGN_OBSIDIAN.md` 一份文件。

@@ -38,7 +38,7 @@
 ### 色彩系統
 ```
 背景層級（由深到淺）：
-  canvas         #07080A  — 最底層（近黑藍）
+  canvas         #07080A  — 最底層（Raycast 近黑藍）
   surface        #101111  — 卡片面板底色
   surfaceElevated #1B1C1E — badge、標籤
   surfaceHover   #252829  — hover 狀態
@@ -93,7 +93,7 @@ fallback: SF Pro Display, SF Pro Text, system-ui, sans-serif
 
 ### 圓角系統
 ```
-  roundSharp      0px   — 技術標籤（銳利風格）
+  roundSharp      0px   — 技術標籤（xAI 風格）
   roundSubtle     4px   — badge
   roundStandard   8px   — 輸入框
   roundComfortable 12px — 標準卡片
@@ -369,28 +369,28 @@ Container(
 9. **真實**：內容是真實的嗎？不是假數字假標籤？
 10. **美感**：整體看起來有品味嗎？還是像 AI 生成的模板？
 
-## 設計風格參考（從 54 個真實網站提取的原則）
+## 參考設計系統（從 54 個真實網站提取的原則）
 
-### 適合 Bridge App 的風格
-- **極簡暗色**：精確、紫色 accent——最接近 BridgeDS
-- **黑白精確**：Geist 字體的理性骨架——BridgeDS 的 Geist Mono 基調
-- **暗色 chrome**：漸層 accent——BridgeDS canvas 色的質感基礎
-- **流暢暗色介面**：漸層 accent
-- **高級暗色**：鍵盤優先、紫色光暈
-- **溫暖極簡**：serif 標題、柔軟表面——對比參考
+### 適合 Bridge App 參考的風格
+- **Linear**：極簡暗色、精確、紫色 accent——最接近 BridgeDS
+- **Vercel**：黑白精確、Geist 字體——BridgeDS 的 Geist Mono 來自此
+- **Raycast**：暗色 chrome、漸層 accent——BridgeDS canvas 色參考此
+- **Cursor**：流暢暗色介面、漸層 accent
+- **Superhuman**：高級暗色、鍵盤優先、紫色光暈
+- **Notion**：溫暖極簡、serif 標題、柔軟表面——對比參考
 
 ### 設計風格光譜
 ```
 精密工程 ←→ 溫暖人文
-  精確極簡          溫暖柔軟
+  Linear/Vercel    Notion/Airbnb
 
 工具優先 ←→ 內容優先
-  效率工具          內容空間
+  Warp/xAI         Stripe/Apple
 
 極簡 ←→ 豐富
-  克制留白          豐富互動
+  Vercel/Cal.com   Figma/Miro
 ```
-Bridge App 定位：精密工程 + 工具優先 + 適度極簡（偏精確極簡一側）
+Bridge App 定位：精密工程 + 工具優先 + 適度極簡（偏 Linear/Vercel/Raycast）
 
 ## 總結
 
@@ -402,7 +402,7 @@ Bridge App 定位：精密工程 + 工具優先 + 適度極簡（偏精確極簡
 5. 每個操作都有回饋
 6. 留白是設計元素
 7. 不產出 AI 設計垃圾
-8. 遵循極簡、精確、有質感的暗色美學
+8. 參考 Linear/Vercel/Raycast 的暗色美學
 
 ## 色彩理論進階
 
@@ -643,4 +643,4 @@ final bridge = Theme.of(context).extension<BridgeDSExtension>()!;
 ## 完整參考資料
 - 研究全文 1：`lib/services/agent_loop/research_visual_fundamentals.md`（色彩/字體/間距/高度/WCAG）
 - 研究全文 2：`lib/services/agent_loop/research_uiux_principles.md`（格式塔/費茲/希克/佈局/桌面模式/macOS HIG）
-- 研究全文 3：`lib/services/agent_loop/research_systems_darkmode.md`（暗色模式/M3/macOS HIG/Token 系統/Flutter theming/反模式/動畫）
+- 研究全文 3：`lib/services/agent_loop/research_systems_darkmode.md`（暗色模式/M3/Apple HIG/Token 系統/Flutter theming/反模式/動畫）

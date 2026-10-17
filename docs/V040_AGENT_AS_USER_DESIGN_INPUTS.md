@@ -34,7 +34,7 @@ agent 要能像人類使用者一樣「看見畫面、操作介面、驗證結�
 ## 2. 現況盤點：8420 通道全貌（2026-09-26 實證）
 
 - HTTP router **68 條 route**（`bridge_mcp_server.dart`）
-- MCP 層只暴露 **14 個工具**——**54 條隱藏門**（`/navigate`、`/get_app_state`、`/app_view`、
+- MCP 層註冊 **43 個工具**（2026-10-15 Fable V2 複驗修正；本文件初稿誤記 14）——其餘 route 仍屬內部通道（`/navigate`、`/get_app_state`、`/app_view`、
   `/send_user_message`、`/vector_search`、`/galaxy_cmd`…）MCP discovery 看不到
 - 原生 Agent（App 內）已有眼：`canvas_look`（周邊視覺）、`canvas_capture`（注視）——
   但外部 agent（Hermes 小葵）只能走 HTTP/MCP，感官不對稱

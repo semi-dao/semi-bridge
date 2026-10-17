@@ -140,6 +140,12 @@ void main(List<String> args) async {
     }
   }
 
+  // [T7④ 根修 2026-10-16] localOnly 預熱——冷啟動第一輪 race 窗口關閉。
+  // 盲測實證：首輪 SharedPreferences 未載入完成 → getLocalOnly=false →
+  // 打雲 401。runApp 前同步讀一次，static 快取從第一輪就正確。
+  try {
+    await StorageService.getLocalOnly();
+  } catch (_) {}
   runApp(const BridgeApp());
   // [小葵 2026-10-01 離合器] App 啟動掛 Scheduler——
   // 載入角色設定＋定時評估（閒置+有待辨識 → 自動切辨識模式）

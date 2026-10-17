@@ -136,7 +136,7 @@ def check_server_alive() -> bool:
         print(f"{C.DIM}   連線失敗: {e}{C.RST}")
         print()
         print(f"{C.B}💡 啟動方式：{C.RST}")
-        print(f"   {C.DIM}cd $HOME/Developer/bridge_app && flutter run -d macos{C.RST}")
+        print(f"   {C.DIM}cd <HOME>/Developer/bridge_app && flutter run -d macos{C.RST}")
         print()
         print(f"{C.DIM}（啟動後 MCP server 會自動 listen 在 localhost:8420）{C.RST}")
         return False

@@ -115,7 +115,7 @@ class _GalaxyWebViewState extends State<GalaxyWebView> {
       // token 走 query → 頁內 fetch 帶 x-bridge-token header 過 MCP 閘門
       // [v85b] probe 模式開關：~/galaxy_probe 檔存在時帶 ?probe=1（零場景 rAF 測試）
       var probe = '';
-      try { final pf = File(resolveDevPath('~/galaxy_probe')); if (pf.existsSync()) probe = '&probe=' + pf.readAsStringSync().trim(); } catch (_) {}
+      try { final pf = File('<HOME>/galaxy_probe'); if (pf.existsSync()) probe = '&probe=' + pf.readAsStringSync().trim(); } catch (_) {}
       _url = 'http://localhost:8420/galaxy?token=$token$probe&app=1&cb=${DateTime.now().millisecondsSinceEpoch}'; // [v53] 時間戳破快取——WKWebView 舊頁=律動/FPS 修復沒生效的根因
     });
   }

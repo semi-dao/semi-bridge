@@ -4,7 +4,7 @@
 > **角色**：Bridge LOGO 動畫、DAO 鉚釘瞬間、AI 共識提示、畫布粒子背景等所有「事件驅動視覺效果」的設計規範
 > **生效範圍**：獨立於 `BridgeDSColors` token 層；只在氣氛層 z-index 內運作
 > **不影響**：App 功能層 UI、字體級距、顏色 token 表、widget 邏輯
-> **參考座標**：事件驅動 WebGL 視覺的設計紀律
+> **參考座標**：Active Theory（activetheory.net）的 WebGL 設計紀律
 > **適用平台**：橋樑 App 桌面版（macOS / Windows / Linux）
 
 > **📱 手機版刪除宣告（2026-08-10）**：
@@ -25,8 +25,8 @@ Bridge App 的視覺目前分兩層：
 
 兩層的**紀律標準不同**：
 
-- 功能層 → 暗底低飽和、長時間使用不疲勞
-- 氣氛層 → 粒子宇宙、量子感、事件驅動
+- 功能層 → 對齊 Raycast + xAI 的「暗底低飽和、長時間使用不疲勞」
+- 氣氛層 → 對齊 Active Theory 的「粒子宇宙、量子感、事件驅動」
 
 兩層之間**永遠不會互相搶按鈕點擊、焦點、focus**。氣氛層只透過事件 bus 接收觸發，渲染時永遠在功能層之下（z-index 邏輯）。
 
@@ -44,9 +44,9 @@ Bridge App 的視覺目前分兩層：
 | **有回應** | 氣氛是「對事件的回應」而不是「裝飾」。每次出現都有可指認的觸發源。 |
 | **不斷線** | 氣氛層與功能層之間的事件通訊是冪等、可恢復、不打斷使用者流程的。 |
 
-### 2.2 效能設計紀律
+### 2.2 從 Active Theory 蒸餾的設計紀律
 
-沉浸層效能紀律的核心信條：
+源自 activetheory.net 自己 Medium 文章「The Story of Technology Built at Active Theory」明確寫下的原則：
 
 > "high CPU usage is actually the most likely culprit of a common negative symptom of WebGL experiences, **the annoying sound of fans spinning up to full speed**."
 
@@ -83,7 +83,7 @@ particle:
 
 ### 3.2 軌跡 (Trail)
 
-粒子移動時留下的視覺痕跡。對應 spline 粒子軌跡 shader 的實作。
+粒子移動時留下的視覺痕跡。呼應 Active Theory 的 `SplineParticleInstance` shader。
 
 ```yaml
 trail:
@@ -455,7 +455,7 @@ event_bus:
 |---|---|---|
 | Phase 0 | 2026-08 | 本文件 v0.1 草稿完成 ✅ |
 | Phase 1 | 2026-08 | 獨立 `bridge-atmosphere/` repo 建立 |
-| Phase 1 | 2026-08 | Flutter particle widget + shader port（沉浸層風格蒸餾） |
+| Phase 1 | 2026-08 | Flutter particle widget + shader port（從 Active Theory 風格蒸餾） |
 | Phase 1 | 2026-08 | 4 個情境 demo：splash / dao_seal / ai_thinking / canvas_workflow |
 | Phase 1 | 2026-08 | GPU 預算管理器 + 降級策略實作 |
 | Phase 2 | 2026-09 | 第一個官方主題包 `atmosphere_quantum_cosmos` 完整可安裝 |
@@ -468,7 +468,7 @@ event_bus:
 
 | 日期 | 版本 | 變更 |
 |---|---|---|
-| 2026-08-06 | v0.1 | 初稿建立。納入沉浸層設計紀律、SemiMaker 時刻表、LOGO 形狀規則、主題包架構 |
+| 2026-08-06 | v0.1 | 初稿建立。納入 Active Theory 設計紀律、SemiMaker 時刻表、LOGO 形狀規則、主題包架構 |
 
 ---
 
@@ -495,12 +495,12 @@ event_bus:
 
 ## 附錄 B：參考座標
 
-- **事件驅動視覺** — 氣氛只在事件發生時出現，效果必須有可指認的觸發源
-- **效能紀律** — 風扇不狂轉、主執行緒不被佔用，是沉浸層成立的前提
-- **跨平台單一 codebase** — 同一份渲染核心跨 web / iOS / Android / 桌面
+- **Active Theory**（activetheory.net）— Venice CA 創意工作室，2012 創立，自製 Hydra 框架
+- **The Story of Technology Built at Active Theory** — Medium 文章，風扇/主執行緒紀律的原始出處
+- **Mira prototype** — 同一份 JavaScript codebase 跨 web / iOS / Android / Apple TV / Kinect
 - **狀態即函數** — state-based functional programming（與 Bridge 畫布引擎同源）
 
 ---
 
 — 教練 Agent 2026-08-06 12:15  
-*基於 2026-08-05 鏡像奇點對話、2026-08-06 沉浸層蒸餾討論、與 使用者 三輪決策*
+*基於 2026-08-05 鏡像奇點對話、2026-08-06 Active Theory 蒸餾討論、與 使用者 三輪決策*

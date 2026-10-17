@@ -189,7 +189,7 @@ String? _findRoot() {
     dir = parent;
   }
   // fallback：已知本尊路徑
-  final fallback = resolveDevPath('~/Developer/bridge_app');
+  const fallback = '<HOME>/Developer/bridge_app';
   if (File('$fallback/pubspec.yaml').existsSync()) return fallback;
   return null;
 }

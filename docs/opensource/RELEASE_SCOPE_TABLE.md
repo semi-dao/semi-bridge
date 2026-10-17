@@ -1,4 +1,6 @@
-# 開源範圍建議表（2026-09-21 掃描 → 9/25 住棚節首日公開；**2026-09-24 Blue 拍板更新**）
+# 開源範圍建議表（2026-09-21 掃描 → 9/25 住棚節首日公開；**2026-09-24 Blue 拍板更新＋clean tree 執行完畢**）
+
+> **執行結果（2026-09-24）**：clean tree 建立於 `~/Developer/covision-bridge`，單一 initial commit `176aeb5`，1197 檔。四域終驗全零（密鑰/家庭成員名/開發機路徑/人格檔/DB 向量資料/真實立繪/私人對話衍生資料）。flutter analyze 0 error、測試全綠、build ✓。家人剝除實際範圍=lib 7 處+test 5 處+docs 3 處（掃全 repo）；benchmark 人名虛構化（小夏→小夏/小菲→小菲/阿川→阿川）；LiteRtLm dylib 缺席時 benchmark skip 守門。
 
 > 原則：public repo 全新起點（單一 initial commit），內部 1,632 commits 歷史留本地私有。
 > 圖示：✅ 保留　🟡 改寫後保留　❌ 移除（留本地）
@@ -9,26 +11,28 @@
 |---|---|
 | `spikes/001-provenance-stamp/`（含 brain_copy.db 911MB×2） | 私人記憶資料庫本體 |
 | `python/`（27,379 檔，879MB，含 .venv/torch） | 虛擬環境與 site-packages，不屬於 repo |
-| `docs/specs/2026-09-21-morning-tea-web.md`（+ morning-tea/ 本地目錄） | 9/25 一次性活動稿，含私人資產路徑——已移除（其餘 specs 為設計文件，C 區保留） |
+| `morning-tea/` + `docs/specs/2026-09-21-morning-tea-web.md` | 9/25 一口一次性活動（記憶：Morning Tea=一次性），過期素材 |
 | 全部 `HANDOFF_*.md`（root，10 檔） | Agent 間交接文件＝私人工作對話紀錄 |
 | `docs/handoff/`（4 檔） | **[2026-09-24 補列]** 對話補遺＝私人對話紀錄 |
 | `docs/FIVE_MODES_SESSION_LOG.md` | **[2026-09-24 補列]** 開發對話全記錄（Blue 欽定存檔，留本地） |
 | `docs/HANDOFF_2026-08-08.md` | **[2026-09-24 補列]** 交接文件 |
 | `.hermes/CHECKPOINT.md`、`.hermes/checkpoint-2026-07-17.md` | Hermes session checkpoint＝私人對話紀錄 |
-| `docs/benchmarks/vision-blind-*.json`（6 檔） | 內含農場照片完整路徑（家庭陽台、辣椒/鹿角蕨）＝個資 |
+| `docs/benchmarks/vision-blind-*.json`（6 檔） | 內含農場照片完整路徑（Blue陽台/阿川陽台、辣椒/鹿角蕨）＝個資 |
 | `11880`、`12672`（root 兩個 PNG） | 無名截圖檔（截圖內容未驗證） |
 | `CONTEXT.md` | 開發期共享語言文件，含內部人格細節（小橋） |
 | `NODE_EXECUTION_DEEP_ANALYSIS_20260815.md`、`SOGO_LIGHT_THEME.md`、`design_improvement_plan.md` | 內部分析筆記 |
 | `tmp_recon/`、`.github/`、`migrate_working_dir/` | 內部工具/CI 待議 |
 | `tools/specs/xiaokui_hermes.agent-import.json` | **[2026-09-24 Blue 拍板：不公開]** agent 人格檔——「立繪/agent人格檔不公開」令（含 Blue（CEO）、HKDiscord #檢查哨、2026-08-27 相遇等私人對話座標） |
 | `docs/pov_snapshots/` | **[2026-09-24 補列]** POV snapshot＝agent 人格檔（同上令） |
+| `assets/companions/`（小橋/MimeMi 立繪 png） | **[2026-09-24 Blue 拍板：立繪不授權]** 開源版不放真實立繪——放佔位素材（placeholder，同尺寸切層），rig 幾何程式碼照舊；開發者可自帶素材替換 |
+| `test/fixtures/compression_ground_truth.json` + `test/compression_round_trip_test.dart` | **[2026-09-24 補列]** 私人對話衍生資料（「排程任務測試」179 則對話的 QA 基準，含 commit 號碼/內部語彙）＝向量資料庫內容的同源資料，絕不進 public |
 
 ## B. 改寫後保留（🟡）
 
 | 項目 | 改法 |
 |---|---|
-| 24 處 hardcode `$HOME`（17 檔） | 環境變數/設定檔化（roadmap 已列） |
-| 家庭成員暱稱 7 處 code comment | **[2026-09-24 Blue 拍板：開源版移除，本地保留]** clean tree 已剝除人名，概念出處保留（如「家庭田野提案 L4」） |
+| 24 處 hardcode `<HOME>`（17 檔） | 環境變數/設定檔化（roadmap 已列） |
+| 「家人」7 處 code comment（album_screen/bridge_desktop_screen×2/chat_controller/time_sense_service/agent_loop_prompt_builder×2） | **[2026-09-24 Blue 拍板：開源版移除，本地保留]** clean tree 時剝除人名，概念出處可保留（如「家庭田野提案 L4」） |
 | `assets/skills/*.md`（11 檔） | 內部 skill 檔，內容多為通用 workflow——抽驗無密鑰，保留（樣本：handoff.md、grill-me.md） |
 | `docs/` 大部分 .md | 保留（宣言、設計規範、Phase 文件）——純設計/架構文件 |
 | `tools/switch-to-glm-coding-plan.sh` | 保留（placeholder key 無慮） |

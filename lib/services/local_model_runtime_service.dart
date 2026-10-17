@@ -473,7 +473,11 @@ class LocalModelRuntimeService {
     if (nativeState != null) {
       final checkedState = await _withBridgeRuntimeHealth(nativeState);
       if (checkedState.serverHealthy == true) {
-        await activateBridgeRuntimeAsBrain(checkedState);
+        // [T7③ 2026-10-16 編織線 D7] startServer 是 clutch/背景行為——
+        // 只通知路由層「本地可用」，禁改使用者 storage provider。
+        // 寫 storage（saveProvider('local')）只留給使用者明確「設為現役」
+        // 的 activateBridgeRuntimeAsBrain。
+        _notifyRouterLocalAvailable();
       }
       _publishCompanionSignal(checkedState);
       return checkedState;
@@ -487,6 +491,12 @@ class LocalModelRuntimeService {
       primaryActionLabel: '等待桌面端支援',
       primaryActionEnabled: false,
     );
+  }
+
+  /// [T7③ 2026-10-16 編織線] 背景 clutch 用的輕量通知——只動路由層記憶體，
+  /// 不碰 StorageService（使用者選的 provider 不被背景程序覆蓋，D7）
+  void _notifyRouterLocalAvailable() {
+    ProviderRouter.instance.localServerAvailable = true;
   }
 
   Future<bool> activateBridgeRuntimeAsBrain(

@@ -22,6 +22,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'scrub_history_store.dart'; // [Blue 令 2026-10-17] 除痕歷史
 
 import '../vector_db/vision_embedding_pipeline.dart';
 
@@ -156,6 +157,18 @@ class TraceScrubber {
     await prefs.setString(_lastRunKey, now.toIso8601String());
     debugPrint('[TraceScrubber] 自動除痕：清了 ${items.length} 檔 / '
         '${(freed / 1024).toStringAsFixed(0)}KB');
+    // [Blue 令 2026-10-17] 除痕歷史——什麼時候清了什麼、清了多大
+    if (items.isNotEmpty) {
+      await ScrubHistoryStore.instance.record(
+        trigger: 'auto',
+        files: items.length,
+        bytes: freed,
+        items: [
+          for (final it in items)
+            {'label': it.label, 'bytes': it.bytes},
+        ],
+      );
+    }
   }
 
   bool _globMatch(String name, Pattern p) {

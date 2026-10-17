@@ -64,7 +64,7 @@
       "fts_rank": 1
     },
     {
-      "query": "阿川 對 CI 有什麼想法？",
+      "query": "Peter 對 CI 有什麼想法？",
       "note": "多人稱",
       "pipeline_rank": null,
       "fts_rank": null

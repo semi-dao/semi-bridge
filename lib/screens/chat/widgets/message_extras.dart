@@ -72,8 +72,11 @@ Widget buildTextSelectionContextMenu(
 
 /// 解析 agent 名稱。
 String resolveAgentName(String speakerId) {
+  // [指紋定律 2026-10-16 Blue] 原生 Agent 具名——不是匿名「夥伴」。
+  // 沒有 companion 的對話＝App 原生 Agent（小葵家族的預設身份）。
+  if (speakerId == 'native-agent') return '原生 Agent';
   final companion = CompanionStore().getById(speakerId);
-  return companion?.name ?? '夥伴';
+  return companion?.name ?? '原生 Agent';
 }
 
 /// 回答回饋列：準確 / 不準確 / 先別採用。

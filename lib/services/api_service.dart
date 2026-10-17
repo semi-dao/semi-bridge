@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'storage_service.dart';
 import 'brain_revival_service.dart';
-import 'local_model_runtime_service.dart';
 import 'provider_router.dart'; // [教練 Agent 2026-07-29] 读取路由结果
 import 'provider_registry.dart'; // [教練 Agent 2026-07-30] 動態 provider/模型探測
 import 'api_usage_tracker.dart'; // [教練 Agent 2026-07-29] API 額度追蹤
@@ -114,6 +113,9 @@ class ApiService {
 
   /// [教練 Agent 2026-07-30] 統一解析 provider——'default' 轉成路由結果的實際 provider
   static Future<String> _effectiveProvider() async {
+    // [T7④ 補刀2 2026-10-16] localOnly 一票否決——第三處側門：
+    // stored=openai 直接返回，繞過路由層。斷網血管：一律 local。
+    if (await StorageService.getLocalOnly()) return 'local';
     final stored =
         await StorageService.getProvider() ??
         await StorageService.detectAvailableProvider() ??
@@ -129,12 +131,19 @@ class ApiService {
   /// [教練 Agent 2026-07-30] 'default' 預設選型模式：用 ProviderRouter.routedBaseUrl
   static Future<String?> _getBaseUrl() async {
     if (_overrideBaseUrl != null) return _overrideBaseUrl;
-    // [教練 Agent 2026-07-30] 預設選型模式——用路由結果的 URL
-    final provider = await StorageService.getProvider();
-    if (provider == 'default') {
-      final routedUrl = ProviderRouter.instance.routedBaseUrl;
-      if (routedUrl != null && routedUrl.isNotEmpty) return routedUrl;
+    // [T7④ 補刀3 2026-10-16 深夜] localOnly 直接回本地 endpoint——
+    // 不吃 routedBaseUrl（殘留雲端）也不 fallback storage（openai）
+    if (await StorageService.getLocalOnly()) {
+      debugPrint('[T7④TRACE] _getBaseUrl localOnly → 本地 endpoint');
+      return await StorageService.getLocalModelEndpoint() ?? 'http://127.0.0.1:18789';
     }
+    // [T7① 2026-10-16 編織線 D7] 分流只有一個腦——一律先吃 ProviderRouter
+    // 路由結果（chat_controller 每輪 setCurrent；使用者明選 provider 時
+    // setCurrent 也會設成使用者選的雲端 URL），刪除 provider=='default'
+    // 特例判斷。routedBaseUrl 是記憶體值，永不覆蓋使用者 storage。
+    final routedUrl = ProviderRouter.instance.routedBaseUrl;
+    if (routedUrl != null && routedUrl.isNotEmpty) return routedUrl;
+    final provider = await StorageService.getProvider();
     // [教練 Agent 2026-08-16 使用者 抓包] billing mode 糾偏——存起來的 gateway_url
     // 可能跟 billing mode 脫鉤（歷史 bug：切計費模式沒寫回 URL）。
     // 這裡當場比對：billing mode 說的 URL 跟存的 URL 不同 provider 網域
@@ -165,6 +174,12 @@ class ApiService {
   /// [教練 Agent 2026-07-30] 'default' 預設選型模式：用路由結果的 provider 查 token
   static Future<String?> _getToken() async {
     if (_overrideToken != null) return _overrideToken;
+    // [T7④ 補刀3] localOnly 回本地 token（'ollama'/'bridge-local-runtime'）——
+    // 不因 storage provider=openai 而拿過期雲 token
+    if (await StorageService.getLocalOnly()) {
+      debugPrint('[T7④TRACE] _getToken localOnly → ollama');
+      return 'ollama';
+    }
     final provider = await StorageService.getProvider();
     if (provider == 'default') {
       final routedProvider = ProviderRouter.instance.current?.providerId;

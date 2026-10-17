@@ -16,12 +16,12 @@
 
 ## 📜 緣起
 
-橋樑 App 從 2026-04 開始，累積了五種設計質地的揉合：
-- 深色科技氛圍
-- 色彩質感
-- 向量粒子
-- 動態活潑
-- 無限畫布連續感
+橋樑 App 從 2026-04 開始，已累積 5 套設計系統的混血：
+- **xAI** 深色科技氛圍
+- **Raycast** 色彩質感
+- **Stripe** 向量粒子
+- **Figma** 動態活潑
+- **Miro** 無限畫布連續感
 
 過去這些規則散落在 `lib/theme/bridge_design_system.dart` 註解裡，沒有正式名稱，也沒有可被外部社群擴充的介面。
 
@@ -259,7 +259,7 @@ Q8: 這是輔助說明 / metadata / 狀態 / tag / loading 文字嗎？
 
 | Mode | 用途 |
 |---|---|
-| `BridgeDSColors.dark` | 預設（暗色科技氛圍） |
+| `BridgeDSColors.dark` | 預設（暗色 xAI 科技氛圍） |
 | `BridgeDSColors.light` | 淺色（純白卡片、淺灰畫布底） |
 
 每個模式**必須實作所有 33 個 token**，不允許 token 在某個模式下是 null。

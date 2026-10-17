@@ -19,6 +19,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'provider_router.dart';
 import 'storage_service.dart';
 
 enum MemoryGuardLevel { green, yellow, red, critical }
@@ -237,6 +238,15 @@ class MemoryGuardService {
       await _channel.invokeMethod('killLocalModel');
     } catch (_) {}
 
+    // [T7④ 2026-10-16 編織線] localOnly 模式——不上雲。
+    // 殺本地模型後 provider 維持 local（無腦可用）=使用者要求下一輪明確重試，
+    // 而不是默默把資料送出機器（D7：localOnly 是 M6 的一等設定）
+    if (await StorageService.getLocalOnly()) {
+      debugPrint('[MemoryGuard] localOnly：critical 只殺本地引擎，不上雲——'
+          '維持 provider=local，等使用者重試或喚醒');
+      return;
+    }
+
     // 切到雲端
     final current = await StorageService.getProvider() ?? '';
     if (current == 'local') {
@@ -253,7 +263,7 @@ class MemoryGuardService {
   /// 取得使用者設定過的雲端 provider 列表
   Future<List<String>> _getSavedCloudProviders() async {
     final providers = <String>[];
-    for (final p in ['minimax', 'glm', 'openai', 'kimi', 'anthropic']) {
+    for (final p in ProviderRouter.cloudFallbackOrder) { // [T7⑤] 統一常數
       final token = await StorageService.getToken(provider: p);
       if (token != null && token.isNotEmpty) {
         providers.add(p);
