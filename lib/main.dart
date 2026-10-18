@@ -7,6 +7,8 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import 'app.dart';
 import 'quick_assistant_window.dart' as qa_window; // [無限插槽 C1 2026-10-06 移植]
+import 'package:path_provider/path_provider.dart' show getApplicationSupportDirectory; // [小葵 2026-10-18] SlotRegistry 接線
+import 'services/slots/slot_registry.dart' show SlotRegistry; // [小葵 2026-10-18] 根路徑注入
 import 'services/local_model_scheduler.dart'; // [小葵 2026-10-01] 離合器
 import 'services/agent_loop/app_log_buffer.dart';
 import 'services/sovereignty/trace_scrubber.dart';
@@ -146,6 +148,21 @@ void main(List<String> args) async {
   try {
     await StorageService.getLocalOnly();
   } catch (_) {}
+
+  // [小葵 2026-10-18 Blue 拍板] SlotRegistry 根路徑接線——
+  // 之前全 repo 無人呼叫 init()，slotsDir 落到相對路徑 `slots`（看啟動
+  // cwd 臉色）：watchdog/launchd 拉（cwd=/）→ 讀 /slots 失敗空開機；
+  // flutter run 拉（cwd=repo）→ 寫進 repo 污染工作區。歷史上已漂出
+  // 三份 index.json。此處在 runApp 前注入 App Support 真實路徑，
+  // 之後任何啟動方式都讀同一份正本。
+  try {
+    final dir = await getApplicationSupportDirectory();
+    await SlotRegistry.init(dir);
+    debugPrint('[SlotRegistry] 根路徑已接線: ${dir.path}/slots');
+  } catch (e) {
+    debugPrint('[SlotRegistry] init 接線失敗（registry 將退相對路徑）: $e');
+  }
+
   runApp(const BridgeApp());
   // [小葵 2026-10-01 離合器] App 啟動掛 Scheduler——
   // 載入角色設定＋定時評估（閒置+有待辨識 → 自動切辨識模式）

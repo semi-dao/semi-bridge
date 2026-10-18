@@ -26,6 +26,13 @@ class BuiltinSkillsLoader {
     'codebase-design.md',
     // [小葵 2026-10-04 Blue 令「不教而殺謂之虐」] 視覺問題先看畫面再查 log
     'observe-first.md',
+    // [小葵 2026-10-18 Blue 拍板] mattpocock 五顆獨有概念自製版——
+    // 概念取樣、內容自寫（見 Hermes 端同名 skill 完整版）
+    'wait-what.md',
+    'to-questionnaire.md',
+    'teach.md',
+    'domain-modeling.md',
+    'wizard.md',
   ];
 
   /// 載入內建 skills 到指定目錄
