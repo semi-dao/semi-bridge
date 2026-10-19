@@ -76,8 +76,6 @@ dependencies:
   # [教練 Agent 2026-07-24] P4: 系統列圖示 + 視窗管理
   tray_manager: ^0.4.0
   window_manager: ^0.4.3
-  desktop_multi_window: ^0.3.1
-  hotkey_manager: ^0.2.3
 
   # MCP HTTP server
   shelf: ^1.4.2
@@ -107,7 +105,7 @@ flutter:
     - assets/icons/
     - assets/theme_packs/
     - assets/companions/xiaoqiao/
-    - assets/persona/  # [T4① 2026-10-16 編織線] M2 語氣層——App 資產不是訓練產物（D6）
+# [開源版] assets/persona/ 為私有語氣層資產，開源版不附（M2PersonaService fail-open 跳過注入）
     - assets/companions/mimemi/
   fonts:
     - family: BridgeCJK
