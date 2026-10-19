@@ -31,11 +31,14 @@ class EventLedger {
     _ensured = false;
     _ensuredV3 = false;
     _ensuredV4 = false;
+    _ensuredV5 = false;
   }
 
   bool _ensured = false;
   bool _ensuredV3 = false;
   bool _ensuredV4 = false;
+  bool _ensuredV5 = false;
+  bool _ensuredV6 = false; // [T12-④] conversation_id 欄遷移旗
 
   void _ensureTable() {
     if (!_ensured) {
@@ -87,6 +90,34 @@ class EventLedger {
       }
       _ensuredV4 = true;
     }
+    if (!_ensuredV5) {
+      // v5 [小葵 2026-10-15 T2/D2] 信心雙軌制：
+      // confidence＝K1「要不要查記憶」的信心（原有，誤用中）；
+      // answer_confidence＝「回答正確性」信心（校準/熔斷/M6 修正率唯一吃的）。
+      // 舊列 NULL＝尚未有來源；onlineCalibration 對 NULL 桶跳過（見下）。
+      final cols = _db.select('PRAGMA table_info(event_ledger)');
+      final hasAnsConf = cols.any((c) => c['name'] == 'answer_confidence');
+      if (!hasAnsConf) {
+        _db.execute('ALTER TABLE event_ledger ADD COLUMN answer_confidence REAL');
+      }
+      _ensuredV5 = true;
+    }
+    if (!_ensuredV6) {
+      // v6 [T12-④ 2026-10-17] lastTurnId 帶對話歸屬——全域「最新一輪」
+      // 在多對話並行時會指錯輪（A 對話的糾正掛到 B 對話的 turn 上）。
+      // conversation_id 落欄；lastTurnId(conversationId) 過濾後回
+      // 「該對話」最新一輪。舊列 NULL＝未標記（全域 fallback 行為保留）。
+      final cols = _db.select('PRAGMA table_info(event_ledger)');
+      final hasConv = cols.any((c) => c['name'] == 'conversation_id');
+      if (!hasConv) {
+        _db.execute(
+            'ALTER TABLE event_ledger ADD COLUMN conversation_id TEXT');
+        _db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_event_ledger_conv '
+            'ON event_ledger(conversation_id)');
+      }
+      _ensuredV6 = true;
+    }
   }
 
   String? _lastHash() {
@@ -94,6 +125,28 @@ class EventLedger {
       'SELECT hash_self FROM event_ledger ORDER BY rowid DESC LIMIT 1',
     );
     return row.isEmpty ? null : row.first['hash_self'] as String;
+  }
+
+  /// [小葵 2026-10-14 M3-第三刀] 最近一筆 turn 的 turn_id——
+  /// 糾正→reaction 接線用（chat_controller 不必知道 turnId 生成細節）。
+  /// [T12-④ 2026-10-17] 帶對話歸屬過濾——多對話並行時全域「最新一輪」
+  /// 會指錯（A 對話的糾正掛到 B 的 turn）。帶 [conversationId] 時只回
+  /// 該對話的最新一輪；不帶＝舊行為（全域最新，未標記歸屬的舊列相容）。
+  String? lastTurnId({String? conversationId}) {
+    if (conversationId != null) {
+      final row = _db.select(
+        "SELECT turn_id FROM event_ledger "
+        "WHERE kind='turn' AND conversation_id = ? "
+        "ORDER BY rowid DESC LIMIT 1",
+        [conversationId],
+      );
+      if (row.isNotEmpty) return row.first['turn_id'] as String;
+      // 該對話沒有標記過的輪——fallback 全域（未遷移的舊輪相容）
+    }
+    final row = _db.select(
+      "SELECT turn_id FROM event_ledger WHERE kind='turn' ORDER BY rowid DESC LIMIT 1",
+    );
+    return row.isEmpty ? null : row.first['turn_id'] as String;
   }
 
   String _hash({
@@ -136,6 +189,153 @@ class EventLedger {
   }
 
   /// 落一筆對話輪次事件。回傳 hash_self。
+  /// [T11②+ 2026-10-17 Blue #4] 近 N 天逐輪記錄——儀表滾動列表資料源。
+  /// 每筆：{ts, provider, model, is_local, unknown}。舊輪無 provider
+  /// 標 unknown（誠實顯示，不猜）。
+  List<Map<String, dynamic>> recentTurns({int days = 7}) {
+    try {
+      final db = _db;
+      if (db == null) return [];
+      final since = DateTime.now()
+          .subtract(Duration(days: days))
+          .millisecondsSinceEpoch;
+      final rows = db.select(
+          "SELECT ts, meta FROM event_ledger WHERE kind = 'turn' AND ts >= ? ORDER BY ts DESC",
+          [since]);
+      final out = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        Map<String, dynamic> meta = {};
+        try {
+          meta = (jsonDecode(r['meta'] as String) as Map).cast<String, dynamic>();
+        } catch (_) {}
+        out.add({
+          'ts': r['ts'] as int,
+          'provider': meta['provider'],
+          'model': meta['model'],
+          'is_local': meta['is_local'] == true,
+          'unknown': !meta.containsKey('provider'),
+        });
+      }
+      return out;
+    } catch (e) {
+      debugPrint('[EventLedger] recentTurns 失敗: $e');
+      return [];
+    }
+  }
+
+  /// [T11③ 2026-10-17] 修正率週報——correction_events / turns。
+  /// 驗收：修正率三週遞減。無反應記錄時回 null（誠實：分母不足不硬算）。
+  Map<String, dynamic>? correctionWeeklyReport({int weeks = 3}) {
+    try {
+      final db = _db;
+      if (db == null) return null;
+      final report = <String, dynamic>{'weeks': <Map<String, dynamic>>[]};
+      final now = DateTime.now();
+      for (var w = 0; w < weeks; w++) {
+        // 本週窗口含 now（w=0 時 end=now+1s 防邊界漏掉剛發生的輪）
+        final end = now.subtract(Duration(days: 7 * w)).add(const Duration(seconds: 1));
+        final start = end.subtract(const Duration(days: 7));
+        final turnsN = db.select(
+            "SELECT COUNT(*) as n FROM event_ledger WHERE kind = 'turn' AND ts >= ? AND ts < ?",
+            [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch]).first['n'] as int;
+        var correctedN = 0;
+        try {
+          correctedN = db.select(
+              "SELECT COUNT(*) as n FROM correction_events WHERE created_at >= ? AND created_at < ?",
+              [start.millisecondsSinceEpoch, end.millisecondsSinceEpoch]).first['n'] as int;
+        } catch (_) {
+          // 表不存在（早期 DB）——0
+        }
+        (report['weeks'] as List).add({
+          'week_start': start.toIso8601String().substring(0, 10),
+          'turns': turnsN,
+          'corrected': correctedN,
+          'rate': turnsN == 0 ? null : (correctedN / turnsN),
+        });
+      }
+      return report;
+    } catch (e) {
+      debugPrint('[EventLedger] correctionWeeklyReport 失敗: $e');
+      return null;
+    }
+  }
+
+  /// [T11② 2026-10-17] 雲端率統計——近 N 天 turn 的 provider 分佈。
+  /// 回傳 {total, local, cloud, by_provider}。無 meta 的舊輪次不計入
+  /// （誠實：分母=有路由記錄的輪次，不是全部輪次）。
+  Map<String, dynamic> cloudRateStats({int days = 7}) {
+    try {
+      final db = _db;
+      if (db == null) return {'total': 0};
+      final since = DateTime.now()
+          .subtract(Duration(days: days))
+          .millisecondsSinceEpoch;
+      final rows = db.select(
+          "SELECT meta FROM event_ledger WHERE kind = 'turn' AND ts >= ? AND meta IS NOT NULL",
+          [since]);
+      var local = 0, cloud = 0;
+      final byProvider = <String, int>{};
+      var unknown = 0; // [Blue 抓包 2026-10-17 #4] 舊輪無 provider——誠實分類
+      for (final r in rows) {
+        try {
+          final meta = (jsonDecode(r['meta'] as String) as Map);
+          final hasRoute = meta.containsKey('provider');
+          if (!hasRoute) {
+            unknown++; // 補記機制上線前的歷史輪——不算本地也不算雲端
+            continue;
+          }
+          final isLocal = meta['is_local'] == true;
+          final provider = meta['provider']?.toString() ?? 'unknown';
+          if (isLocal) {
+            local++;
+          } else {
+            cloud++;
+          }
+          byProvider[provider] = (byProvider[provider] ?? 0) + 1;
+        } catch (_) {
+          unknown++;
+        }
+      }
+      return {
+        'total': local + cloud, // 分母=有路由記錄的輪（誠實：不含 unknown）
+        'local': local,
+        'cloud': cloud,
+        'unknown': unknown,
+        'by_provider': byProvider,
+      };
+    } catch (e) {
+      debugPrint('[EventLedger] cloudRateStats 失敗: $e');
+      return {'total': 0};
+    }
+  }
+
+  /// [T11② 2026-10-17] 補記 turn meta——LLM 呼叫完成後才知道的欄位
+  /// （provider/model/is_local）。雲端率儀表的資料源：不改 appendTurn
+  /// 簽名（它在注入前呼叫，provider 還沒定）。
+  void updateTurnMeta(String turnId, Map<String, dynamic> extra) {
+    try {
+      final db = _db;
+      if (db == null) return;
+      final row = db.select(
+          "SELECT meta FROM event_ledger WHERE turn_id = ? AND kind = 'turn'",
+          [turnId]);
+      if (row.isEmpty) return;
+      final raw = row.first['meta'] as String?;
+      Map<String, dynamic> meta = {};
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          meta = (jsonDecode(raw) as Map).cast<String, dynamic>();
+        } catch (_) {}
+      }
+      meta.addAll(extra);
+      db.execute(
+          "UPDATE event_ledger SET meta = ? WHERE turn_id = ? AND kind = 'turn'",
+          [jsonEncode(meta), turnId]);
+    } catch (e) {
+      debugPrint('[EventLedger] updateTurnMeta 失敗（fail-open）: $e');
+    }
+  }
+
   String appendTurn({
     required String turnId,
     required String input,
@@ -143,9 +343,11 @@ class EventLedger {
     List<String> injectedIds = const [],
     String? decision,
     double? confidence,
+    double? answerConfidence, // [T2/D2] 回答正確性信心（校準/熔斷用）
     String? executor,
     String? output,
     Map<String, dynamic>? meta,
+    String? conversationId, // [T12-④] 對話歸屬——lastTurnId 過濾用
   }) {
     _ensureTable();
     final prev = _lastHash() ?? 'GENESIS';
@@ -160,12 +362,27 @@ class EventLedger {
       hashPrev: prev,
     );
     _db.execute(
-      'INSERT INTO event_ledger (kind, turn_id, ts, input, input_hash, injected_ids, decision, confidence, executor, output, meta, hash_prev, hash_self) '
-      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO event_ledger (kind, turn_id, ts, input, input_hash, injected_ids, decision, confidence, answer_confidence, executor, output, meta, conversation_id, hash_prev, hash_self) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [ 'turn', turnId, ts, input, inputHash, jsonEncode(injectedIds), decision,
-        confidence, executor, output, metaJson, prev, self ],
+        confidence, answerConfidence, executor, output, metaJson, conversationId, prev, self ],
     );
     return self;
+  }
+
+  /// [T12-① D2 2026-10-17] answer_confidence 收尾補寫——唯一寫入通道。
+  /// appendTurn 在輪開頭落盤（答案未生成，欄位 NULL）；agent_loop.run()
+  /// 收尾時以本方法補上 AnswerConfidenceScorer 的評分。UPDATE 只動本輪
+  /// 列（WHERE turn_id+kind），不觸 hash 欄（hash_self/hash_prev 不含
+  /// answer_confidence——見 _hash 參數清單），hash 鏈不斷。
+  /// 冪等：同輪重複補寫覆蓋為最新評分（輕裝→全裝重跑場景，最終結果勝出）。
+  void setAnswerConfidence(String turnId, double value) {
+    _ensureTable();
+    _db.execute(
+      "UPDATE event_ledger SET answer_confidence = ? "
+      "WHERE turn_id = ? AND kind = 'turn'",
+      [value, turnId],
+    );
   }
 
   /// 使者反應以新事件 append（不 UPDATE，鏈不斷）。
@@ -224,14 +441,17 @@ class EventLedger {
   }
 
   /// M3 用：依信心區間統計線上正確率（reaction join turn）
+  /// [小葵 2026-10-15 T2/D2] 改吃 answer_confidence（回答正確性信心）——
+  /// 舊欄 confidence 是 K1 的「要不要查」信心，語意錯配（Fable 斷鏈①）。
+  /// answer_confidence IS NULL 的舊輪不進統計（無訊號≠零分）。
   List<({double bucket, int n, double acc})> onlineCalibration() {
     _ensureTable();
     final rows = _db.select('''
-      SELECT t.confidence AS conf, r.user_reaction AS reaction
+      SELECT t.answer_confidence AS conf, r.user_reaction AS reaction
       FROM event_ledger t
       JOIN event_ledger r
         ON r.kind = 'reaction' AND r.ref_turn_id = t.turn_id
-      WHERE t.kind = 'turn' AND t.confidence IS NOT NULL
+      WHERE t.kind = 'turn' AND t.answer_confidence IS NOT NULL
     ''');
     final buckets = <double, List<int>>{};
     for (final r in rows) {

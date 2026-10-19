@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqlite3/sqlite3.dart';
 
 import 'compass_models.dart';
@@ -43,6 +44,20 @@ class CompassStore {
     if (_db != null) return;
     final path = dbPath ?? await defaultDbPath();
     _db = sqlite3.open(path);
+    _db!.execute('PRAGMA journal_mode = WAL');
+    _db!.execute('PRAGMA synchronous = NORMAL');
+    _migrate();
+    _loadVersion();
+  }
+
+  /// [T12-③ test 2026-10-17] 測試隔離——關舊 db 開新 db（事件流不動：
+  /// broadcast stream 關了全 App 訂閱者陪葬，dispose() 只給真關閉用）。
+  /// singleton + 冪等 initialize 的組合會讓第一個測試的 handle 殘留
+  /// 到所有後續測試（寫到別人的庫）。每個測試 setUp 呼叫本方法換乾淨 db。
+  @visibleForTesting
+  Future<void> reopenForTest(String dbPath) async {
+    _db?.close();
+    _db = sqlite3.open(dbPath);
     _db!.execute('PRAGMA journal_mode = WAL');
     _db!.execute('PRAGMA synchronous = NORMAL');
     _migrate();

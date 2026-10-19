@@ -9,7 +9,7 @@
 // 冷門時段=動態（Blue 2026-09-20 設計「不固定 23:00」）——
 // v1 取 02:00-05:00 窗口，未來可依使用數據調整。
 
-import 'package:bridge_app/services/compass/compass_speaker.dart';
+import 'package:bridge_app/services/compass/red_flag_reporter.dart';
 import 'package:flutter/foundation.dart';
 
 import '../agent_loop/agent_loop_tools/dream_once_tool.dart';
@@ -24,6 +24,27 @@ class DreamScheduler {
 
   String? _lastShallowNight; // 最近一次淺眠夢的日期（yyyy-mm-dd）
   bool _inFlight = false; // [2026-10-05 雙 tick 修復] 重入鎖
+  String? _lastDaytimeCheck; // [殘件①] 白天紅旗路的小時節流（yyyy-mm-dd-HH）
+
+  /// [殘件① 2026-10-19] 白天紅旗路——冷門窗口外，每小時看一次儀表。
+  /// 夢路只活在凌晨（App 半夜沒開就斷線）；這條路讓白天出現的紅旗
+  /// （K1 escalate 飙高、認知傷口堆積）當天就能進開口佇列。
+  /// 去重記帳在 RedFlagReporter（同類紅旗同日只報一次）——這裡只節流。
+  Future<void> _daytimeRedFlagCheck(DateTime now) async {
+    final hourKey =
+        '${now.year}-${now.month}-${now.day}-${now.hour}';
+    if (_lastDaytimeCheck == hourKey) return; // 每小時一次
+    _lastDaytimeCheck = hourKey;
+    try {
+      final metrics = CompassSelfGauge.instance.compute();
+      final reds = metrics.redFlags();
+      if (reds.isNotEmpty) {
+        RedFlagReporter.instance.report(reds, source: 'daytime_heartbeat');
+      }
+    } catch (e) {
+      debugPrint('[DreamScheduler] 白天紅旗檢查失敗（fail-quiet）: $e');
+    }
+  }
 
   /// 每分鐘被 heartbeat 呼叫；只在冷門窗口行動
   Future<void> tick() async {
@@ -35,7 +56,10 @@ class DreamScheduler {
     try {
       final now = DateTime.now();
       // 冷門窗口 02:00–05:00
-      if (now.hour < 2 || now.hour >= 5) return;
+      if (now.hour < 2 || now.hour >= 5) {
+        await _daytimeRedFlagCheck(now); // [殘件①] 窗口外走白天路
+        return;
+      }
 
       final today = _dayKey(now);
       if (_lastShallowNight == today) return; // 今晚已做過
@@ -60,14 +84,11 @@ class DreamScheduler {
       // [T9② 2026-10-17] 紅旗 → 羅盤開口排隊——夢裡看到的不安，
       // 醒來（下次開 App）用一兩句人話說給使用者聽。開口閘在
       // CompassSpeaker（信心>0.7＋每日≤3＋證據）；夢結論 ≥1 才排。
-      if (metrics.redFlags().isNotEmpty && result.conclusions > 0) {
-        CompassSpeaker.instance.enqueue(CompassSpeakDraft(
-          '剛剛整理內部的時候，我注意到一些狀況（'
-          '${metrics.redFlags().take(2).join('；')}）。'
-          '不急，你有空的時候可以看看羅盤頁。',
-          'dream_red_flags:${metrics.redFlags().length}',
-          0.85, // 夢結論有實證（conclusions>0）——高信心
-        ));
+      // [殘件① 2026-10-19] 生產者抽成 RedFlagReporter（同類紅旗同日
+      // 去重記帳）——夜夢路與白天心跳路共用，不會對使用者重複講。
+      final reds = metrics.redFlags();
+      if (reds.isNotEmpty && result.conclusions > 0) {
+        RedFlagReporter.instance.report(reds, source: 'dream_red_flags');
       }
 
       // ── 節律決定是否深夢/詩夢 ──

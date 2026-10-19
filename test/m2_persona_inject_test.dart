@@ -6,8 +6,22 @@ import 'package:flutter/services.dart';
 import 'package:bridge_app/services/agent_loop/agent_loop_prompt_builder.dart';
 import 'package:bridge_app/services/agent_loop/agent_tool_registry.dart';
 
-void main() {
+Future<void> main() async {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  // [開源版] assets/persona/ 為私有語氣層資產——開源 repo 不附。
+  // 資產不存在時整檔 skip（本尊 bridge_app 有資產，照常驗證）。
+  var personaAssetsPresent = true;
+  try {
+    await rootBundle.loadString('assets/persona/persona_e4b.txt');
+  } catch (_) {
+    personaAssetsPresent = false;
+  }
+  if (!personaAssetsPresent) {
+    // ignore: avoid_print
+    print('SKIP: 私有 persona 資產不存在（開源版預期行為）');
+    return;
+  }
 
   test('assets/persona 兩版資產存在且可載入', () async {
     final cloud = await rootBundle.loadString('assets/persona/persona_cloud.txt');

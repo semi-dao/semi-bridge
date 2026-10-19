@@ -41,6 +41,12 @@ class AppScheduleEngine {
   AppScheduleEngine._();
   static final AppScheduleEngine instance = AppScheduleEngine._();
 
+  /// [T10② W5 2026-10-17] 排程觸發結果廣播——App 層監聽後彈 toast。
+  /// ValueNotifier：不依賴 BuildContext，引擎層零 UI 依賴。
+  /// payload: {'jobTitle': String, 'success': bool, 'summary': String?}
+  static final ValueNotifier<Map<String, dynamic>?> lastRunDone =
+      ValueNotifier<Map<String, dynamic>?>(null);
+
   EntityGraphService? _entityGraph;
   ScheduleEngine? _engine;
 
@@ -240,6 +246,16 @@ class AppScheduleEngine {
           ? null
           : _errorSummary(failed),
     )));
+
+    // [T10② W5] 廣播——App 層 toast（成功/失敗都報，誠實原則）
+    lastRunDone.value = {
+      'jobTitle': nodeTitle,
+      'success': ok,
+      'summary': ok
+          ? (resolved.summary ?? '${results.length} 節點完成')
+          : _errorSummary(failed),
+      'firedAt': firedAt.toIso8601String(),
+    };
 
     for (final r in results) {
       final out = r.output ?? '';

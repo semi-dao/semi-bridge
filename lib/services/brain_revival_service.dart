@@ -41,6 +41,11 @@ class BrainRevivalService {
   // [Blue 令 2026-10-05] 閒置自動卸載本身也要有開關（預設開，持久化）
   bool _idleUnloadEnabled = true;
   bool get idleUnloadEnabled => _idleUnloadEnabled;
+
+  /// [小葵 2026-10-16] 引擎是否處於「閒置自動卸載」狀態（正當休眠，
+  /// 非故障）——UI 據此顯示休眠而非紅色警報。
+  bool _idleUnloaded = false;
+  bool get idleUnloaded => _idleUnloaded;
   Future<void> loadIdleUnloadPref() async {
     _idleUnloadEnabled = await StorageService.getLocalModelIdleUnloadEnabled();
   }
@@ -171,10 +176,7 @@ class BrainRevivalService {
     }
   }
 
-  /// [小葵 2026-10-05 修] 閒置自動卸載狀態——true=保持卸載，等手動喚醒
-  bool _idleUnloaded = false;
-
-  /// 查 llama-server /slots 是否有任何 slot 在處理請求
+    /// 查 llama-server /slots 是否有任何 slot 在處理請求
   Future<bool> _anySlotProcessing(String baseUrl) async {
     try {
       final resp = await _dio.get<List<dynamic>>('$baseUrl/slots');

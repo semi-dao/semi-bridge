@@ -20,6 +20,7 @@ import 'package:bridge_app/models/brain_container/memory.dart';
 import 'persistence/memory_file_backfill_service.dart';
 // [小葵 2026-10-13 K1 修復線] K1 頭還原
 import '../decision/k1_bootstrapper.dart';
+import '../decision/k1_auto_trainer.dart';
 import 'package:bridge_app/models/brain_container/memory_source.dart';
 import 'package:bridge_app/services/brain_container/brain_database.dart';
 import 'package:bridge_app/services/brain_container/asset_reembed_service.dart';
@@ -119,6 +120,11 @@ class BrainContainerService {
       // 2.5 [小葵 2026-10-13 K1 修復線] 還原 K1 決策頭（權重檔在
       // brain_state/k1_head.json；無檔時 K1 走規則層+escalate 不阻擋啟動）
       K1Bootstrapper.instance.restoreFromStore();
+      // [殘件② 2026-10-19] 自訓練觸發檢查——樣本 ≥200 自動重訓。
+      // 背景跑不擋啟動；訓練含嵌入（每樣本 ~30ms）與 LOO-CV，
+      // 樣本大時可能數分鐘——絕不在啟動路徑上同步等它。
+      // ignore: unawaited_futures
+      K1AutoTrainer.instance.maybeTrain();
 
       // 3. 管線元件
       _preprocessor = ContentPreprocessor();

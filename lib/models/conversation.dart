@@ -5,15 +5,20 @@ enum ConversationType {
   /// 一般對話
   general,
   /// 專案畫布對話（綁定畫布，封閉不污染）
-  projectCanvas;
+  projectCanvas,
+  /// [Blue 令 2026-10-17] 主動回應頻道——羅盤/夢的主動發話住這裡，
+  /// 不混入既有對話討論串。Session 獨立、可回覆、不觸發工具循環。
+  proactive;
 
   String get label => switch (this) {
         general => 'general',
         projectCanvas => 'project_canvas',
+        proactive => 'proactive',
       };
 
   static ConversationType fromString(String? s) => switch (s) {
         'project_canvas' => projectCanvas,
+        'proactive' => proactive,
         _ => general,
       };
 }

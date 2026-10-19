@@ -12,7 +12,11 @@ import '../../theme/tier_style.dart';
 
 class MemoryLayerEntriesView extends StatefulWidget {
   final MemoryLayer layer;
-  const MemoryLayerEntriesView({super.key, required this.layer});
+  /// [小葵 2026-10-14 Blue 報案] 返回素材牆出口——層視圖蓋過主區後，
+  /// 原本只能跳出頁面再回來才能回去。這顆按鈕把出口還給原地。
+  final VoidCallback? onClose;
+  const MemoryLayerEntriesView(
+      {super.key, required this.layer, this.onClose});
 
   @override
   State<MemoryLayerEntriesView> createState() => _MemoryLayerEntriesViewState();
@@ -164,6 +168,32 @@ class _MemoryLayerEntriesViewState extends State<MemoryLayerEntriesView> {
                 ),
               ],
               const Spacer(),
+              // [小葵 2026-10-14] 返回素材牆出口
+              if (widget.onClose != null)
+                Tooltip(
+                  message: '返回素材牆',
+                  child: InkWell(
+                    onTap: widget.onClose,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.grid_view_outlined,
+                              size: 14, color: ds.textMuted),
+                          const SizedBox(width: 4),
+                          Text('素材牆',
+                              style: TierStyle.of(context, Tier.cardCaption)
+                                  .toTextStyle()
+                                  .copyWith(color: ds.textMuted)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 12),
               Text(
                 '點條目可編輯',
                 style: TierStyle.of(context, Tier.cardCaption)

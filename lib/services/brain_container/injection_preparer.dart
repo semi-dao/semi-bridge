@@ -44,6 +44,7 @@ class InjectionPreparer {
     String userMessage, {
     bool k1 = true,
     bool logSample = true,
+    String? turnId, // [小葵 2026-10-15 T1/D4] K1 樣本與本輪 join 的鑰匙
   }) async {
     final sw = Stopwatch()..start();
     final digest = digestOf(userMessage);
@@ -59,11 +60,20 @@ class InjectionPreparer {
         final decision = await K1Gatekeeper.instance.classify(
           digest,
           onSample: logSample
-              ? (d, msg) => K1Gatekeeper.instance.logSample(msg, d)
+              ? (d, msg) =>
+                  K1Gatekeeper.instance.logSample(msg, d, turnId: turnId)
               : null,
         );
         k1Decision = decision;
-        if (decision.needMemory && !decision.escalated) {
+        // [T5① 2026-10-17] escalate 有去處——線性頭不自信時 E4B zero-shot
+        // 仲裁（source=escalate_llm），仲裁完照常走記憶查詢分流。
+        if (decision.escalated) {
+          debugPrint('[InjectionPreparer] K1 escalate→E4B 仲裁');
+          k1Decision = await K1Gatekeeper.instance
+              .escalateResolve(userMessage, turnId: turnId);
+        }
+        final eff = k1Decision!;
+        if (eff.needMemory && !eff.escalated) {
           k1Candidates = await _k1Candidates(digest);
           k1MergedN = k1Candidates.length;
         }
