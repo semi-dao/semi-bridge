@@ -70,9 +70,12 @@ Semi Bridge 是一個 Flutter 桌面 App，讓人類和 AI agent 在**同一塊�
 ```bash
 git clone https://github.com/semi-dao/semi-bridge.git
 cd semi-bridge
-flutter pub get
-flutter run -d macos
+make setup   # pub get + dylib patch + pod install（或手動 flutter pub get）
+make run     # flutter run -d macos
 ```
+
+常用指令都在 [Makefile](Makefile)（`setup`／`run`／`build`／`test`）。
+本地埠（8420 MCP／18789 LLM／18890 嵌入）說明見 [docs/PORTS.md](docs/PORTS.md)。
 
 需要 Flutter 穩定版。目前主要支援 macOS 桌面。
 

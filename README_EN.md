@@ -66,9 +66,12 @@ All born from a real two-day incident investigation ("the computer is too sluggi
 ```bash
 git clone https://github.com/semi-dao/semi-bridge.git
 cd semi-bridge
-flutter pub get
-flutter run -d macos
+make setup   # pub get + dylib patch + pod install (or run flutter pub get manually)
+make run     # flutter run -d macos
 ```
+
+Common commands live in the [Makefile](Makefile) (`setup` / `run` / `build` / `test`).
+Local ports (8420 MCP / 18789 LLM / 18890 embedding) are documented in [docs/PORTS.md](docs/PORTS.md).
 
 Requires the stable channel of Flutter. macOS desktop is the primary target.
 
