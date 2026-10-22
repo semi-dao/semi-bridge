@@ -521,9 +521,15 @@ class _QuickAssistantOverlayState extends State<QuickAssistantOverlay> {
       child: Column(
         children: [
           // 工具列
+          // [邊界動態鐵則 2026-10-21 Blue 令] Row→Wrap：懸浮窗最小 200px 寬，
+          // 寫死單行必溢出。Wrap 依內容動態、空間不足自動換行。
           Padding(
             padding: const EdgeInsets.only(left: 4, bottom: 6),
-            child: Row(
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              alignment: WrapAlignment.start,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 // 模型選型
                 AgentModelSelector(
@@ -532,7 +538,6 @@ class _QuickAssistantOverlayState extends State<QuickAssistantOverlay> {
                     widget.controller.refreshLocalModelState();
                   },
                 ),
-                const SizedBox(width: 4),
                 // 新增對話（＋對話泡泡）
                 _iconButton(
                   icon: Icons.add_comment_outlined,
@@ -540,7 +545,6 @@ class _QuickAssistantOverlayState extends State<QuickAssistantOverlay> {
                   color: ds.textTertiary,
                   onTap: _newConversation,
                 ),
-                const SizedBox(width: 4),
                 // 上傳檔案（＋）
                 _iconButton(
                   icon: Icons.attach_file_outlined,
@@ -548,8 +552,7 @@ class _QuickAssistantOverlayState extends State<QuickAssistantOverlay> {
                   color: ds.textTertiary,
                   onTap: _attachFile,
                 ),
-                const Spacer(),
-                // 送出按鈕
+                // 送出按鈕（有字才顯示；Wrap 下不用 Spacer，尾端對齊交給換行）
                 if (_textController.text.trim().isNotEmpty || _isSending)
                   _sendButton(ds),
               ],

@@ -25,6 +25,7 @@ import '../models/companion.dart';
 import '../models/conversation.dart';
 import '../models/task_evidence.dart'; // P0.5 對話任務證據
 import '../services/tasks/task_dispatcher.dart'; // [隊友訊息流 C2]
+import '../services/chat_modes.dart'; // [聊天模式 B 線 2026-10-20 Blue 拍板]
 import '../services/memory_layer_service.dart'; // [H2/M3 2026-10-07] 記憶2域10層分層注入
 import '../services/collab/meeting_layer.dart'; // [TRIO M3.5 2026-09-22] 會議接線
 import '../services/collab/intel_pool.dart'; // [TRIO M3.5] 情報池（會議紀錄入池）
@@ -1491,6 +1492,8 @@ class ChatController extends ChangeNotifier {
         toolRegistry: _agentToolRegistry!,
         llmClient: ProductionAgentLoopLLMClient(),
       );
+      // [身份保護 2026-10-21] 同步活躍夥伴名給 AgentLoop（直通道用真名）
+      _agentLoop!.companionName = _activeCompanion?.name;
       // [D002 2026-08-10] 將 onToolConfirmation 橋接到 AgentLoop 實例欄位
       _agentLoop!.onToolConfirmation = onToolConfirmation;
     } catch (e, stack) {
@@ -1931,6 +1934,18 @@ class ChatController extends ChangeNotifier {
           ? m2
           : '$personaWithTone\n\n---\n$m2';
     }
+    // [身份保護 2026-10-21 Blue 令] 三 Agent 身份互不污染——
+    // M2 語氣資產是小葵的聲音（含 71 條小葵範例），語氣可借、身份不可借。
+    // 病例：小橋被問名字自稱「小葵」。修：注入最尾（近因最強）加身份覆蓋，
+    // 範例中的名字一律降級為「風格示範者」。
+    final companionName = _activeCompanion?.name;
+    if (companionName != null && companionName.isNotEmpty) {
+      personaWithTone =
+          '$personaWithTone\n\n---\n\n# 身份覆蓋（本段優先於上方語氣規格中的一切身份描述）\n'
+          '你的名字是「$companionName」。上方語氣規格（含其中所有範例）是**風格參考**——'
+          '範例中出現的「小葵」只是語氣的示範者，不是你。'
+          '自稱「$companionName」或「我」，絕不自稱小葵、絕不借用其他夥伴的名字。';
+    }
 
     final systemPrompt = AgentLoopPromptBuilder.build(
       budgetEye: budgetEyeText,
@@ -1955,6 +1970,9 @@ class ChatController extends ChangeNotifier {
       quickAssistantContext:
           _quickAssistantContext, // [教練 Agent 2026-08-03] Quick Assistant 模式
       lockedProvider: userWantsCloud ? userProvider : null, // [教練 Agent 2026-08-07] 指定模式鎖定
+      // [聊天模式 B 線 2026-10-20 Blue 拍板] 每輪注入當前模式的紀律 prompt
+      // （自由對話模式 prompt 為 null＝不注入，零回歸）
+      chatModePrompt: ChatModeService.instance.currentPrompt,
     );
 
     final sanitizedMessage = AgentToolCallParser.sanitize(userMessage);
@@ -1980,6 +1998,7 @@ class ChatController extends ChangeNotifier {
     final result = await _agentLoop!.run(
       systemPrompt: systemPrompt,
       userMessage: fullUserMessage,
+      conversationId: _currentConversation?.id, // [T12-④] 對話歸屬落輪
       maxTurns: AgentLoop.hardMaxTurns, // [2026-09-18] Hermes 模式——無輪數限制（Blue 拍板對齊小葵）
       prohibitPaidTools: prohibitPaidTools, // [教練 Agent 2026-08-20] 機器輪次禁用付費工具
       onProgress: (turnIndex, maxTurns, toolCall, toolResult, llmOutput) {
@@ -3786,12 +3805,16 @@ class ChatController extends ChangeNotifier {
   /// 載入活躍夥伴。
   void loadActiveCompanion() {
     _activeCompanion = CompanionStore().activeCompanion;
+    // [身份保護 2026-10-21] 夥伴名同步 AgentLoop（直通道用真名）
+    _agentLoop?.companionName = _activeCompanion?.name;
     // [2026-08-26 共視修復] 訂閱換人廣播——任何入口（切換 sheet/控制中心/外觀頁）
     // 換夥伴時，本 controller 即時跟上，人格注入不再卡在前一位。
     if (!_companionChangedHooked) {
       _companionChangedHooked = true;
       CompanionStore().addCompanionChangedListener((companion) {
         _activeCompanion = companion;
+        // [身份保護 2026-10-21] 換夥伴＝換靈魂——直通道真名跟著換
+        _agentLoop?.companionName = companion?.name;
         notifyListeners();
       });
     }
@@ -4150,7 +4173,9 @@ class ChatController extends ChangeNotifier {
   /// detect 先跑、hit==null 才補 accepted。
   Future<void> _wireImplicitAccept() async {
     try {
-      final turnId = EventLedger.instance.lastTurnId();
+      // [T12-④] 帶對話歸屬——多對話並行時不再指錯輪
+      final turnId = EventLedger.instance
+          .lastTurnId(conversationId: _currentConversation?.id);
       if (turnId != null) {
         EventLedger.instance.appendReaction(turnId, 'accepted');
       }
@@ -4161,7 +4186,9 @@ class ChatController extends ChangeNotifier {
 
   Future<void> _wireCorrectionToBreaker() async {
     try {
-      final turnId = EventLedger.instance.lastTurnId();
+      // [T12-④] 帶對話歸屬
+      final turnId = EventLedger.instance
+          .lastTurnId(conversationId: _currentConversation?.id);
       if (turnId != null) {
         final ok = EventLedger.instance.appendReaction(turnId, 'corrected');
         if (ok) {
@@ -6700,7 +6727,7 @@ class ChatController extends ChangeNotifier {
       if (cid == null || cid.isEmpty) return null;
       final t = await TimeSenseService.instance.timelineFor(cid);
       if (t == null) return null;
-      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——家人提案 L4）
+      // [時間感 L4] 相遇軸＋臨近紀念日（時間從 bug 變 feature——樂樂提案 L4）
       final base = TimeSenseService.buildTimelineSection(t);
       final milestones = TimeSenseService.buildMilestoneSection(t);
       if (base == null) return milestones;
@@ -7043,6 +7070,20 @@ class ChatController extends ChangeNotifier {
   /// 加派工鐵則。只帶穩定參數（persona/記憶/工具清單），不依賴單輪對話狀態。
   Future<String> _buildTaskSystemPrompt(TaskSession session) async {
     final companionPersona = _activeCompanion?.systemPrompt;
+    // [T12-⑧ 2026-10-17] M2 語氣層注入派工路徑——Fable V3 斷鏈③：
+    // 聊天路徑有 M2、派工沒有＝「有個性」只在一半的嘴上。
+    // 與聊天路徑同款：personaForCurrentRoute 選版、fail-open 不擋派工。
+    String personaWithTone = companionPersona ?? '';
+    try {
+      final m2 = await M2PersonaService.instance.personaForCurrentRoute();
+      if (m2 != null && m2.isNotEmpty) {
+        personaWithTone = personaWithTone.isEmpty
+            ? m2
+            : '$personaWithTone\n\n---\n$m2';
+      }
+    } catch (e) {
+      debugPrint('[TaskPrompt] M2 注入失敗（不擋派工）: $e');
+    }
     String budgetEyeText = '';
     try {
       budgetEyeText = await PaidActionGate.instance.budgetEye();
@@ -7053,10 +7094,13 @@ class ChatController extends ChangeNotifier {
     final base = AgentLoopPromptBuilder.build(
       budgetEye: budgetEyeText,
       timelineSection: await _buildTimelineSection(),
-      companionPersona: companionPersona,
+      companionPersona: personaWithTone, // [T12-⑧] M2 語氣層
       toolRegistry: _agentToolRegistry!,
       skillsSection: SkillPromptInjector.buildSkillSection(
           userMessage: session.instruction),
+      // [聊天模式 B 線 2026-10-20 Blue 拍板] 派工路徑也吃模式紀律
+      // （自主長跑模式與派工場景天然重疊；自由對話不注入零回歸）
+      chatModePrompt: ChatModeService.instance.currentPrompt,
     );
 
     return '''
@@ -7224,7 +7268,8 @@ $base
           assistantContext: prevAssistant ?? '',
           kind: hit.kind,
           hitPattern: hit.hit,
-          refTurnId: EventLedger.instance.lastTurnId(), // [小葵 2026-10-15 T1/D4] 被糾正輪的鑰匙
+          refTurnId: EventLedger.instance.lastTurnId(
+              conversationId: convId), // [T12-④] 本對話最後一輪
         ));
         // [小葵 2026-10-14 M3-第三刀] 糾正＝負反應——接活校準訊號源：
         // appendReaction 落 event_ledger（原本生產環境從未呼叫，死線）→
@@ -7454,11 +7499,39 @@ $base
     final userWantsDefault = userProvider == 'default' || userProvider == null;
     final RoutedProvider routed;
     if (userWantsDefault) {
-      // [教練 Agent 2026-07-30] 「預設」選型——走 resolveDefault() 依預設選型原則動態選模型
-      routed = await ProviderRouter.instance.resolveDefault();
-      debugPrint(
-        '[ChatController] 預設選型 → ${routed.providerId}（${routed.reason}）',
-      );
+      // [Blue 令 2026-10-20 活預設] 先查用途角色映射——意圖→角色→鑰匙。
+      // 設了對應角色（如 chat=glm、coding=claude）→ 直接用該鑰匙；
+      // 沒設 → 走 resolveDefault()（本地優先＋自動雲端）。
+      final roleForMode = switch (intentSpine.mode) {
+        IntentSpineMode.execute => 'coding',
+        IntentSpineMode.project => 'coding',
+        IntentSpineMode.capabilitySetup => 'reasoning',
+        IntentSpineMode.analyze => 'reasoning',
+        IntentSpineMode.clarify => 'chat',
+        IntentSpineMode.casual => 'chat',
+        IntentSpineMode.assetReuse => 'chat',
+      };
+      final roleProvider = await StorageService.getRoleProvider(roleForMode);
+      final roleToken = roleProvider != null
+          ? await StorageService.getToken(provider: roleProvider)
+          : null;
+      if (roleProvider != null &&
+          roleToken != null &&
+          roleToken.trim().isNotEmpty) {
+        routed = RoutedProvider(
+          target: RoutedTarget.cloud,
+          providerId: roleProvider,
+          reason: '活預設：$roleForMode → $roleProvider（意圖：${intentSpine.mode.name}）',
+        );
+        ProviderRouter.instance.setCurrent(routed);
+        debugPrint('[ChatController] 活預設 $roleForMode → $roleProvider');
+      } else {
+        // [教練 Agent 2026-07-30] 「預設」選型——走 resolveDefault() 依預設選型原則動態選模型
+        routed = await ProviderRouter.instance.resolveDefault();
+        debugPrint(
+          '[ChatController] 預設選型 → ${routed.providerId}（${routed.reason}）',
+        );
+      }
     } else if (userWantsCloud) {
       // 使用者指定的直接用——不經過 ProviderRouter 的快取檢測
       routed = RoutedProvider(

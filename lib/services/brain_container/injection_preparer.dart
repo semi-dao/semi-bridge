@@ -192,6 +192,8 @@ class InjectionPreparer {
         slot: parsed?.slot ?? MemorySlot.recent,
         source: 'k1',
         floorExempt: true,
+        // [指紋章 2026-10-21 ②刀1] K1 通道同款出處章
+        fingerprint: parsed?.fingerprint,
       ));
     }
     return out;

@@ -33,7 +33,11 @@ class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
 
   /// [T11② 2026-10-17] 最近一次路由結果——雲端率儀表資料源。
   /// AgentLoop 在輪次結束後讀取並 updateTurnMeta 進 event_ledger。
-  static Map<String, dynamic> lastRoute = {};
+  /// [T12-⑥ 2026-10-17] 去 static——聊天與畫布兩迴圈並行時 static 互
+  /// 踩（雲端率記錯回合，Fable 指認）。改實例欄位，由 interface 預設
+  /// getter（空 Map）統一合約。
+  @override
+  Map<String, dynamic> lastRoute = {};
   ApiCompletionReceipt? _lastReceipt;
 
   /// [教練 Agent 2026-08-08] 輪數計數器——追蹤 complete() 被呼叫幾次
@@ -82,6 +86,47 @@ class ProductionAgentLoopLLMClient implements AgentLoopLLMClient {
         final resolved = userModel.trim();
         _logTrace('user_locked', userProvider, resolved);
         return resolved;
+      }
+    }
+
+    // [Blue 令 2026-10-20] 「預設」= 本地優先＋自動觸發雲端——
+    // 但只在「使用者有安裝本地模型」時啟動。上游 chat_controller 已依
+    // 意圖 route()（閒聊→本地、執行/專案→雲端）並 setCurrent；這裡
+    // 尊重路由結果：本地路且本地 server 活著 → 用本地模型；否則落到
+    // 下方品牌階梯（雲端）。route() 的安全閥（本地沒跑→雲端）天然
+    // 處理「沒裝本地模型」的情況。
+    if (userProvider == 'default' || userProvider == null) {
+      // [Blue 令 2026-10-20 活預設] 此 client 是對話迴圈——chat 角色映射優先。
+      // 上游 chat_controller 已按意圖 setCurrent；這裡對 chat/casual 輪
+      // 檢查 chat 角色有沒有指定鑰匙（例：chat=glm），有 → 鎖定該鑰匙。
+      final chatRoleProvider = await StorageService.getRoleProvider('chat');
+      if (chatRoleProvider != null && chatRoleProvider.isNotEmpty) {
+        final token =
+            await StorageService.getToken(provider: chatRoleProvider);
+        if (token != null && token.trim().isNotEmpty) {
+          final m = await StorageService.getApiModel(provider: chatRoleProvider);
+          ProviderRouter.instance.setCurrent(RoutedProvider(
+            target: RoutedTarget.cloud,
+            providerId: chatRoleProvider,
+            reason: '活預設 chat → $chatRoleProvider',
+          ));
+          _logTrace('role_map_chat', chatRoleProvider, m ?? '');
+          if (m != null && m.trim().isNotEmpty) return m.trim();
+        }
+      }
+
+      final routed = ProviderRouter.instance.current;
+      if (routed != null && routed.isLocal) {
+        // 再探一次本地 server——route() 的探測可能已是幾秒前
+        await ProviderRouter.instance.probeLocalServerNow();
+        if (ProviderRouter.instance.localServerAvailable) {
+          final localModel =
+              await StorageService.getApiModel(provider: 'local');
+          if (localModel != null && localModel.trim().isNotEmpty) {
+            _logTrace('default_local_first', 'local', localModel);
+            return localModel;
+          }
+        }
       }
     }
 

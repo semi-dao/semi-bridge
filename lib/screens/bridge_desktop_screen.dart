@@ -646,7 +646,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     });
   }
 
-  /// [時間感 L4 2026-09-13] 相簿視圖——家的記憶按日子翻頁（家人提案 L4）
+  /// [時間感 L4 2026-09-13] 相簿視圖——家的記憶按日子翻頁（樂樂提案 L4）
   void _openAlbum() {
     showDialog(
       context: context,
@@ -1362,49 +1362,81 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
           // 之後取「y 座標在視野內且最短文字」的最佳候選（短=按鈕而非標題）
           final candidates = <Map<String, dynamic>>[];
           void findText(Element el) {
-            el.visitChildElements((child) {
-              final w = child.widget;
-              String? data;
-              if (w is Text) data = w.data ?? '';
-              if (w is SelectableText) data = w.data ?? '';
-              if (data != null && data.contains(selector)) {
-                final ro = child.findRenderObject();
-                if (ro is RenderBox && ro.hasSize && ro.size != Size.zero) {
-                  // 找最近可點祖先
-                  Element? clickable = child;
-                  Offset? best;
-                  for (int i = 0; i < 8 && clickable != null; i++) {
-                    final pw = clickable.widget;
-                    if (pw is GestureDetector ||
-                        pw is InkWell ||
-                        pw is TextButton ||
-                        pw is ElevatedButton ||
-                        pw is OutlinedButton ||
-                        pw is IconButton) {
-                      final cro = clickable.findRenderObject();
-                      if (cro is RenderBox && cro.hasSize) {
-                        best = cro.localToGlobal(cro.size.center(Offset.zero));
-                        break;
+            // [A線 1022 修] 每層 try/catch——modal 關閉後的 stale element 會讓
+            // visitChildElements 拋「widget has been unmounted」，一炸炸掉整次
+            // 掃描（實證：插槽精靈關掉後 app_tap 語意定位全面失效，只能靠座標）。
+            try {
+              el.visitChildElements((child) {
+                try {
+                  final w = child.widget;
+                  String? data;
+                  if (w is Text) data = w.data ?? '';
+                  if (w is SelectableText) data = w.data ?? '';
+                  if (data != null && data.contains(selector)) {
+                    final ro = child.findRenderObject();
+                    if (ro is RenderBox && ro.hasSize && ro.size != Size.zero) {
+                      // 找最近可點祖先
+                      Element? clickable = child;
+                      Offset? best;
+                      for (int i = 0; i < 8 && clickable != null; i++) {
+                        final pw = clickable.widget;
+                        if (pw is GestureDetector ||
+                            pw is InkWell ||
+                            pw is TextButton ||
+                            pw is ElevatedButton ||
+                            pw is OutlinedButton ||
+                            pw is IconButton) {
+                          final cro = clickable.findRenderObject();
+                          if (cro is RenderBox && cro.hasSize) {
+                            best = cro.localToGlobal(cro.size.center(Offset.zero));
+                            break;
+                          }
+                        }
+                        Element? next;
+                        clickable.visitAncestorElements((anc) {
+                          next = anc;
+                          return false;
+                        });
+                        clickable = next;
                       }
+                      best ??= ro.localToGlobal(ro.size.center(Offset.zero));
+                      candidates.add({'text': data.trim(), 'offset': best!});
                     }
-                    Element? next;
-                    clickable.visitAncestorElements((anc) {
-                      next = anc;
-                      return false;
-                    });
-                    clickable = next;
                   }
-                  best ??= ro.localToGlobal(ro.size.center(Offset.zero));
-                  candidates.add({'text': data.trim(), 'offset': best!});
+                } catch (_) {
+                  // stale/unmounted child——跳過這顆，不炸整次掃描
                 }
-              }
-              findText(child);
-            });
+                findText(child);
+              });
+            } catch (_) {
+              // 這一層已卸載——靜默往上層
+            }
           }
-          context.visitChildElements(findText);
+          // [A線 1022 修] 掃描根＝App 根 element（rootElement）——
+          // 走訪整棵 widget 樹，含：其他路由的 screen（/slots 插槽管理頁）、
+          // dialog/popup（插槽精靈）、popup menu（模式下拉）。
+          // 舊法只掃 bridge_desktop 的 context 子樹：跨路由頁面與 modal 全找不到，
+          // 且 modal 關閉後的 stale element 會讓 visitChildElements 拋
+          // 「widget has been unmounted」炸掉整次掃描（實證兩種病）。
+          // 每個 child 各自 try/catch——單顆壞不炸整樹。
+          final rootEl = WidgetsBinding.instance.rootElement;
+          if (rootEl != null) {
+            rootEl.visitChildElements(findText);
+          }
           if (candidates.isNotEmpty) {
             // 視野內優先（y 0..視窗高），再取文字最短（按鈕精準於標題）
-            final winH = MediaQuery.of(context).size.height;
+            // [A線 1022 修] 視窗高度改從 root render object 取——
+            // MediaQuery.of(context) 在跨路由（bridge_desktop 已出樹）會拋
+            // 「widget has been unmounted」，整次掃描報廢。
+            double winH = 1e9;
+            final rootRo = WidgetsBinding.instance.rootElement?.renderObject;
+            if (rootRo is RenderBox && rootRo.hasSize) {
+              winH = rootRo.size.height;
+            } else {
+              try {
+                winH = MediaQuery.of(context).size.height;
+              } catch (_) {}
+            }
             Map<String, dynamic>? best;
             for (final c in candidates) {
               final off = c['offset'] as Offset;
@@ -1468,10 +1500,62 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         return {'success': false, 'message': '定位失敗: $e'};
       }
     };
+    // [開光 A線 2026-10-22] 文字注入——聚焦欄位打字（app_type 工具）。
+    // 正解來自 10-22 pbcopy 教訓：Agent 不得占用使用者剪貼簿。合成鍵盤事件
+    // 直接進 Flutter FocusNode，與真打字同路徑。
+    mcp.onAppType = (text) async {
+      try {
+        final focused = FocusManager.instance.primaryFocus;
+        if (focused == null) {
+          return {'success': false, 'message': '沒有聚焦中的欄位——先 app_tap 點選輸入框'};
+        }
+        // FocusNode.context 是 EditableText 的 context——直接取 widget
+        final ctx = focused.context;
+        if (ctx == null) {
+          return {'success': false, 'message': '聚焦節點無 context（欄位已卸載？）'};
+        }
+        EditableText? editable;
+        ctx.visitAncestorElements((el) {
+          final w = el.widget;
+          if (w is EditableText) {
+            editable = w;
+            return false;
+          }
+          return true;
+        });
+        if (editable == null) {
+          return {'success': false, 'message': '聚焦節點不是輸入欄位（找不到 EditableText）'};
+        }
+        final controller = editable!.controller;
+        // 游標位置插入（預設末尾）
+        final sel = controller.value.selection;
+        final base = sel.isValid ? sel.baseOffset : controller.text.length;
+        final newText = controller.text.replaceRange(
+            base, sel.isValid ? sel.extentOffset : controller.text.length, text);
+        controller.value = TextEditingValue(
+          text: newText,
+          selection: TextSelection.collapsed(offset: base + text.length),
+        );
+        return {
+          'success': true,
+          'typed': text.length,
+          'fieldLen': newText.length,
+          'note': '已注入（合成 TextEditingValue，零剪貼簿）',
+        };
+      } catch (e) {
+        return {'success': false, 'message': '注入失敗: $e'};
+      }
+    };
     // [開光 P1 2026-10-01] 頁面捲動感官——agent 看見頁面深處（選擇模型清單尾部等）
     mcp.onAppScroll = (direction, pixels) async {
       try {
-        final ctx = context;
+        // [A線 1022 修] 掃描根改 rootElement——跨路由（/slots 等其他 screen）
+        // 時 bridge_desktop 的 context 已出樹，visitChildElements 拋
+        // 「widget has been unmounted」，捲動整個報廢。
+        final rootCtx = WidgetsBinding.instance.rootElement;
+        if (rootCtx == null) {
+          return {'success': false, 'message': '無 root element'};
+        }
         ScrollableState? target;
         // [v6 實證法 2026-10-01] benchmark 六代教訓收斂：
         // 擇靶五法全被騙（離屏/兄弟頁/惰性 extent/hit-miss/viewport 面積）。
@@ -1489,7 +1573,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
             collect(child);
           });
         }
-        ctx.visitChildElements(collect);
+        rootCtx.visitChildElements(collect);
         if (candidates.isNotEmpty) {
           final seen = <ScrollPosition>{};
           candidates.retainWhere((s) => seen.add(s.position));
@@ -1545,6 +1629,28 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
               break;
             }
           }
+          }
+        }
+        // [A線 1022 v9] v8 嚴格模式（moved && visuallyMoved）全沒命中時的
+        // 寬鬆 fallback：取 pixels 能動且 extent > 0 的最後一個候選。
+        // 實證：插槽管理頁（/slots 跨路由）SingleChildScrollView 在
+        // rootElement 掃描下 pixels 會動但 visuallyMoved 幀驗證時序不穩。
+        if (target == null) {
+          for (final s in candidates) {
+            if (!s.position.maxScrollExtent.isFinite ||
+                s.position.maxScrollExtent <= 0) continue;
+            final p0 = s.position.pixels;
+            try {
+              s.position.jumpTo((p0 + 60).clamp(0.0, s.position.maxScrollExtent));
+            } catch (_) { continue; }
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+            final moved = (s.position.pixels - p0).abs() > 1;
+            try { s.position.jumpTo(p0); } catch (_) {}
+            if (moved) {
+              target = s;
+              debugPrint('[app_scroll v9] 寬鬆模式命中: ${s.widget.runtimeType}');
+              break;
+            }
           }
         }
         if (target == null) {
@@ -1727,7 +1833,11 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     MemoryGuardService.instance.stop();
     // [W1 2026-10-08] App 層排程引擎停止（引擎生命周期跟著 App 走）
     AppScheduleEngine.instance.stop();
-    BridgeMcpServer.instance.stop();
+    // [A線 2026-10-22 小葵修] 拔掉 BridgeMcpServer.instance.stop()——
+    // MCP server 由 App 根層（app.dart initState）啟動，生命週期跟 App 走。
+    // 原本這裡 stop() 會在離開 bridge-desktop 頁（如導航 /slots 插槽管理）
+    // 時把 MCP 殺掉——Agent 開光通道瞬間斷線、App 無法再被控制。
+    // 實證：點首頁插槽卡 → 8420 connection refused（reproducible）。
     // [教練 Agent 2026-07-28] Phase 5: 移除跨頁面跳轉監聽
     BridgeDesktopScreen.navigateToTab.removeListener(_onNavigateToTab);
     // [羅盤 2026-09-06] 釋放快捷鍵 callback
@@ -4802,6 +4912,8 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
         return [
+          // [聊天模式 B 線 2026-10-21] 側欄模式組已除役——模式下拉搬進輸入列
+          // （輸入框與送出之間，desktop_chat_panel _buildChatModePicker）。
           // 💬 一般對話
           _sidebarSection('一般對話', [
             _sidebarItem('新增對話', Icons.add_rounded, false,
@@ -5006,6 +5118,9 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
       ),
     );
   }
+
+  // [聊天模式 B 線 2026-10-21] _buildChatModeSection/_chatModeItem/tooltip class
+  // 已除役刪除——模式下拉搬進輸入列（Blue 拍板：旁邊能選，側欄不用存在）。
 
   Widget _sidebarSection(String title, List<Widget> items) {
     return Padding(
@@ -5738,6 +5853,10 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // [M6 2026-10-20 Blue 抓包] 雲端率儀表移到最頂——7 天實測驗收儀表
+        // 不該藏在 Watchdog 卡後面（原位置要捲過主題包/Gateway/系統資訊才看得到）。
+        const CloudRateCard(),
+        SizedBox(height: BridgeDS.spaceMD),
         // [教練 Agent 2026-08-04] Phase E+：主題包入口（顯示在第一個，最顯眼）
         _buildThemePackCard(),
         SizedBox(height: BridgeDS.spaceMD),
@@ -5797,7 +5916,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         SizedBox(height: BridgeDS.spaceMD),
 
         // [Blue 令 2026-10-17 #3] 大腦資料庫位置卡——向量 DB 設定已由 vault 頁取代，移除
-        const CloudRateCard(), // [T11②] 雲端率儀表——M6 驗收 ≤30%
+        // [M6 2026-10-20] CloudRateCard 移至 _buildSettingsTab 頂部（Blue 抓包：藏太深）
         SizedBox(height: BridgeDS.spaceMD),
 
         // [資料主權 P0-c 2026-09-14] 資料路徑總覽——ledger 攤給使用者看（人機共視）
@@ -7174,6 +7293,63 @@ class _CapabilityCardState extends State<_CapabilityCard> {
   bool _activated = false;
   int _count = 0;
 
+  /// [Blue 令 2026-10-20 #3] 能力級預設下拉——≥2 已開通服務時顯示。
+  /// 存 role_provider_map（key=能力 id，value=服務 id）。
+  Widget _buildDefaultPicker(CapabilityId cap) {
+    return FutureBuilder<List<ServiceDefinition>>(
+      future: ServiceRegistry.instance.activatedServicesFor(cap),
+      builder: (context, snap) {
+        final activated = snap.data ?? [];
+        if (activated.length < 2) return const SizedBox.shrink();
+        final capKey = cap.id;
+        return FutureBuilder<Map<String, String>>(
+          future: StorageService.getRoleProviderMap(),
+          builder: (context, roleSnap) {
+            final ds = BridgeDSColors.of(context);
+            final current = roleSnap.data?[capKey] ?? '';
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.star_outline, size: 14, color: ds.accentYellow),
+                  const SizedBox(width: 6),
+                  Text('預設服務',
+                      style: TierStyle.of(context, Tier.cardCaption)
+                          .toTextStyle()
+                          .copyWith(color: ds.textSecondary)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: activated.any((s) => s.id == current)
+                          ? current
+                          : '',
+                      items: [
+                        const DropdownMenuItem(
+                            value: '',
+                            child: Text('自動（第一個可用）',
+                                style: TextStyle(fontSize: 13))),
+                        for (final s in activated)
+                          DropdownMenuItem(
+                              value: s.id,
+                              child: Text('${s.providerName}・${s.serviceName}',
+                                  style: const TextStyle(fontSize: 13))),
+                      ],
+                      onChanged: (v) async {
+                        await StorageService.saveRoleProvider(capKey, v ?? '');
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -7235,6 +7411,10 @@ class _CapabilityCardState extends State<_CapabilityCard> {
             ),
             if (_expanded) ...[
               const Divider(height: 20),
+              // [Blue 令 2026-10-20 #3 抓包] 能力級預設——妳開的頁面是這份
+              // （bridge_desktop 版 _CapabilityCard），上一刀只加在
+              // capability_center 版。兩份都要有。
+              _buildDefaultPicker(cap),
               ...widget.group.services.map((s) => _ServiceTile(service: s, onChanged: _check)),
             ],
           ],

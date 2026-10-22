@@ -29,6 +29,7 @@ import 'storage_service.dart';
 import 'provider_registry.dart'; // [教練 Agent 2026-07-30] 動態 Provider 探測 + URL 查詢
 import 'agent_loop/agent_profile_store.dart'; // [教練 Agent 2026-07-30] 預設選型需要
 import 'agent_loop/agent_provider_profile.dart'; // [教練 Agent 2026-07-30] ProviderTier
+import 'billing_modes.dart'; // [小葵 2026-10-20] billing 感知 URL
 import 'memory_guard_service.dart';
 
 enum RoutedTarget { local, cloud }
@@ -62,13 +63,29 @@ class ProviderRouter {
   RoutedProvider? _current;
   RoutedProvider? get current => _current;
 
+  /// [小葵 2026-10-20 修復] billing 感知 URL——glm 有 Coding Plan（z.ai）
+  /// 與按量（bigmodel.cn）兩個端點；BillingModes.getBaseUrl 會按使用者
+  /// 選的計費模式回正確 URL。病例： setCurrent 用 ProviderRegistry 的
+  /// bigmodel.cn URL，coding token 打 payg 端點 → 整包 429。
+  static Future<String> _cloudUrlOf(String providerId) async {
+    try {
+      final billingUrl = await BillingModes.getBaseUrl(providerId);
+      if (billingUrl.isNotEmpty) return billingUrl;
+    } catch (_) {}
+    return ProviderRegistry.baseUrlOf(providerId) ?? '';
+  }
+
   /// [教練 Agent 2026-07-30] 由外部（chat_controller）設定路由結果
   /// 使用時機：使用者已明確選了雲端 provider，chat_controller 直接建構
   /// RoutedProvider 並傳入，跳過 route() 的快取檢測邏輯。
   void setCurrent(RoutedProvider r) {
     _current = r;
     if (r.target == RoutedTarget.cloud) {
-      // [教練 Agent 2026-07-30] 改用 ProviderRegistry.baseUrlOf() 取代 _cloudBaseUrl()
+      // [小葵 2026-10-20] 非同步糾正 routedBaseUrl——billing 感知
+      _cloudUrlOf(r.providerId).then((url) {
+        if (_current == r) _routedBaseUrl = url;
+      });
+      // 同步先給 registry 值（fallback，非同步糾正後覆蓋）
       _routedBaseUrl = ProviderRegistry.baseUrlOf(r.providerId);
     } else if (r.target == RoutedTarget.local) {
       _routedBaseUrl = 'http://127.0.0.1:18789';
@@ -90,6 +107,9 @@ class ProviderRouter {
     _localServerAvailable = v;
     debugPrint('[ProviderRouter] localServerAvailable = $v');
   }
+
+  /// [Blue 令 2026-10-20] 讀取探測結果——LLM client「預設＝本地優先」用
+  bool get localServerAvailable => _localServerAvailable;
 
   /// 啟動時檢測可用的雲端 provider
   Future<void> init() async {
@@ -114,6 +134,10 @@ class ProviderRouter {
     }
     debugPrint('[ProviderRouter] localServerAvailable = $_localServerAvailable (probed)');
   }
+
+  /// [Blue 令 2026-10-20] 公開探測——LLM client 端「預設＝本地優先」
+  /// 落地前再探一次本地 server（route() 的探測可能已是幾秒前）。
+  Future<void> probeLocalServerNow() async => _probeLocalServer();
 
   /// 輕量 HTTP GET（不依賴 dio）
   Future<String> _httpGet(String url) async {
@@ -249,8 +273,8 @@ class ProviderRouter {
     // [教練 Agent 2026-07-29] 修復：不再呼叫 saveProvider / saveGatewayUrl 覆蓋使用者選的 provider
     // 只在記憶體中記住路由結果，由 ApiService 讀取 routedBaseUrl 使用
     if (target == RoutedTarget.cloud) {
-      // [教練 Agent 2026-07-30] 改用 ProviderRegistry.baseUrlOf() 取代 _cloudBaseUrl()
-      _routedBaseUrl = ProviderRegistry.baseUrlOf(providerId);
+      // [小葵 2026-10-20] billing 感知 URL（glm coding plan 病例見 setCurrent）
+      _routedBaseUrl = await _cloudUrlOf(providerId);
     } else if (target == RoutedTarget.local) {
       // 本地路由——讀取本地 server endpoint
       final localUrl = await StorageService.getLocalModelEndpoint();

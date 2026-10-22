@@ -19,9 +19,11 @@ import 'dart:math';
 import 'package:shelf/shelf.dart';
 import 'storage_service.dart'; // [T7④] localOnly 官方開關
 import 'package:shelf/shelf_io.dart' as shelf_io;
-import 'life_tree/global_notice_channel.dart'; // [小葵 2026-09-21] 全域對話佇列
+import 'life_tree/global_notice_channel.dart';
+import 'chat_modes.dart'; // [聊天模式 B 線 2026-10-21] set_chat_mode route // [小葵 2026-09-21] 全域對話佇列
 import '../widgets/canvas/v2/canvas_mcp_registry.dart'; // [教練 Agent 2026-07-20] 渲染感應器
 import 'canvas_store.dart'; // [W4.5] create_canvas 用
+import 'brain_container/event_ledger.dart'; // [M6②③ 2026-10-20] 靈魂儀表資料源
 import 'package:shelf_router/shelf_router.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart' show Offset, Size; // [開光 P2/P3] canvas_zoom focal + window_control restore
@@ -206,6 +208,9 @@ class BridgeMcpServer {
   Future<Map<String, dynamic>> Function(String nodeId, Map<String, dynamic> params)? onSetNodeParams;
   Future<Map<String, dynamic>> Function(String direction, double? pixels)? onAppScroll; // [開光 P1] 頁面捲動
   Future<Map<String, dynamic>> Function({String? selector, double? x, double? y, bool confirm})? onAppTap; // [開光 v0.4.0] 語意點擊
+  /// [開光 A線 2026-10-22] 文字注入：聚焦欄位打字（app_type 工具）。
+  /// 不碰系統剪貼簿（pbcopy 教訓：剪貼簿是使用者共用工作區，Agent 不得占用）。
+  Future<Map<String, dynamic>> Function(String text)? onAppType;
   Future<String?> Function()? onScreenCapture; // [開光 v0.4.x] OS 層視網膜（Swift CGWindowList）
   Future<Map<String, dynamic>> Function(String nodeId)? onGetNodeParams;
   Future<void> Function()? onClearCanvas;
@@ -303,6 +308,7 @@ class BridgeMcpServer {
     router.post('/send_user_message', _handleSendUserMessage); // [教練 Agent 2026-07-19] 模擬使用者打字
     router.post('/new_conversation', _handleNewConversation); // [T4③ 2026-10-16] 盲測乾淨上下文
     router.post('/set_local_only', _handleSetLocalOnly); // [T7④ 2026-10-16] 盲測 localOnly 官方開關——App 內寫入 static 快取+prefs，跳過 plist 讀取謎團
+    router.post('/set_chat_mode', _handleSetChatMode); // [聊天模式 B 線 2026-10-21] 模式切換官方通道——UI 側欄與 Agent 共用（分流直通道/輕裝都吃這裡）
     router.get('/global_notice', _handleGlobalNoticeClaim); // [小葵 2026-09-21] 全域對話佇列認領
     router.post('/send_canvas_message', _handleSendCanvasMessage); // [教練 Agent 2026-07-19] 派任務到畫布對話框
     router.post('/inject_message', _handleInjectMessage); // [教練 Agent 2026-07-19] 原生 Agent工作時插嘴
@@ -316,13 +322,26 @@ class BridgeMcpServer {
     // [Blue 令 2026-10-17] 羅盤開口測試機制——樣本不足的環境也能驗證
     // 主動回應頻道端到端（enqueue→閘→proactive session→注入）。
     router.post('/compass/test_fire', (Request req) async {
+      // [T12-③ 2026-10-17] debug 旗保護——testFire 內部已驗
+      // （kDebugMode || BRIDGE_TEST_FIRE=1），這裡提前擋＋明說原因，
+      // 免得回 200 卻靜默沒反應（假成功比拒絕更糟）。
+      if (!kDebugMode &&
+          Platform.environment['BRIDGE_TEST_FIRE'] != '1') {
+        return Response(403, body: jsonEncode({
+          'error': 'test_fire locked',
+          'hint': '正式環境鎖 test_fire（注入口）。驗證請跑 debug build '
+              '或 launchctl setenv BRIDGE_TEST_FIRE 1 後重啟 App',
+        }));
+      }
       final body = await req.readAsString();
       String? msg;
       try {
         final j = jsonDecode(body);
         if (j is Map<String, dynamic>) msg = j['message'] as String?;
       } catch (_) {}
-      CompassSpeaker.instance.onSpeak ??= (content, metadata) async {
+      // [T12-③] ??＝ 改直接掛——測試注入必須走最新 onSpeak（App 載入
+      // 後 45 秒掛的 UI 回呼），否則 test_fire 走不到畫面（假成功）。
+      CompassSpeaker.instance.onSpeak = (content, metadata) async {
         final controller = BridgeDesktopScreen.activeChatController.value;
         if (controller == null) return;
         await controller.openOrCreateProactiveSession();
@@ -359,6 +378,7 @@ class BridgeMcpServer {
     router.get('/annotations', _handleGetAnnotations);
     router.get('/get_latest_messages', _handleGetLatestMessages); // [教練 Agent 2026-07-20] 渲染感應器
     router.get('/get_agent_debug', _handleGetAgentDebug); // [教練 Agent 2026-08-08] 教練模式
+    router.get('/soul_dashboard', _handleSoulDashboard); // [M6②③ 2026-10-20] 靈魂儀表——雲端率＋修正率週報
 
     router.get('/galaxy', _handleGetGalaxyPage); // [小葵 2026-08-27] 3D 星系模式頁
     router.post('/galaxy_cmd', _handleGalaxyCmd); // [小葵 2026-09-24 出道令] Agent 操控星系
@@ -556,6 +576,23 @@ class BridgeMcpServer {
       ...info,
       'timestamp': DateTime.now().toIso8601String(),
     }), headers: _jsonHeaders);
+  }
+
+  /// [M6②③ 2026-10-20] 靈魂儀表——雲端率＋修正率週報，8420 官方讀取通道。
+  /// 資料源：EventLedger.cloudRateStats / correctionWeeklyReport（T11② 已建）。
+  Response _handleSoulDashboard(Request request) {
+    try {
+      final cloud = EventLedger.instance.cloudRateStats(days: 7);
+      final corrections = EventLedger.instance.correctionWeeklyReport(weeks: 3);
+      return Response.ok(jsonEncode({
+        'cloud_rate': cloud,
+        'correction_weekly': corrections,
+        'generated_at': DateTime.now().toIso8601String(),
+      }), headers: _jsonHeaders);
+    } catch (e) {
+      return Response(500, body: jsonEncode({'error': e.toString()}),
+          headers: _jsonHeaders);
+    }
   }
 
   Future<Response> _handleAddNode(Request request) async {
@@ -972,6 +1009,32 @@ Future<Response> _handleInjectEnrich(Request request) async {
     }
     final ok = await onNewConversation!();
     return Response.ok(jsonEncode({'success': ok}), headers: _jsonHeaders);
+  }
+
+  // [聊天模式 B 線 2026-10-21] 模式切換官方通道——
+  // UI 座標代操不可靠（tooltip overlay 擋點擊），Agent 切模式走這裡。
+  // body: {"mode": "chat|research|engineering|debugging|creative|autonomous"}
+  // 回傳切換後的模式（未知 id → 400，不靜默 fallback——誠實鐵則）
+  Future<Response> _handleSetChatMode(Request request) async {
+    final body = await request.readAsString();
+    Map<String, dynamic> data = {};
+    try {
+      data = jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {}
+    final modeId = data['mode'];
+    if (modeId is! String || modeId.isEmpty) {
+      return Response(400, body: jsonEncode({'error': 'missing "mode" (chat|research|engineering|debugging|creative|autonomous)'}), headers: _jsonHeaders);
+    }
+    final known = chatModeById(modeId);
+    if (known.id != modeId) {
+      return Response(400, body: jsonEncode({'error': 'unknown mode "$modeId"', 'available': chatModes.map((m) => m.id).toList()}), headers: _jsonHeaders);
+    }
+    await ChatModeService.instance.setMode(modeId);
+    return Response.ok(jsonEncode({
+      'success': true,
+      'mode': known.id,
+      'name': known.name,
+    }), headers: _jsonHeaders);
   }
 
   // [小葵 2026-09-21] 全域對話佇列認領——UI（Quick Assistant/主畫面）輪詢，
@@ -1963,6 +2026,19 @@ Future<Response> _handleInjectEnrich(Request request) async {
         'additionalProperties': false,
       },
     },
+    // ── [開光 A線 2026-10-22] app_type 文字注入 ────────────────────
+    {
+      'name': 'app_type',
+      'description': '把文字打進目前聚焦的輸入欄位（合成鍵盤注入，不碰系統剪貼簿）。先 app_tap 點選欄位聚焦，再 app_type 注入。適用：表單預填、精靈輸入框、搜尋欄。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'text': {'type': 'string', 'description': '要注入的文字'},
+        },
+        'required': ['text'],
+        'additionalProperties': false,
+      },
+    },
     {
       'name': 'app_scroll',
       'description': '捲動目前頁面：direction=up/down/top/bottom，pixels=可選精確量。看見頁面深處的內容（如「選擇模型」清單尾端）。',
@@ -2030,6 +2106,74 @@ Future<Response> _handleInjectEnrich(Request request) async {
         'properties': {
           'root': {'type': 'string', 'description': '要掃的根目錄路徑（空=全部）'},
         },
+      },
+    },
+    // [T12-⑦ 2026-10-17] 四條 POST-only 工具收編（Fable：白名單藏死門）——
+    // dispatch 有 case、agent 卻看不到 schema＝隱藏門。galaxy_note/galaxy_oplog
+    // 是 webview/Flutter 內部通道，保留 internal 白名單。
+    {
+      'name': 'galaxy_cmd',
+      'description': '操控星系視覺化：飛行聚焦、鎖定、自轉、開預覽卡、相機重置。'
+          '指令入列，galaxy 頁每秒輪詢執行。[小葵 2026-09-24 出道令]',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'op': {
+            'type': 'string',
+            'description': '動作：spin/spin_speed/rotate/fly/fly_hub/fly_star/'
+                'lock_hub/lock_star/lock_clear/card/peek_star/reset',
+          },
+          'x': {'type': 'number', 'description': 'fly 用——目標座標'},
+          'y': {'type': 'number', 'description': 'fly 用——目標座標'},
+          'z': {'type': 'number', 'description': 'fly 用——目標座標'},
+          'idx': {'type': 'integer', 'description': 'fly_hub/fly_star/lock_hub/lock_star/peek_star 用——目標索引'},
+          'on': {'type': 'boolean', 'description': 'spin 用——開關'},
+          'v': {'type': 'number', 'description': 'spin_speed 用——速度'},
+          'dy': {'type': 'number', 'description': 'rotate 用——弧度'},
+          'title': {'type': 'string', 'description': 'card 用——卡片標題'},
+          'body': {'type': 'string', 'description': 'card 用——卡片內容'},
+        },
+        'required': ['op'],
+      },
+    },
+    {
+      'name': 'galaxy_edit',
+      'description': '星系內編輯：刪除（進垃圾桶）、到所屬資料夾、標籤、改名、'
+          '圖示。[v308 Blue 五動作令]',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'op': {
+            'type': 'string',
+            'description': 'delete/reveal/tags/rename/icon',
+          },
+          'kind': {'type': 'string', 'description': 'asset|memory（預設 asset）'},
+          'id': {'type': 'string', 'description': '目標資產/記憶 id'},
+          'tags': {'type': 'array', 'items': {'type': 'string'}, 'description': 'tags 用——標籤列表'},
+          'name': {'type': 'string', 'description': 'rename 用——新名稱'},
+          'icon': {'type': 'string', 'description': 'icon 用——emoji/字元'},
+        },
+        'required': ['op', 'id'],
+      },
+    },
+    {
+      'name': 'brain_search_focus',
+      'description': '腦搜尋放大對焦：把搜尋查詢推到搜尋 UI 對焦（教練 Agent 感官）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'query': {'type': 'string', 'description': '要對焦的搜尋詞'},
+        },
+        'required': ['query'],
+      },
+    },
+    {
+      'name': 'design_thumb_reindex',
+      'description': '手動觸發設計檔縮圖重嵌（fire-and-forget，回傳啟動確認）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': <String, dynamic>{},
+        'additionalProperties': false,
       },
     },
   ];
@@ -2266,6 +2410,16 @@ Future<Response> _handleInjectEnrich(Request request) async {
             return _jsonRpcResult(id, {'resultType': 'complete', 'available': false, 'target': target, 'message': '視網膜拍照失敗: $e'});
           }
         }
+        case 'app_type':
+          // [開光 A線 2026-10-22] 文字注入——聚焦欄位打字（零剪貼簿）
+          if (onAppType == null) return error('Type handler not connected');
+          final typeText = args['text'] as String?;
+          if (typeText == null || typeText.isEmpty) {
+            return _jsonRpcError(id, -32602, 'text required');
+          }
+          final typeResult = await onAppType!(typeText);
+          return _jsonRpcResult(id, {'resultType': 'complete', ...typeResult});
+
         case 'app_tap':
           // [S2 合併 · 2026-10-12] 雙 case（canvas_toolbar 版 vs selector/x/y 版）合併：
           // args 帶 target（且無 selector/x）→ 走 canvas_toolbar 語意點擊（相容舊用法）；
@@ -2302,13 +2456,16 @@ Future<Response> _handleInjectEnrich(Request request) async {
           return _jsonRpcResult(id, await _proxyGet(route));
         }
         case 'galaxy_cmd':
-          return _jsonRpcResult(id, await _proxyGet('/galaxy_cmd'));
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/galaxy_cmd', args)); // [T12-7] POST-only
         case 'galaxy_oplog':
-          return _jsonRpcResult(id, await _proxyGet('/galaxy_oplog'));
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/galaxy_oplog', args)); // [T12-7] POST-only
         case 'galaxy_note':
           return _jsonRpcResult(id, await _proxyGet('/galaxy_note'));
         case 'galaxy_edit':
-          return _jsonRpcResult(id, await _proxyGet('/galaxy_edit'));
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/galaxy_edit', args)); // [T12-7] POST-only
         case 'galaxy_params':
           return _jsonRpcResult(id, await _proxyGet('/galaxy_params'));
         case 'galaxy_icons':
@@ -2330,9 +2487,11 @@ Future<Response> _handleInjectEnrich(Request request) async {
         case 'annotations':
           return _jsonRpcResult(id, await _proxyGet('/annotations'));
         case 'brain_search_focus':
-          return _jsonRpcResult(id, await _proxyGet('/brain_search_focus'));
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/brain_search_focus', args)); // [T12-7] POST-only
         case 'design_thumb_reindex':
-          return _jsonRpcResult(id, await _proxyGet('/design_thumb_reindex'));
+          return _jsonRpcResult(
+              id, await _proxy('POST', '/design_thumb_reindex', args)); // [T12-7] POST-only
         case 'fps_probe':
           return _jsonRpcResult(id, await _proxyGet('/fps_probe'));
         case 'app_scroll':

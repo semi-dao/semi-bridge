@@ -14,6 +14,7 @@ import 'dart:convert';
 
 import 'package:bridge_app/services/brain_container/brain_database.dart';
 import 'package:bridge_app/services/brain_container/embedding/embedding_service.dart';
+import 'package:bridge_app/services/companion_store.dart'; // [指紋章 2026-10-21] companion_id→名字映射
 import 'package:bridge_app/services/vector_db/five_factor_rerank.dart'; // [小葵 2026-09-09] 五因素重排
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -120,11 +121,20 @@ class MemoryHit {
   /// 相似度分數（0.0 ~ 1.0）
   final double score;
 
+  /// [指紋章 2026-10-21 ②刀1] 誰的記憶——companion_id 映射後的名字
+  /// （例：「小橋」；shared/空 = 'shared'）。檢索時 JOIN 帶出，注入時亮章。
+  final String? speakerName;
+
+  /// [指紋章 2026-10-21 ②刀1] 記憶誕生日（M/d，供注入出處標籤）
+  final String? createdAtLabel;
+
   const MemoryHit({
     required this.id,
     required this.content,
     required this.room,
     required this.score,
+    this.speakerName,
+    this.createdAtLabel,
   });
 
   @override
@@ -792,7 +802,7 @@ class HybridSearchService {
           : [vectorJson, k, ownerCompanionId, limit];
 
       final rows = db.select(
-        "SELECT m.id, m.title, m.content, m.memory_type, m.created_at, v.distance "
+        "SELECT m.id, m.title, m.content, m.memory_type, m.created_at, m.owner_companion_id, v.distance "
         "FROM agent_memories m "
         "JOIN vector_full_scan('agent_memories', 'embedding', vector_as_f32(?), ?) AS v "
         "  ON m.rowid = v.rowid "
@@ -823,6 +833,10 @@ class HybridSearchService {
               : '[$type] $title — ${row['content'] as String}',
           room: 'agent_memory',
           score: baseScore * decay,
+          // [指紋章 2026-10-21 ②刀1] 誰的記憶＋何時——檢索即帶出處
+          speakerName: CompanionStore().fingerprintName(
+              (row['owner_companion_id'] as String?) ?? 'shared'),
+          createdAtLabel: _mdLabel(created),
         );
       }).toList();
     } catch (e) {
@@ -1221,6 +1235,12 @@ class HybridSearchService {
   /// 公式: decay = 1 / (1 + age_days / half_life_days)
   /// half_life = 90 天（3 個月後影響力減半）
   static const int _ageDecayHalfLifeDays = 90;
+
+  /// [指紋章 2026-10-21 ②刀1] DateTime → M/d 標籤（null 安全，解析失敗回 null）
+  static String? _mdLabel(DateTime? dt) {
+    if (dt == null) return null;
+    return '${dt.month}/${dt.day}';
+  }
 
   double _computeAgeDecay(int? timestampMs) {
     if (timestampMs == null || timestampMs == 0) return 1.0; // 無時間資訊不懲罰

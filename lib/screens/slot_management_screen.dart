@@ -217,6 +217,10 @@ class _SlotManagementScreenState extends State<SlotManagementScreen> {
   Widget _buildCategoryCard(String category) {
     final slots = _registry.listByCategory(category);
     final expanded = _expandedCategories.contains(category);
+    // [小葵 2026-10-18 Blue 拍板除錯] debugPrint 渲染鐵證——之前 MCP/Swift 點擊
+    // 都無效、視窗像素差 0（agent-channel-selector「debugPrint 渲染鐵證法」）。
+    // 先看 build 渲染跟 onTap 是否真的被觸發、再決定要不要再深入。
+    debugPrint('[SlotsMgmt] build category="$category" slots=${slots.length} expanded=$expanded');
 
     return Container(
       margin: const EdgeInsets.only(
@@ -232,11 +236,17 @@ class _SlotManagementScreenState extends State<SlotManagementScreen> {
         children: [
           // 大卡頭：類名 + 數量 + 說明 + 展開箭頭
           InkWell(
-            onTap: () => setState(() {
-              expanded
-                  ? _expandedCategories.remove(category)
-                  : _expandedCategories.add(category);
-            }),
+            onTap: () {
+              debugPrint('[SlotsMgmt] tap category="$category" expanded_before=$expanded');
+              setState(() {
+                if (expanded) {
+                  _expandedCategories.remove(category);
+                } else {
+                  _expandedCategories.add(category);
+                }
+              });
+              debugPrint('[SlotsMgmt] tap done category="$category" expanded_after=${_expandedCategories.contains(category)}');
+            },
             borderRadius: BorderRadius.circular(BridgeDS.roundComfortable),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(
@@ -535,6 +545,19 @@ class _SlotCard extends StatelessWidget {
               ),
             ),
           ],
+          // [A線 2026-10-22] plugin 插槽卡（agent-plugins.org 出身或帶版本）
+          // 顯示 version 行——照既有小卡排版，Tier list.item.meta 語彙
+          if (slot.origin == 'agent-plugins.org' || slot.version != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'v${slot.version}',
+              style: TierStyle.of(context, Tier.listItemMeta)
+                  .toTextStyle()
+                  .copyWith(color: BridgeDSColors.of(context).textMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
           const SizedBox(height: BridgeDS.spaceSM),
           // 認證徽章
           _certBadge(context),
@@ -590,15 +613,15 @@ class _SlotCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: BridgeDS.spaceMD),
-          // 操作按鈕：橫向單行、nowrap、不折行（Blue 2026-10-06 修法定案）
-          // 「更新」按鈕：只在未認證＋有新版顯示——無版本來源前一律不顯示（Q5）
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            // [Blue 抓包 2026-10-07] 不可 reverse——reverse 讓捲動起始在尾端，
-            // 「開啟」（最高頻操作）被推出視野外。正序：開啟恆在第一眼，
-            // 卸載要滑到最後才看得到（順序即防誤觸）。
-            child: Row(
-              children: [
+          // 操作按鈕：動態換行（Blue 邊界動態鐵則 2026-10-22 修）
+          // [A線 1022 實證] 固定寬卡（250px）內 5 顆按鈕 ~275px 塞不下，
+          // horizontal scroll 把「卸載」clip 在視野外——人要橫拖才點得到，
+          // agent（合成點擊）永遠點不到。改 Wrap 換行：開啟恆在第一眼、
+          // 卸載自然落第二行尾（防誤觸順序保留）。
+          Wrap(
+            spacing: BridgeDS.spaceSM,
+            runSpacing: BridgeDS.spaceSM,
+            children: [
                 _opButton(
                   context,
                   '開啟',
@@ -634,8 +657,7 @@ class _SlotCard extends StatelessWidget {
                   danger: true,
                   onTap: () => _showUninstallDialog(context),
                 ),
-              ],
-            ),
+            ],
           ),
         ],
       ),

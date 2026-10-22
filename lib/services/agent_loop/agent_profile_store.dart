@@ -591,10 +591,11 @@ class ProviderProfileStore {
       ),
       'glm_glm-5.3': ProviderProfile(
         provider: 'glm', model: 'glm-5.3', tier: ProviderTier.tier1,
-        // [教練 Agent 2026-08-16 使用者 抓包] 5.3 強制思考模式（每輪 7-10s、
-        // 思考 200-260 tokens）；thinking.disabled 對它無效，
-        // 帶著無害（5.2 教訓：明寫比默認好）
-        apiParams: {'temperature': 0.3, 'thinking': {'type': 'disabled'}},
+        // [小葵 2026-10-20 修復] 5.3 曾「disabled 帶著無害」——API 改版後
+        // 不成立了：錯誤 1210「该模型始终思考，不支持关闭思考；请使用
+        // low、high 或 max」。thinking.disabled 現在整包 400。改不帶參數
+        //（預設思考），需要快的場合 suggestsFallbackModel 有 5-turbo。
+        apiParams: {'temperature': 0.3},
         suggestsFallbackModel: 'glm-5-turbo', // [教練 Agent 2026-08-16] 5.3 額度滿/429 fallback
         suggestedMaxTurns: 25, suggestedTaskChunkSize: 15, tested: true,
         supportsReasoningContent: true,

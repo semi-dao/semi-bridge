@@ -153,7 +153,7 @@ void main() {
     // [開光 P3 2026-09-26] 32 → 34：app_permissions（權限即地圖）+ window_control（視窗管理）
     // [S1+S2 合併 2026-10-12] 48（app_look/app_tap 雙 schema 重複註冊）→ 43：
     // app_look 與 app_tap 各自雙 schema 合併為一份，重複註冊終結。
-    test('POST /mcp tools/list → 43 tools + 每個有 inputSchema (JSON Schema 2020-12)', () async {
+    test('POST /mcp tools/list → 49 tools + 每個有 inputSchema (JSON Schema 2020-12)', () async {
       final res = await _httpPost(
         'http://127.0.0.1:$actualPort/mcp',
         body: {
@@ -183,7 +183,7 @@ void main() {
       // [開光 P1 2026-09-26] 28 → 30：app_look + window_map
       // [開光 P3 2026-09-26] 32 → 34：app_permissions + window_control
       // [S1+S2 合併 2026-10-12] 48 → 43：app_look/app_tap 雙 schema 合併
-      expect(tools.length, 44); // [T8①] create_canvas 收編 43→44
+      expect(tools.length, 49); // [A線 1022] app_type 收編 48→49
 
       // 每個 tool 都必須有 inputSchema（JSON Schema 2020-12 結構）
       for (final t in tools) {
@@ -309,8 +309,9 @@ void main() {
         'app_tap', 'canvas_zoom',
         'app_permissions', 'window_control',
         'create_canvas', // [T8①] 收編
+        'app_type', // [A線 2026-10-22] 文字注入收編
       ]));
-      expect(names.length, 44); // [T8①] create_canvas 收編 43→44——三份清單漂移終結
+      expect(names.length, 49); // [A線 1022] app_type 收編（48→49）——長度鎖每次收編更新
     });
 
     test('開光：app_view（無 UI 測試環境）→ available:false 不炸', () async {

@@ -14,6 +14,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'builtin_skills_intake.dart' show BuiltinSkillsIntake;
+import '../plugins/plugin_slot_service.dart';
+import '../skills/skill_catalog.dart';
+import '../skills/skill_store.dart';
 import 'package:uuid/uuid.dart';
 
 /// 插槽記錄 — 一個住進橋樑的開源程式
@@ -480,6 +483,20 @@ class SlotRegistry extends ChangeNotifier {
     _slots.removeWhere((x) => x.id == id);
     await _persist();
     notifyListeners();
+    // [A線 2026-10-22] plugin 插槽卸載掃除——按 `<pluginName>__` 前綴刪
+    // skillsDir 下的 skills＋catalog reload（uninstall 只刪 slots/<id>/，
+    // 不掃這裡會留幽靈 skills）。SkillStore 未初始化（測試環境）就靜默跳過。
+    if (s.sourceRepo.startsWith('skill://') && s.origin == PluginSlotService.origin) {
+      final skillsPath = SkillStore.instance.skillsDirPath;
+      if (skillsPath != null) {
+        final pluginName = s.sourceRepo.substring('skill://'.length);
+        final svc = PluginSlotService(
+          catalog: SkillCatalog.instance,
+          skillsDir: Directory(skillsPath),
+        );
+        await svc.removePluginSkills(pluginName);
+      }
+    }
     // [Blue 提議 2026-10-06] builtin skill 全數卸載 → 立墓碑（不還魂）
     await BuiltinSkillsIntake.instance.onSlotUninstalled(s.sourceRepo);
   }

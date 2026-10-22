@@ -40,6 +40,41 @@ class CapabilityRouter {
       );
     }
 
+    // [Blue 令 2026-10-20] 能力級預設——金鑰匙能力卡勾選的「預設服務」
+    // 優先於 current provider。map key = 能力 id（image_generation 等），
+    // value = 服務 id（minimax_image / openai_image 等）。adapter id 與
+    // 服務 id 不同名時嘗試前綴對映（minimax_image → minimax）。
+    final capKey = switch (action.type) {
+      BridgeActionType.generateImage => 'image_generation',
+      BridgeActionType.generateAnimation => 'image_generation',
+      BridgeActionType.generateVideo => 'video_generation',
+      BridgeActionType.generateMusic => 'music_generation',
+      BridgeActionType.vision => 'image_understanding',
+      BridgeActionType.browse => 'web_search',
+      BridgeActionType.document => 'text_reasoning',
+      BridgeActionType.desktopFiles => 'text_reasoning',
+      BridgeActionType.unknown => null,
+    };
+    if (capKey != null) {
+      final preferred = await StorageService.getRoleProvider(capKey);
+      if (preferred != null && preferred.trim().isNotEmpty) {
+        // 服務 id（minimax_image）→ adapter id（minimax）前綴對映：
+        // 底線前段 = provider 名。直接同名也試（保險）。
+        var providerId = preferred.trim().toLowerCase();
+        var adapter = _registry.findAdapter(action, providerId);
+        adapter ??= _registry.findAdapter(
+            action, providerId.split('_').first);
+        if (adapter != null && await _isProviderReady(adapter.id)) {
+          return CapabilityRoute(
+            adapter: adapter,
+            provider: adapter.id,
+            candidateProviders: [adapter.id],
+            reason: 'capability_default（能力卡預設 $preferred）',
+          );
+        }
+      }
+    }
+
     final currentProvider = (await StorageService.getProvider() ?? 'kimi')
         .trim()
         .toLowerCase();

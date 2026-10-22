@@ -146,6 +146,12 @@ class InjectPipeline {
       text: hit.content,
       similarity: hit.score,
       slot: slot,
+      // [指紋章 2026-10-21 ②刀1] 檢索帶出的出處章傳遞到注入層
+      fingerprint: (hit.speakerName == null || hit.speakerName == 'shared')
+          ? null
+          : (hit.createdAtLabel == null
+              ? hit.speakerName
+              : '${hit.speakerName}·${hit.createdAtLabel}'),
     );
   }
 

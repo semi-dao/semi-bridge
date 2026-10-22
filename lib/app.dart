@@ -373,9 +373,24 @@ class BridgeApp extends StatefulWidget {
   State<BridgeApp> createState() => _BridgeAppState();
 }
 
+/// [T12-③ 2026-10-17] 羅盤前景沖出——resumed 時 flushQueue。
+/// 主動訊息等的就是使用者回來看：開機 45 秒唯一窗口的病根修復
+/// （Fable V3：羅盤有嘴但只在開機 45 秒開一次——App 持續運行期間
+/// 入列的紅旗永遠沖不到使用者）。
+class _CompassFlushObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      CompassSpeaker.instance.flushQueue(); // 1h 限頻在 speaker 內
+    }
+  }
+}
+
 class _BridgeAppState extends State<BridgeApp> with WindowListener {
   // [隊友訊息流 C7 2026-09-08] Tray 退出確認需要 root context
   final TrayService _tray = TrayService();
+  // [T12-③] 羅盤前景沖出 observer（resumed → flushQueue）
+  final _compassFlushObserver = _CompassFlushObserver();
   // [教練 Agent 2026-07-24] P5: Daemon WebSocket client (singleton)
   final DaemonClient _daemonClient = DaemonClient();
   StreamSubscription? _daemonEventSub;
@@ -487,6 +502,10 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
     // [T9③ 2026-10-17] 羅盤開口 M4——夢裡排隊的話，開 App 後沖出
     // （走既有注入通道 injectAssistantMessage + kind:compass，不另建
     // 聊天路徑；開口閘全在 CompassSpeaker——信心/額度/證據）
+    // [T12-③ 2026-10-17] 前景沖出——開機 45 秒不是唯一窗口：
+    // WidgetsBindingObserver resumed 時也沖（主動訊息等的就是使用者
+    // 回來看；App 持續運行期間入列的訊息原本永遠沖不到）。
+    WidgetsBinding.instance.addObserver(_compassFlushObserver);
     Timer(const Duration(seconds: 45), () {
       if (!mounted) return;
       CompassSpeaker.instance.onSpeak = (content, metadata) async {
@@ -529,13 +548,19 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
       VaultService.instance.markInitialized();
       debugPrint('[VaultService] 初始化完成');
 
-      // [教練 Agent P0.6c 2026-08-07] 把 bridge_media/ 加入向量 DB 受管範圍，
-      // 讓生成的圖片/文件/音訊自動被偵測和嵌入。
-      await _registerBridgeMediaInSandbox();
+      // [小葵 2026-10-20 Blue 抓包·滾動卡頓] 啟動掃描延後——原本 BrainContainer
+      // 一就緒就 fullScan＋嵌入（51s 掃描＋6182 檔嵌入直接壓在剛啟動的 UI 上，
+      // 滾對話就轉圈圈）。延後 45 秒讓 UI 先暖；期間的新檔案由 watcher＋
+      // 兜底 fullScan 追上（fullScan 會對帳整棵樹，不會漏）。
+      Future.delayed(const Duration(seconds: 45), () async {
+        // [教練 Agent P0.6c 2026-08-07] 把 bridge_media/ 加入向量 DB 受管範圍，
+        // 讓生成的圖片/文件/音訊自動被偵測和嵌入。
+        await _registerBridgeMediaInSandbox();
 
-      // [教練 Agent 2026-07-28] App 啟動時自動觸發嵌入
-      // 偵測到有檔案但沒 embedding 的就自動跑
-      _autoGenerateEmbeddings();
+        // [教練 Agent 2026-07-28] App 啟動時自動觸發嵌入
+        // 偵測到有檔案但沒 embedding 的就自動跑
+        _autoGenerateEmbeddings();
+      });
     } else {
       debugPrint('[VaultService] BrainContainer 未初始化，Vault 服務暫停');
     }
@@ -569,8 +594,10 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
         debugPrint('[App] bridge_media/ 已加入向量 DB 受管範圍: $mediaRoot');
       }
       // 增量掃描，把剛加入的檔案補進索引
+      // [小葵 2026-10-20 Blue 抓包·滾動卡頓] 帶指紋短路——指紋一致時整輪
+      // 跳過（原本每次啟動都白掃 51 秒 887 檔）。有真實變更仍走全掃。
       final indexService = AssetIndexService();
-      await indexService.fullScan(mediaRoot);
+      await indexService.fullScan(mediaRoot, skipIfUnchanged: true);
       debugPrint('[App] bridge_media/ 增量掃描完成');
     } catch (e) {
       debugPrint('[App] bridge_media/ 向量 DB 註冊失敗: $e');
@@ -582,6 +609,7 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
     _daemonEventSub?.cancel();
     _daemonStateSub?.cancel();
     // 不 dispose singleton DaemonClient（其他頁面也在用）
+    WidgetsBinding.instance.removeObserver(_compassFlushObserver); // [T12-③]
     windowManager.removeListener(this);
     JsBridge.instance.appState.removeListener(_handleNavigation);
     CompanionRuntimeOutlet.instance.stop();

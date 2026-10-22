@@ -205,6 +205,10 @@ class _CapabilityCardState extends State<_CapabilityCard> {
           // Expanded services list
           if (_expanded) ...[
             const Divider(height: 24),
+            // [Blue 令 2026-10-20] 能力級預設——該能力有 ≥2 個已開通服務時，
+            // 可勾選預設服務（全線 APP 照此執行）。存 role_provider_map
+            // （key=能力 id 如 image_generation，value=服務 id 如 minimax_image）。
+            _CapabilityDefaultPicker(capability: widget.group.capability),
             ...widget.group.services.map(
               (service) =>
                   _ServiceTile(service: service, onChanged: _checkActivation),
@@ -212,6 +216,83 @@ class _CapabilityCardState extends State<_CapabilityCard> {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// [Blue 令 2026-10-20] 能力級預設選擇器——
+// 該能力有 ≥2 個已開通服務時顯示「預設服務」下拉。
+// 儲存 key = 能力 id（image_generation 等），與活預設共用 role_provider_map。
+// ═══════════════════════════════════════════════════
+
+class _CapabilityDefaultPicker extends StatefulWidget {
+  final CapabilityId capability;
+
+  const _CapabilityDefaultPicker({required this.capability});
+
+  @override
+  State<_CapabilityDefaultPicker> createState() =>
+      _CapabilityDefaultPickerState();
+}
+
+class _CapabilityDefaultPickerState extends State<_CapabilityDefaultPicker> {
+  @override
+  Widget build(BuildContext context) {
+    final ds = BridgeDSColors.of(context);
+    return FutureBuilder<List<ServiceDefinition>>(
+      future: ServiceRegistry.instance.activatedServicesFor(widget.capability),
+      builder: (context, snap) {
+        final activated = snap.data ?? [];
+        // 未開通或只有一個選項 → 沒有「選預設」的意義
+        if (activated.length < 2) return const SizedBox.shrink();
+        final capKey = widget.capability.id;
+        return FutureBuilder<Map<String, String>>(
+          future: StorageService.getRoleProviderMap(),
+          builder: (context, roleSnap) {
+            final current = roleSnap.data?[capKey] ?? '';
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.star_outline,
+                      size: 14, color: ds.accentYellow),
+                  const SizedBox(width: 6),
+                  Text('預設服務',
+                      style: TierStyle.of(context, Tier.cardCaption)
+                          .toTextStyle()
+                          .copyWith(color: ds.textSecondary)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: activated.any((s) => s.id == current)
+                          ? current
+                          : '',
+                      items: [
+                        const DropdownMenuItem(
+                            value: '',
+                            child: Text('自動（第一個可用）',
+                                style: TextStyle(fontSize: 13))),
+                        for (final s in activated)
+                          DropdownMenuItem(
+                              value: s.id,
+                              child: Text('${s.providerName}・${s.serviceName}',
+                                  style: const TextStyle(fontSize: 13))),
+                      ],
+                      onChanged: (v) async {
+                        await StorageService.saveRoleProvider(
+                            capKey, v ?? '');
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

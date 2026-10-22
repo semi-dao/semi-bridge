@@ -285,6 +285,50 @@ class StorageService {
     return prefs.getString(_keyProvider);
   }
 
+  // ========== 用途角色映射（活預設）==========
+  // [Blue 令 2026-10-20] 「預設」不是單一 provider——每個用途角色可指定
+  // 不同鑰匙：chat=主要對話、coding=主要編程、reasoning=深度推理、
+  // image_gen=圖片生成。沒設的角色走原本邏輯（本地優先/品牌階梯）。
+  static const String _keyRoleMap = 'role_provider_map';
+
+  static Future<void> saveRoleProvider(String role, String provider) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_keyRoleMap);
+    final map = <String, String>{};
+    if (raw != null) {
+      try {
+        (jsonDecode(raw) as Map).forEach((k, v) {
+          if (v is String && v.isNotEmpty) map[k.toString()] = v;
+        });
+      } catch (_) {}
+    }
+    if (provider.isEmpty) {
+      map.remove(role);
+    } else {
+      map[role] = provider;
+    }
+    await prefs.setString(_keyRoleMap, jsonEncode(map));
+  }
+
+  static Future<Map<String, String>> getRoleProviderMap() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_keyRoleMap);
+    if (raw == null) return {};
+    try {
+      final map = <String, String>{};
+      (jsonDecode(raw) as Map).forEach((k, v) {
+        if (v is String && v.isNotEmpty) map[k.toString()] = v;
+      });
+      return map;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<String?> getRoleProvider(String role) async {
+    return (await getRoleProviderMap())[role];
+  }
+
   // ========== TTS Voice Preference ==========
   // [小葵 2026-09-24] MiniMax TTS 音色偏好（例：xiaokui_video_voice＝小葵 JK2 定案音色）
   static const String _keyTtsVoice = 'tts_voice_preference';

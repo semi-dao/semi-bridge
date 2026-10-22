@@ -76,7 +76,9 @@ class AgentSearchKnowledgeTool extends AgentTool {
         lines.add('找到 ${memories.length} 個相關記憶：\n');
         for (var i = 0; i < memories.length; i++) {
           final m = memories[i];
-          lines.add('${i + 1}. ${m.title}');
+          // [指紋章 2026-10-21 ②刀2] 出處章——誰的記憶、何時寫下
+          final stamp = m.fingerprintLabel == null ? '' : '〔${m.fingerprintLabel}〕';
+          lines.add('${i + 1}. ${m.title}$stamp');
           lines.add('   ${m.snippet}');
           lines.add('   ID: ${m.id}');
           lines.add('');

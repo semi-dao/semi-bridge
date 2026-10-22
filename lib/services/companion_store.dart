@@ -57,6 +57,15 @@ class CompanionStore extends ChangeNotifier {
     }
   }
 
+  /// [指紋章 2026-10-21 ②刀1] companion_id → 指紋章名字。
+  /// 'shared'/空/未知 id → 'shared'（寧標 shared 不誤標——誠實鐵則，
+  /// 呼應 WS-2「找不到 active 保守回 shared」）。
+  String fingerprintName(String companionId) {
+    if (companionId.isEmpty || companionId == 'shared') return 'shared';
+    final c = getById(companionId);
+    return c?.name ?? 'shared';
+  }
+
   /// 取得當前活躍夥伴
   Companion? get activeCompanion {
     if (_activeCompanionId == null) return null;

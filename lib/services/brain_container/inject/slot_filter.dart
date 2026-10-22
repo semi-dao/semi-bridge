@@ -13,6 +13,7 @@ class MemoryCandidate {
     required this.slot,
     this.source = 'm0',
     this.floorExempt = false,
+    this.fingerprint,
   });
 
   final String id;
@@ -27,6 +28,9 @@ class MemoryCandidate {
 
   /// K1 候選免相似度地板（hybrid RRF 分數與 semantic 分數不可比）。
   final bool floorExempt;
+
+  /// [指紋章 2026-10-21 ②刀1] 出處標籤（「小橋·10/14」）；null=來源無章（不顯示）
+  final String? fingerprint;
 }
 
 enum MemorySlot {

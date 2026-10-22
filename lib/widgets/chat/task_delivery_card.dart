@@ -220,8 +220,10 @@ class _DeliverableThumb extends StatelessWidget {
       child: deliverable.kind == 'image' && File(deliverable.ref).existsSync()
           ? ClipRRect(
               borderRadius: BorderRadius.circular(8),
+              // [小葵 2026-10-20] 同對話滾動卡頓修復——縮圖按需解碼（72px 顯示）
               child: Image.file(File(deliverable.ref),
-                  fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback(ds)),
+                  fit: BoxFit.cover, cacheWidth: 144,
+                  errorBuilder: (_, __, ___) => _fallback(ds)),
             )
           : _fallback(ds),
     );

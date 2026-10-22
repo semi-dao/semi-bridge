@@ -110,6 +110,103 @@ class _BrainApiConfigCardState extends State<BrainApiConfigCard> {
     super.dispose();
   }
 
+  /// [Blue 令 2026-10-20] 用途角色映射（活預設）——
+  /// 每個用途角色（chat/coding/reasoning/image_gen）可指定一把鑰匙。
+  /// 「預設」模式下路由按意圖角色找鑰匙；沒設的角色走原本邏輯。
+  static const _roleLabels = {
+    'chat': '主要對話',
+    'coding': '主要編程',
+    'reasoning': '深度推理',
+    // [Blue 令 2026-10-20 #2] image_gen 移除——圖片生成等能力級預設
+    // 歸能力卡管（capability_center 每能力 ≥2 開通服務時可選預設服務）。
+  };
+
+  Widget _buildRoleMapSection() {
+    final ds = BridgeDSColors.of(context);
+    return FutureBuilder<Map<String, String>>(
+      future: StorageService.getRoleProviderMap(),
+      builder: (context, roleSnap) {
+        final roleMap = roleSnap.data ?? {};
+        // 候選鑰匙＝有 token 的 provider（角色映射只對有鑰匙的有意義）
+        return FutureBuilder<List<String>>(
+          future: _lockedProviders(),
+          builder: (context, lockSnap) {
+            final locked = lockSnap.data ?? [];
+            if (locked.isEmpty) return const SizedBox.shrink();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SelectableText('用途預設（各角色用哪把鑰匙）',
+                    style: ds.small.copyWith(
+                        fontSize: 14, color: ds.textMuted)),
+                const SizedBox(height: 4),
+                SelectableText(
+                    '選「預設」模式時，路由會按用途找對應鑰匙；沒設的角色走本地優先＋自動雲端。',
+                    style: TierStyle.of(context, Tier.cardCaption)
+                        .toTextStyle()
+                        .copyWith(color: ds.textTertiary)),
+                const SizedBox(height: 8),
+                for (final entry in _roleLabels.entries)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 90,
+                          child: Text(entry.value,
+                              style: TierStyle.of(context, Tier.cardCaption)
+                                  .toTextStyle()
+                                  .copyWith(color: ds.textSecondary)),
+                        ),
+                        Expanded(
+                          child: DropdownButton<String>(
+                            isExpanded: true,
+                            value: locked.contains(roleMap[entry.key])
+                                ? roleMap[entry.key]
+                                : '',
+                            items: [
+                              const DropdownMenuItem(
+                                  value: '',
+                                  child: Text('自動（未指定）',
+                                      style: TextStyle(fontSize: 13))),
+                              for (final p in locked)
+                                DropdownMenuItem(
+                                    value: p,
+                                    child: Text(p,
+                                        style:
+                                            const TextStyle(fontSize: 13))),
+                            ],
+                            onChanged: (v) async {
+                              await StorageService.saveRoleProvider(
+                                  entry.key, v ?? '');
+                              if (mounted) setState(() {});
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 掃出有 token（已鎖定）的 provider 清單
+  Future<List<String>> _lockedProviders() async {
+    final result = <String>[];
+    for (final p in _providers) {
+      if (p == 'local' || p == 'ollama') continue;
+      try {
+        final token = await StorageService.getToken(provider: p);
+        if (token != null && token.trim().isNotEmpty) result.add(p);
+      } catch (_) {}
+    }
+    return result;
+  }
+
   /// 載入 API 設定
   Future<void> _loadApiConfig() async {
     debugPrint('[BrainApiConfigCard] _loadApiConfig 開始');
@@ -414,6 +511,10 @@ class _BrainApiConfigCardState extends State<BrainApiConfigCard> {
               ),
             ],
           ),
+          SizedBox(height: BridgeDS.spaceMD),
+
+          // [Blue 令 2026-10-20] 用途角色映射（活預設）——每把鑰匙可掛用途
+          _buildRoleMapSection(),
           SizedBox(height: BridgeDS.spaceMD),
 
           // Provider 選擇

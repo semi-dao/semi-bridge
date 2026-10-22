@@ -13,6 +13,8 @@ import '../quick_assistant/quick_assistant_context.dart';
 import '../quick_assistant/quick_assistant_system_prompt.dart';
 // [小葵 2026-10-05 生命樹代謝] 夢的藥回灌——夢卡檢索
 import '../life_tree/life_tree_store.dart';
+// [聊天模式 B 線 2026-10-20 Blue 拍板] 模式紀律 prompt 資料源
+import '../chat_modes.dart';
 
 class AgentLoopPromptBuilder {
   /// [身份] 原 KnowledgeIndexer.coreIdentity——身份非知識，退役時內聯保留
@@ -36,7 +38,7 @@ class AgentLoopPromptBuilder {
 
 ## 專案路徑
 - 原始碼：<HOME>/Developer/bridge_app
-- 設計文件：/Volumes/DATA/橋樑計劃/02-架構設計/
+- 設計文件：<DATA_VOLUME>/橋樑計劃/02-架構設計/
 - App container：~/Library/Containers/farm.semiwasabi.bridgeApp/''';
 
   /// 組裝完整 system prompt
@@ -63,6 +65,7 @@ class AgentLoopPromptBuilder {
     String? budgetEye, // [教練 Agent 2026-08-21] 自律 Phase A——預算之眼（即時額度+覆盤）
     String? timelineSection, // [時間感 L2 2026-09-12] 相遇第 N 天（TimeSenseService 供給）
     String? localToolKit, // [小葵 2026-10-01 Blue 令] 本地模式任務配備——精靈挑的 compact 工具組
+    String? chatModePrompt, // [聊天模式 B 線 2026-10-20 Blue 拍板] 當前聊天模式的紀律 prompt（null＝自由對話不注入）
   }) {
     // [教練 Agent 2026-07-21] 本地輕量路徑
     if (isLocalProvider) {
@@ -72,6 +75,9 @@ class AgentLoopPromptBuilder {
         activeProjectDoorTitle: activeProjectDoorTitle,
         skillsSection: skillsSection,
         localToolKit: localToolKit,
+        // [聊天模式 B 線 2026-10-20 Blue 拍板] 本地路徑同樣吃模式紀律——
+        // 漏接＝切本地模型時模式靜默失效（時好時壞病型）
+        chatModePrompt: chatModePrompt,
       );
     }
 
@@ -332,7 +338,7 @@ $lines
 
     // [時間感 L1 2026-09-12] 時間為骨架——注入當前日期星期（每次對話），
     // 夥伴回顧記憶時時鐘先行：先算時間差、再談內容。
-    // 來源：家人×小葵 17 天田野提案（時間感塌縮：16 天被感知成 3 個月）。
+    // 來源：樂樂×小葵 17 天田野提案（時間感塌縮：16 天被感知成 3 個月）。
     // 與因果引擎合成座標系：時間=骨架（何時）、證據=血肉（為何）、意義=亮度。
     {
       final now = DateTime.now();
@@ -353,7 +359,7 @@ $lines
 ''');
       // [出處戳 2026-09-15 Blue 拍板 B 強度] 每條記憶帶 speaker=戳
       // （user/agent/external/unknown）。spike 001 實測：對照組（無戳）
-      // 會把自己寫的農場文歸成「你說的」——家人案 #7 重演；有戳+規則
+      // 會把自己寫的農場文歸成「你說的」——樂樂案 #7 重演；有戳+規則
       // 3/3 攔截。speaker= 前綴是必要語法，裸值會被忽略。
       parts.add('''
 # 出處戳（話語歸屬——誰說的就是誰說的）
@@ -413,6 +419,14 @@ $lines
       parts.add(skillsSection);
     }
 
+    // [聊天模式 B 線 2026-10-20 Blue 拍板] 模式紀律 prompt——放最尾部
+    // （動態區慣例：離 user 訊息最近＝模型必讀位置。自由對話模式為 null＝不注入）
+    if (chatModePrompt != null && chatModePrompt.isNotEmpty) {
+      parts.add(
+          '# 聊天模式紀律（使用者選定的「${ChatModeService.instance.currentMode.name}」模式，本輪適用）\n\n'
+          '$chatModePrompt');
+    }
+
     return parts.join('\n\n---\n\n');
   }
 
@@ -436,6 +450,7 @@ $lines
     String? activeProjectDoorTitle,
     String? skillsSection,
     String? localToolKit,
+    String? chatModePrompt, // [聊天模式 B 線 2026-10-20 Blue 拍板] 模式紀律（本地路徑同享）
   }) {
     final parts = <String>[];
 
@@ -486,6 +501,14 @@ ${hasTools ? '''
 
     if (activeProjectDoorTitle != null && activeProjectDoorTitle.isNotEmpty) {
       parts.add('## 當前專案\n使用者正在進行專案「$activeProjectDoorTitle」。');
+    }
+
+    // [聊天模式 B 線 2026-10-20 Blue 拍板] 模式紀律 prompt——放最尾部
+    // （離 user 訊息最近＝模型必讀位置。自由對話模式為 null＝不注入）
+    if (chatModePrompt != null && chatModePrompt.isNotEmpty) {
+      parts.add(
+          '# 聊天模式紀律（使用者選定的「${ChatModeService.instance.currentMode.name}」模式，本輪適用）\n\n'
+          '$chatModePrompt');
     }
 
     return parts.join('\n\n---\n\n');

@@ -10,6 +10,8 @@
 /// - 容錯：單個 skill 解析失敗不影響其他
 
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'skill.dart';
 import 'skill_catalog.dart';
 
@@ -24,6 +26,15 @@ class SkillStore {
 
   /// skill 目錄路徑（由呼叫方設定）
   String? _skillsDir;
+
+  /// [A線 2026-10-22] plugin 分支複製 skills 的落點——
+  /// app.dart 啟動時 initialize() 注入過，這裡暴露唯讀。
+  String? get skillsDirPath => _skillsDir;
+
+  /// 測試用：直接改 skills 目錄路徑（initialize() 的 _loaded 冪等會擋重注入，
+  /// 測試需要每個 case 換臨時夾，這裡繞過）。
+  @visibleForTesting
+  void setSkillsDirForTest(String path) => _skillsDir = path;
 
   /// 設定 skill 目錄並載入
   Future<void> initialize({String? skillsDir}) async {

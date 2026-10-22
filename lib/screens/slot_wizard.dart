@@ -10,9 +10,11 @@
 // 任何一步放棄（關窗/上一步回頭/取消）＝不建立任何東西，無需卸載。
 // 所有文字層級走 Tier、顏色走 BridgeDSColors（AlertDialog 鐵則）。
 
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart'; // [A線 1022] plugin 輕量偵測
 import '../../services/slots/github_repo_info.dart';
 import '../../services/slots/slot_registry.dart';
 import '../../services/slots/slot_installer.dart';
@@ -54,6 +56,10 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
   int _step = 0; // 0=貼連結 1=認識專案 2=用途 3=燈號
   final _urlCtrl = TextEditingController();
   GithubRepoInfo? _info;
+  // [A線 1022] plugin 識別（預掃描帶回）——步驟2 顯示「這是 plugin」
+  String? _pluginName;
+  String? _pluginVersion;
+  int _pluginSkillsCount = 0;
   String? _fetchError;
   bool _fetching = false;
 
@@ -91,11 +97,63 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
 
   void _abandon() => Navigator.of(context).pop(const SlotWizardResult.dismissed());
 
+  /// [A線 1022] 輕量 plugin 偵測——GitHub raw 抓 .cursor-plugin/plugin.json。
+  /// 子路徑 URL（/tree/main/pstack）直接組 raw URL；根 URL 先試根目錄再試
+  /// 常見 marketplaces？不猜——根 URL 沒有就是沒有（深度搜尋在安裝時做）。
+  Future<void> _detectPlugin() async {
+    final url = _urlCtrl.text.trim();
+    try {
+      final m = RegExp(
+        r'github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)(?:/(?:tree|blob)/[^/]+/(.+))?'
+      ).firstMatch(url);
+      if (m == null) return;
+      final owner = m.group(1)!, repo = m.group(2)!, sub = m.group(3);
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 8),
+        receiveTimeout: const Duration(seconds: 15),
+        responseType: ResponseType.json,
+      ));
+      // 候選路徑：指名子目錄優先，否則根目錄
+      final candidates = <String>[
+        if (sub != null && sub.isNotEmpty) '$sub/.cursor-plugin/plugin.json',
+        '.cursor-plugin/plugin.json',
+      ];
+      for (final c in candidates) {
+        try {
+          final res = await dio.get(
+              'https://raw.githubusercontent.com/$owner/$repo/main/$c');
+          // raw.githubusercontent 回 text/plain——dio 不自動 parse，手動 jsonDecode
+          final data = res.data is String
+              ? jsonDecode(res.data as String) as Map<String, dynamic>
+              : res.data as Map<String, dynamic>;
+          final name = (data['displayName'] ?? data['name']) as String? ;
+          if (name == null || name.isEmpty) continue;
+          final ver = data['version'] as String?;
+          if (mounted) {
+            setState(() {
+              _pluginName = name;
+              _pluginVersion = ver;
+            });
+          }
+          return;
+        } catch (e) {
+          debugPrint('[SlotWizard] 候選 $c 沒抓到: $e'); // [A線 1022] 偵錯暫留
+          continue; // 這條路徑沒有——試下一條
+        }
+      }
+    } catch (e) {
+      debugPrint('[SlotWizard] _detectPlugin 失敗: $e'); // [A線 1022] 偵錯暫留
+    }
+  }
+
   Future<void> _fetchInfo() async {
     setState(() { _fetching = true; _fetchError = null; });
     try {
       final info = await GithubRepoInfo.fetch(_urlCtrl.text.trim());
       setState(() { _info = info; _step = 1; });
+      // [A線 1022] 步驟2 進入即背景預偵測 plugin（輕量：只抓 plugin.json 判斷，
+      // 不下載整包 tarball——深度掃描留給步驟4 預掃描）
+      _detectPlugin();
     } catch (e) {
       setState(() {
         _fetchError = '抓不到這個專案的資料（$e）。\n'
@@ -108,10 +166,47 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
 
   Future<void> _finish() async {
     final info = _info!;
-    final record = await SlotRegistry.instance.addFromRepo(
-      info.htmlUrl,
-      label: _customLabel?.isNotEmpty == true ? _customLabel : null,
+    // [A線 1022 通用機制] plugin repo：精靈不預建卡——installer plugin 分支
+    // 會建 skill://<pluginName> 卡（帶正確 version/origin/category）。
+    // 精靈若也建（htmlUrl 對位）= 重複雙卡（pstack 案實證）。
+    if (_pluginName == null) {
+      final record = await SlotRegistry.instance.addFromRepo(
+        info.htmlUrl,
+        label: _customLabel?.isNotEmpty == true ? _customLabel : null,
+      );
+      return _finishInstallFor(record);
+    }
+    // plugin 路徑：先 install（分支內建卡）→ 找回卡回傳
+    setState(() => _installing = true);
+    final slotDir = Directory(
+        '${SlotRegistry.instance.slotsDir.path}/${_pluginName}');
+    final install = await SlotInstaller.instance.install(
+      repoUrl: _urlCtrl.text.trim().isNotEmpty
+          ? _urlCtrl.text.trim()
+          : info.htmlUrl,
+      slotDir: slotDir,
     );
+    if (!install.ok) {
+      if (mounted) {
+        setState(() {
+          _installing = false;
+          _installError = install.error ?? '未知錯誤';
+        });
+      }
+      return;
+    }
+    // 找回 installer 建的卡（skill://<name> 對位）
+    await SlotRegistry.instance.ensureLoaded();
+    final repoKey = 'skill://$_pluginName';
+    final existing = SlotRegistry.instance.all
+        .firstWhere((s) => s.sourceRepo == repoKey);
+    if (!mounted) return;
+    Navigator.of(context).pop(SlotWizardResult.completed(existing));
+  }
+
+  /// 非 plugin（HTML 工具）路徑：精靈自建卡＋安裝（原 _finish 邏輯）
+  Future<void> _finishInstallFor(SlotRecord record) async {
+    final info = _info!;
     const permsByChoice = <List<String>>[
       [],                  // 🟢 純本地
       ['network'],         // 🟡 網路唯讀
@@ -123,7 +218,12 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
     final slotDir = Directory(
         '${SlotRegistry.instance.slotsDir.path}/${record.id}');
     final install = await SlotInstaller.instance.install(
-      repoUrl: info.htmlUrl,
+      // [A線 1022 通用機制] 帶使用者貼的原始 URL（含 /tree/main/<sub> 子路徑）——
+      // htmlUrl 會剝成 owner/repo，monorepo 指名安裝（pstack）就失效，
+      // 深度搜尋會抓到第一個碰到的 plugin（advisor 案實證）。
+      repoUrl: _urlCtrl.text.trim().isNotEmpty
+          ? _urlCtrl.text.trim()
+          : info.htmlUrl,
       slotDir: slotDir,
     );
     if (!install.ok) {
@@ -296,6 +396,27 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // [A線 1022] plugin 識別卡——agent-plugins.org repo（如 pstack）：
+        // 讓使用者在「認識它」這步就看見「這是 plugin、版本、帶多少 skills」
+        if (_pluginName != null) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: ds.canvas,
+              borderRadius: BorderRadius.circular(BridgeDS.roundSubtle),
+              border: Border.all(color: ds.borderSubtle),
+            ),
+            child: Text(
+              '🧩 偵測到 plugin：$_pluginName'
+              '${_pluginVersion != null ? ' v$_pluginVersion' : ''}'
+              '${_pluginSkillsCount > 0 ? '（$_pluginSkillsCount 個 skills）' : ''}',
+              style: TierStyle.of(context, Tier.listItemMeta)
+                  .toTextStyle()
+                  .copyWith(color: ds.textSecondary),
+            ),
+          ),
+          const SizedBox(height: BridgeDS.spaceSM),
+        ],
         Text(info.fullName,
             style: TierStyle.of(context, Tier.listItemTitle)
                 .toTextStyle()
@@ -665,9 +786,13 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
     });
     try {
       final tmpDir = await Directory.systemTemp.createTemp('slot_prescan_');
+      // [A線 2026-10-22] plugin repo（.cursor-plugin/plugin.json）預掃描：
+      // runPluginIntake=false——純偵測＋紅隊掃描，不建卡不入庫
+      // （預掃臨時夾的紀錄要是真卡，使用者放棄就留幽靈卡）。
       final result = await SlotInstaller.instance.install(
         repoUrl: _urlCtrl.text.trim(),
         slotDir: tmpDir,
+        runPluginIntake: false,
       );
       // 掃完即刪——臨時夾不留痕（放棄零殘留鐵則）
       await tmpDir.delete(recursive: true);
@@ -676,6 +801,10 @@ class _SlotWizardDialogState extends State<_SlotWizardDialog> {
         setState(() {
           _preScan = result.redTeam;
           _preScanning = false;
+          // [A線 1022] plugin 識別（agent-plugins.org repo）
+          _pluginName = result.pluginName;
+          _pluginVersion = result.version;
+          _pluginSkillsCount = result.pluginSkillsCount;
           // 真實建議：BLOCK→🔴 需網路/WARN→🟡/乾淨→🟢
           _lightChoice = result.redTeam!.blockers.isNotEmpty
               ? 2

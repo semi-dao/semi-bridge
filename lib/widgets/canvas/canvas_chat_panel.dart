@@ -46,6 +46,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // [教練 Agent 2026-07-29] HardwareKeyboard / LogicalKeyboardKey / KeyEvent
 import '../../theme/tier.dart';
 import '../../theme/tier_style.dart';
+import '../../services/chat_modes.dart'; // [聊天模式 B 線 2026-10-21] 畫布對話欄模式下拉（上傳右邊，Blue 指定）
 import '../../theme/bridge_design_system.dart';
 
 /// Open Canvas 第四欄 — 精簡聊天面板。
@@ -676,10 +677,13 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                // [邊界動態鐵則 2026-10-21] Row→Wrap：agent chips 數量隨夥伴
+                // 增加，320px 面板下寫死單行會溢出——動態換行。
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
                   children: [
                     for (var i = 0; i < ordered.length; i++) ...[
-                      if (i > 0) SizedBox(width: 6),
                       _buildHeaderAgentChip(ordered[i], isActive: ordered[i] == activeId),
                     ],
                   ],
@@ -1473,19 +1477,21 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
                 child: VoiceStatusIndicator(mode: _voiceMode),
               ),
             ),
-          // ── 夥伴選擇 + Agent 模型選擇器 + 新增對話 + 上傳 ──
-          Row(
+          // ── 夥伴選擇 + Agent 模型選擇器 + 上傳 + 模式 ──
+          // [邊界動態鐵則 2026-10-21 Blue 令] Row→Wrap：空間不足自動換行，
+          // 元件照內容動態擴張，永不溢出（根治黑黃警示條）。
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
             children: [
               // [教練 Agent 2026-08-11] 夥伴切換按鈕
               _buildCompanionSelectorButton(),
-              const SizedBox(width: 4),
               AgentModelSelector(
                 onProviderChanged: () {
                   // 通知 ChatController 重新載入 provider 設定
                   _controller.refreshLocalModelState();
                 },
               ),
-              const SizedBox(width: 4),
               // 上傳圖片/檔案
               Tooltip(
                 message: '上傳圖片或檔案',
@@ -1495,6 +1501,9 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
                   onPressed: _pickImage,
                 ),
               ),
+              // [聊天模式 B 線 2026-10-21 Blue 指定] 模式下拉——上傳檔案右邊，
+              // 桌面對話 tab 輸入列同款（_buildChatModePicker 語彙）。
+              _buildChatModePicker(),
             ],
           ),
           const SizedBox(height: 4),
@@ -1573,6 +1582,65 @@ class _CanvasChatPanelState extends State<CanvasChatPanel> {
 
   /// [教練 Agent 2026-08-03] 對話發射鈕 — 圓形 + hover 顯著發光 + 背景
   /// 跟 chat_screen.dart 的 FloatingActionButton.small 一樣互動感覺
+  // [聊天模式 B 線 2026-10-21 Blue 指定] 畫布對話欄模式下拉——
+  // 上傳檔案右邊；桌面對話 tab（desktop_chat_panel）同款語彙。
+  Widget _buildChatModePicker() {
+    final ds = BridgeDSColors.of(context);
+    final current = ChatModeService.instance.currentMode;
+    return PopupMenuButton<String>(
+      tooltip: '選擇聊天模式',
+      position: PopupMenuPosition.under,
+      constraints: const BoxConstraints(minWidth: 260),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(current.icon, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 4),
+            Text(
+              current.name,
+              style: TierStyle.of(context, Tier.cardCaption)
+                  .toTextStyle()
+                  .copyWith(color: ds.textSecondary),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down, size: 16, color: ds.textTertiary),
+          ],
+        ),
+      ),
+      itemBuilder: (context) => chatModes
+          .map((mode) => PopupMenuItem(
+                value: mode.id,
+                child: Row(
+                  children: [
+                    Text(mode.icon, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 8),
+                    Text(
+                      mode.name,
+                      style: TierStyle.of(context, Tier.cardBody)
+                          .toTextStyle()
+                          .copyWith(
+                            color: mode.id == current.id
+                                ? ds.accentBlue
+                                : ds.textPrimary,
+                          ),
+                    ),
+                    if (mode.id == current.id) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.check, size: 14, color: ds.accentBlue),
+                    ],
+                  ],
+                ),
+              ))
+          .toList(),
+      onSelected: (modeId) async {
+        await ChatModeService.instance.setMode(modeId);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
   Widget _buildChatSendButton({
     required IconData icon,
     required Color color,

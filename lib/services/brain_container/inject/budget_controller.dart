@@ -15,7 +15,11 @@ class BudgetResult {
 }
 
 class BudgetController {
-  BudgetController({this.maxTokens = 400, this.similarityFloor = 0.55});
+  // [小葵 2026-10-14 Blue 拍板折衷] 地板 0.40。v3 手術實測：0.55→0.30 讓有塊
+  // 39→328/361 但注入微傷（配對差 -3、軌B -3.6pp）——0.30 放進太多弱相關
+  // 噪音。0.40＝分佈（空塊題 top 0.22-0.52）中點偏上，保留較強相關、砍弱
+  // 相關。量質折衷點，M1.5（記憶相依題）重評後再校。
+  BudgetController({this.maxTokens = 400, this.similarityFloor = 0.40});
 
   final int maxTokens;
   final double similarityFloor;
@@ -75,17 +79,21 @@ class BudgetController {
     }
 
     // 4. 序號組裝（#1..#n），kept 順序即序號順序
+    //    [指紋章 2026-10-21 ②刀1] 有章就亮——「〔小橋·10/14〕」前綴
     final buf = StringBuffer();
     for (var i = 0; i < kept.length; i++) {
       final c = kept[i];
-      buf.writeln('[背景記憶#${i + 1}|${c.slot.label}] ${_clip(c.text)}');
+      final stamp = c.fingerprint == null ? '' : '〔${c.fingerprint}〕';
+      buf.writeln('[背景記憶#${i + 1}|${c.slot.label}]$stamp ${_clip(c.text)}');
     }
     return BudgetResult(buf.toString().trimRight(), kept);
   }
 
   /// 估算與輸出格式一字不差
-  String _line(MemoryCandidate c, int seq) =>
-      '[背景記憶#$seq|${c.slot.label}] ${_clip(c.text)}';
+  String _line(MemoryCandidate c, int seq) {
+    final stamp = c.fingerprint == null ? '' : '〔${c.fingerprint}〕';
+    return '[背景記憶#$seq|${c.slot.label}]$stamp ${_clip(c.text)}';
+  }
 
   int _total(List<MemoryCandidate> cs) {
     var sum = 0;

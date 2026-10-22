@@ -32,6 +32,7 @@ import '../../services/bridge_action_progress.dart';
 import '../../services/companion_store.dart';
 import '../../services/conversation_store.dart';
 import '../../services/asset_action_service.dart'; // P0.6a 資產操作
+import '../../services/chat_modes.dart'; // [聊天模式 B 線 2026-10-21] 輸入列模式下拉（Blue 指定：輸入框與送出之間，模型列表同款）
 import '../../services/onboarding_detector.dart';
 import '../../services/agent_loop/mcp_canvas_tools.dart'; // [Phase 0 Track A 2026-07-17]
 import '../../services/local_model_runtime_service.dart'; // [教練 Agent 2026-08-14] resolveShortModelName
@@ -461,6 +462,70 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
       color: color,
       tooltip: tooltip,
       onPressed: onPressed,
+    );
+  }
+
+  // [聊天模式 B 線 2026-10-21 Blue 指定] 模式下拉選單——
+  // 輸入框與送出按鈕之間，選模型列表同款 PopupMenuButton。
+  // 按鈕本體：icon＋當前模式名；選單項：icon＋名稱，副行 tooltip 說明。
+  // 選中持久化（ChatModeService），側欄模式組與此即時同步（兩處共讀同服務）。
+  Widget _buildChatModePicker() {
+    final ds = BridgeDSColors.of(context);
+    final current = ChatModeService.instance.currentMode;
+    return PopupMenuButton<String>(
+      tooltip: '選擇聊天模式',
+      position: PopupMenuPosition.under,
+      constraints: const BoxConstraints(minWidth: 260),
+      // 按鈕本體：跟輸入列圖示同量級（18px 語彙），icon＋模式名
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(current.icon, style: const TextStyle(fontSize: 14)),
+            const SizedBox(width: 4),
+            Text(
+              current.name,
+              style: TierStyle.of(context, Tier.cardCaption)
+                  .toTextStyle()
+                  .copyWith(color: ds.textSecondary),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.arrow_drop_down,
+                size: 16, color: ds.textTertiary),
+          ],
+        ),
+      ),
+      itemBuilder: (context) => chatModes
+          .map((mode) => PopupMenuItem(
+                value: mode.id,
+                // 選中項打勾（模型列表同款回饋）
+                child: Row(
+                  children: [
+                    Text(mode.icon, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 8),
+                    Text(
+                      mode.name,
+                      style: TierStyle.of(context, Tier.cardBody)
+                          .toTextStyle()
+                          .copyWith(
+                            color: mode.id == current.id
+                                ? ds.accentBlue
+                                : ds.textPrimary,
+                          ),
+                    ),
+                    if (mode.id == current.id) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.check, size: 14, color: ds.accentBlue),
+                    ],
+                  ],
+                ),
+              ))
+          .toList(),
+      onSelected: (modeId) async {
+        await ChatModeService.instance.setMode(modeId);
+        if (mounted) setState(() {});
+      },
     );
   }
 
@@ -1169,9 +1234,13 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
+                          // [小葵 2026-10-20 Blue 抓包] 滾動卡頓修復——原圖
+                          // （1024×1024 甚至 2MB PNG）整張解碼佔住 UI isolate，
+                          // 滾到含圖訊息就掉幀轉圈。cacheWidth 按顯示尺寸解碼。
                           child: Image.file(
                             File(imagePath),
                             fit: BoxFit.contain,
+                            cacheWidth: 640,
                             errorBuilder: (_, error, ___) => Container(
                               padding: const EdgeInsets.all(16),
                               child: Text(
@@ -2984,6 +3053,11 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
                 ),
               ),
               const SizedBox(width: 4), // [教練 Agent 2026-08-03] 縮小間距 8→4
+              // [聊天模式 B 線 2026-10-21 Blue 指定] 模式下拉——輸入框與送出
+              // 按鈕之間，選模型列表同款 PopupMenuButton 語彙。
+              // 選單項顯示 icon＋名稱＋tooltip 說明；選中即持久化（側欄同步）。
+              _buildChatModePicker(),
+              const SizedBox(width: 4),
               // [教練 Agent 2026-08-03] 送出按鈕在輸入欄外面（跟畫布頁格式一致）
               // - 發送：永遠可用
               // - 停止：只在 isLoading 時顯示

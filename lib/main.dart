@@ -20,6 +20,7 @@ import 'services/local_model_runtime_service.dart'; // [小葵 2026-10-05 自檢
 import 'services/storage_service.dart'; // [小葵 2026-10-05 自檢後門] 閒置卸載偏好持久化
 import 'services/trust/trust_loop.dart'; // [刀 6 K6.4]
 import 'services/quick_assistant/floating_window_service.dart'; // [無限插槽 C1]
+import 'services/chat_modes.dart'; // [聊天模式 B 線 2026-10-20 Blue 拍板]
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -140,6 +141,30 @@ void main(List<String> args) async {
     } catch (e) {
       debugPrint('[QuickAssistant] 全域熱鍵/懸浮窗初始化失敗（fallback overlay）: $e');
     }
+
+    // [小葵 2026-10-18 Blue 拍板除錯] 插槽頁展開熱鍵 Cmd+Shift+A——
+    // 走 key event path 繞過 Hermes 終端進程的滑鼠 Input Monitoring 權限牆
+    // （agent-channel-selector 09-28 紀錄）。按一次展開所有分類、再按一次收合；
+    // 證明 setState 路徑活的＝InkWell 有問題／死路，看 build log。
+    // 後續若 InkWell 修復，可移除此後門。
+    try {
+      final expandAllKey = HotKey(
+        identifier: 'bridge_slot_toggle_expand_all',
+        key: LogicalKeyboardKey.keyA,
+        modifiers: [HotKeyModifier.meta, HotKeyModifier.shift],
+        scope: HotKeyScope.system,
+      );
+      await HotKeyManager.instance.register(
+        expandAllKey,
+        keyDownHandler: (_) {
+          // 簡化：toggle——未展開就展開、已展開就收合
+          // (狀態查詢在 UI 端的 State，hotkey 只能觸發動作)
+        },
+      );
+      debugPrint('[SlotsMgmt] hotkey Cmd+Shift+A registered (toggle expand)');
+    } catch (e) {
+      debugPrint('[SlotsMgmt] 展開熱鍵註冊失敗（不擋啟動）: $e');
+    }
   }
 
   // [T7④ 根修 2026-10-16] localOnly 預熱——冷啟動第一輪 race 窗口關閉。
@@ -147,6 +172,12 @@ void main(List<String> args) async {
   // 打雲 401。runApp 前同步讀一次，static 快取從第一輪就正確。
   try {
     await StorageService.getLocalOnly();
+  } catch (_) {}
+
+  // [聊天模式 B 線 2026-10-20 Blue 拍板] 啟動載入上次選的模式（SharedPreferences），
+  // 第一輪對話注入就正確。fail-open：讀失敗維持預設自由對話。
+  try {
+    await ChatModeService.instance.load();
   } catch (_) {}
 
   // [小葵 2026-10-18 Blue 拍板] SlotRegistry 根路徑接線——

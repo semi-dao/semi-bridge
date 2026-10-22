@@ -116,6 +116,12 @@ class KnowledgeSearchResult {
   final String? category;
   final String? tags;
 
+  /// [指紋章 2026-10-21 ②刀2] 誰的記憶（companion 名；shared=共用知識）
+  final String? ownerName;
+
+  /// [指紋章 2026-10-21 ②刀2] 記憶誕生日（M/d）
+  final String? createdAtLabel;
+
   const KnowledgeSearchResult({
     required this.id,
     required this.title,
@@ -123,7 +129,18 @@ class KnowledgeSearchResult {
     required this.type,
     this.category,
     this.tags,
+    this.ownerName,
+    this.createdAtLabel,
   });
+
+  /// [指紋章 2026-10-21 ②刀2] 出處章標籤——「小橋·10/14」；shared 給「共用」
+  String? get fingerprintLabel {
+    if (ownerName == null) return null;
+    if (ownerName == 'shared') return '共用';
+    return createdAtLabel == null
+        ? ownerName
+        : '$ownerName·$createdAtLabel';
+  }
 }
 
 /// Agent 本地知識庫服務
@@ -331,7 +348,7 @@ class AgentKnowledgeService {
       final ftsQuery = _buildFtsQuery(query);
       final results = _db.select(
         '''
-        SELECT m.id, m.title, m.content, m.tags, m.memory_type
+        SELECT m.id, m.title, m.content, m.tags, m.memory_type, m.owner_companion_id, m.created_at
         FROM agent_memories_fts f
         JOIN agent_memories m ON m.rowid = f.rowid
         WHERE agent_memories_fts MATCH ? AND m.is_archived = 0
@@ -350,6 +367,10 @@ class AgentKnowledgeService {
           snippet: _makeSnippet(content, 120),
           type: 'memory',
           tags: row['tags'] as String?,
+          // [指紋章 2026-10-21 ②刀2] 搜尋結果帶出處
+          ownerName: CompanionStore().fingerprintName(
+              (row['owner_companion_id'] as String?) ?? 'shared'),
+          createdAtLabel: _mdLabel(row['created_at'] as String?),
         );
       }).toList();
     } catch (e) {
@@ -639,7 +660,7 @@ class AgentKnowledgeService {
     final pattern = '%$query%';
     final results = _db.select(
       '''
-      SELECT id, title, content, tags
+      SELECT id, title, content, tags, owner_companion_id, created_at
       FROM agent_memories
       WHERE (title LIKE ? OR content LIKE ? OR tags LIKE ?) AND is_archived = 0
         AND (owner_companion_id = 'shared' OR owner_companion_id = ?)
@@ -657,11 +678,23 @@ class AgentKnowledgeService {
         snippet: _makeSnippet(content, 120),
         type: 'memory',
         tags: row['tags'] as String?,
+        // [指紋章 2026-10-21 ②刀2] LIKE 路徑同款出處章
+        ownerName: CompanionStore().fingerprintName(
+            (row['owner_companion_id'] as String?) ?? 'shared'),
+        createdAtLabel: _mdLabel(row['created_at'] as String?),
       );
     }).toList();
   }
 
   // ── 工具方法（private）───────────────────────────────────────────
+
+  /// [指紋章 2026-10-21 ②刀2] ISO 時間 → M/d 標籤（agent_memories.created_at）
+  static String? _mdLabel(String? iso) {
+    if (iso == null || iso.isEmpty) return null;
+    final dt = DateTime.tryParse(iso);
+    if (dt == null) return null;
+    return '${dt.month}/${dt.day}';
+  }
 
   /// 把使用者查詢轉成 FTS5 查詢語法
   /// "畫布工作流" → "畫布* OR 工作流*"
