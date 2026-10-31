@@ -645,6 +645,7 @@ grep -rn "方法名(" lib/
 
 ## 開光 v0.4.x 完全體（2026-10-01 下午）
 - app_tap confirm=true 真點：**handlePointerEvent** 完整 lifecycle（hitTest→pointer router→gesture arena）。
+- app_tap button=secondary 右鍵（2026-10-31 收編）：PointerDown/UpEvent kind=mouse + buttons=kSecondaryButton → GestureDetector.onSecondaryTapUp。驗證彈出選單全走官方通道，Swift CGEvent 只留作 App 卡死時的 OS 級救生艇。
   ⚠️ 陷阱：直接 handleEvent 給 hit path 繞過 arena——42 層收到事件但 GestureDetector.onTap 不響
 - app_look target=screen：Swift captureScreen（CGWindowListCreateImage CGRect.null 全螢幕）
   → 暫存 → Dart base64 → 即刪。⚠️ sandbox 內 screencapture 子進程被 TCC 擋（app_permissions 可查）

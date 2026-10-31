@@ -207,7 +207,7 @@ class BridgeMcpServer {
   // [教練 Agent 2026-08-01] 新增 callback — 節點參數控制 + 畫布管理
   Future<Map<String, dynamic>> Function(String nodeId, Map<String, dynamic> params)? onSetNodeParams;
   Future<Map<String, dynamic>> Function(String direction, double? pixels)? onAppScroll; // [開光 P1] 頁面捲動
-  Future<Map<String, dynamic>> Function({String? selector, double? x, double? y, bool confirm})? onAppTap; // [開光 v0.4.0] 語意點擊
+  Future<Map<String, dynamic>> Function({String? selector, double? x, double? y, bool confirm, String? button})? onAppTap; // [開光 v0.4.0] 語意點擊；[小葵 2026-10-31] +button（secondary=右鍵）
   /// [開光 A線 2026-10-22] 文字注入：聚焦欄位打字（app_type 工具）。
   /// 不碰系統剪貼簿（pbcopy 教訓：剪貼簿是使用者共用工作區，Agent 不得占用）。
   Future<Map<String, dynamic>> Function(String text)? onAppType;
@@ -1233,12 +1233,18 @@ Future<Response> _handleInjectEnrich(Request request) async {
     final selector = params['selector'] as String?;
     final x = (params['x'] as num?)?.toDouble();
     final y = (params['y'] as num?)?.toDouble();
+    // [小葵 2026-10-31 收編] button：primary（預設左鍵）/ secondary（右鍵）
+    final button = params['button'] as String?;
+    if (button != null && button != 'primary' && button != 'secondary') {
+      return {'success': false, 'message': 'button 只接受 primary/secondary，收到「$button」'};
+    }
     if (onAppTap == null) {
       return {'success': false, 'message': '點擊控制未連接（App 層未掛 callback）'};
     }
     return await onAppTap!(
         selector: selector, x: x, y: y,
-        confirm: (params['confirm'] as bool?) ?? false);
+        confirm: (params['confirm'] as bool?) ?? false,
+        button: button);
   }
 
   /// [tools_health] canvas state 活性探針（#7 慘案：回 null 讓 agent 猜）
@@ -2010,7 +2016,7 @@ Future<Response> _handleInjectEnrich(Request request) async {
     // 合併為一份：selector/x/y/confirm 為主，target=canvas_toolbar:... 相容舊用法。
     {
       'name': 'app_tap',
-      'description': '點擊（語意目標）：selector=按鈕/連結上的文字（如「設為現役」「下載」），或 x/y 座標精密後門。內部自帶定位（key/text 搜尋），不需要視覺辨識。target=canvas_toolbar:save/copy/test/run 為畫布工具列語意點擊（相容舊用法）。confirm=true 才真點擊。點擊後可用 app_look 複核結果。',
+      'description': '點擊（語意目標）：selector=按鈕/連結上的文字（如「設為現役」「下載」），或 x/y 座標精密後門。內部自帶定位（key/text 搜尋），不需要視覺辨識。target=canvas_toolbar:save/copy/test/run 為畫布工具列語意點擊（相容舊用法）。confirm=true 才真點擊。點擊後可用 app_look 複核結果。button=secondary 模擬右鍵（開啟情境選單）。[小葵 2026-10-31 收編] 原需 Swift CGEvent 旁門的右鍵驗證正式納入官方通道。',
       'inputSchema': {
         'type': 'object',
         'properties': {
@@ -2018,6 +2024,7 @@ Future<Response> _handleInjectEnrich(Request request) async {
           'x': {'type': 'number', 'description': '精密後門：App 邏輯座標 x'},
           'y': {'type': 'number', 'description': '精密後門：App 邏輯座標 y'},
           'confirm': {'type': 'boolean', 'description': 'true=執行真點擊（預設 false 只定位回報）'},
+          'button': {'type': 'string', 'enum': ['primary', 'secondary'], 'description': 'primary=左鍵（預設）；secondary=右鍵（觸發 onSecondaryTap 情境選單）'},
           'target': {
             'type': 'string',
             'description': 'canvas_toolbar:save | canvas_toolbar:copy | canvas_toolbar:test | canvas_toolbar:run（畫布工具列語意點擊，相容舊用法）',

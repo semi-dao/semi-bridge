@@ -1353,7 +1353,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     // [開光 v0.4.0 2026-10-01] 語意點擊——手的誕生
     // selector→找 Text widget（文字含關鍵詞）→ 取 RenderBox 中心座標
     // confirm=true 才真點（TapGesture）——安全兩段式
-    mcp.onAppTap = ({selector, x, y, confirm = false}) async {
+    mcp.onAppTap = ({selector, x, y, confirm = false, button}) async {
       try {
         Offset? target;
         String? hit;
@@ -1481,9 +1481,18 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
           // [開光 v0.4.x] 正規入口：handlePointerEvent——完整 pointer lifecycle
           // （hitTest→pointer router→gesture arena），GestureDetector.onTap 才會觸發。
           // 直接 handleEvent 繞過 arena（42 targets 收到事件但 onTap 不響的實證）。
-          gesture.handlePointerEvent(PointerDownEvent(pointer: pid, position: pos));
+          // [小葵 2026-10-31 收編] button=secondary → 右鍵事件流
+          // （buttons=kSecondaryButton → GestureDetector.onSecondaryTapUp）
+          final isSecondary = button == 'secondary';
+          gesture.handlePointerEvent(PointerDownEvent(
+              pointer: pid, position: pos,
+              kind: PointerDeviceKind.mouse,
+              buttons: isSecondary ? kSecondaryButton : kPrimaryButton));
           await Future<void>.delayed(const Duration(milliseconds: 80));
-          gesture.handlePointerEvent(PointerUpEvent(pointer: pid, position: pos));
+          gesture.handlePointerEvent(PointerUpEvent(
+              pointer: pid, position: pos,
+              kind: PointerDeviceKind.mouse,
+              buttons: isSecondary ? kSecondaryButton : kPrimaryButton));
           return {
             'success': true,
             'tapped': true,
@@ -1491,7 +1500,8 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
             'x': pos.dx,
             'y': pos.dy,
             'via': 'handlePointerEvent',
-            'note': '已執行點擊',
+            'button': isSecondary ? 'secondary' : 'primary',
+            'note': isSecondary ? '已執行右鍵點擊（情境選單應已彈出）' : '已執行點擊',
           };
         } catch (e) {
           return {'success': false, 'message': '點擊執行失敗: $e'};
