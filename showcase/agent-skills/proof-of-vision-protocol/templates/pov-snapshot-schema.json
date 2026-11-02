@@ -1,0 +1,40 @@
+{
+  "observer": "[AI name]",
+  "target": "[exact code being observed]",
+  "pov_version": "0.1",
+  "timestamp": "[ISO 8601]",
+
+  "shape": {
+    "nodes": [
+      {"id": "[node_id]", "type": "[value|key|function|container|daemon|file|object|control|result]", "layer": 1}
+    ],
+    "edges": [
+      {"from": "[node_id]", "to": "[node_id]", "type": "[data|control|signal]"}
+    ]
+  },
+
+  "flow": {
+    "carrier": "[what is flowing, e.g. 'token (string)']",
+    "direction": "left_to_right",
+    "path": ["node_a", "node_b", "node_c"],
+    "return_signal": "[what comes back, or null]"
+  },
+
+  "mutation": {
+    "target": "[what changes, e.g. 'storage[tokenKey]']",
+    "before": "[state before execution]",
+    "after": "[state after execution]",
+    "type": "[overwrite|append|delete|none]"
+  },
+
+  "risk": [
+    {
+      "layer": "[system|api|security|performance|logic]",
+      "severity": "[red|orange|yellow]",
+      "point": "[concise risk description]",
+      "detail": "[longer explanation]"
+    }
+  ],
+
+  "resolution_depth": 2
+}
