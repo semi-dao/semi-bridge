@@ -17,7 +17,13 @@ import 'skill_store.dart';
 
 class BuiltinSkillsLoader {
   /// 內建 skill 檔案清單
+  ///
+  /// [小葵 2026-11-03 Blue 拍板「user.skill」] user-profile-skill 排第一位——
+  /// 多人共用 Agent 時「先認人、再懂人」是一切的前置：Agent 得先知道
+  /// 誰在說話，後續的人格、語氣、檔案載入才有正確的對象。
+  /// 順位原則：辨識使用者 > 一切程序 skill。
   static const List<String> _builtinSkillFiles = [
+    'user-profile-skill.md',
     'grill-me.md',
     'to-spec.md',
     'handoff.md',
@@ -34,6 +40,12 @@ class BuiltinSkillsLoader {
     'domain-modeling.md',
     'wizard.md',
   ];
+
+  /// [2026-11-03 user.skill 順位令] 測試用唯讀暴露——
+  /// 回歸鎖定「user-profile-skill.md 必為第一位」（Blue 拍板：辨識使用者 > 一切程序 skill）。
+  @visibleForTesting
+  static List<String> get builtinSkillFilesForTest =>
+      List.unmodifiable(_builtinSkillFiles);
 
   /// 載入內建 skills 到指定目錄
   ///
