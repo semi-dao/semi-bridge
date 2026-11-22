@@ -16,7 +16,7 @@
 
 ![Semi Bridge — Canvas](docs/screenshots/canvas.webp)
 
-![Semi Bridge — Brain Galaxy](docs/screenshots/brain-galaxy.webp)
+![Semi Bridge — Brain Galaxy](docs/screenshots/brain.webp)
 
 **⚠️ Work in Progress** — Features are incomplete and the codebase changes fast. You're welcome to explore the code and the ideas, and to join the discussion. Daily use is not recommended; no installers are provided.
 
@@ -133,8 +133,6 @@ docs/          # Design specs, manifestos, architecture map
 ```
 
 ## Manifestos & Design Docs
-
-![Semi Bridge — Compass graph](docs/screenshots/compass-graph.webp)
 
 <sub>The compass graph: every app organ is a node, edges = dependencies — each document in this section is about one organ on this graph.</sub>
 

@@ -16,11 +16,9 @@
 
 ![Semi Bridge — 畫布](docs/screenshots/canvas.webp)
 
-![Semi Bridge — 大腦圖譜](docs/screenshots/brain-galaxy.webp)
+![Semi Bridge — 大腦圖譜](docs/screenshots/brain.webp)
 
 <sub>點擊任一星點，右側展開完整節點資訊——檔案、照片、記憶都能直接開啟。</sub>
-
-![Semi Bridge — 星系節點詳情](docs/screenshots/heart-galaxy-detail.webp)
 
 **⚠️ 早期開發中（Work in Progress）** — 功能未齊、隨時 refactor。歡迎圍觀程式碼與理念、參與討論；暫不建議日常使用，也未提供安裝包。
 
@@ -139,8 +137,6 @@ docs/          # 設計規範、宣言、架構地圖
 ```
 
 ## 宣言與設計文件
-
-![Semi Bridge — 羅盤系統圖譜](docs/screenshots/compass-graph.webp)
 
 <sub>羅盤圖譜：App 的每個器官是一個節點、線＝依賴連動——這一節的每份文件，講的都是圖上某一個器官。</sub>
 
