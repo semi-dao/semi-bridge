@@ -29,7 +29,7 @@
 2. **`tools/specs/xiaokui_hermes.agent-import.json`**——9/21 範圍表拍板「保留」（IG 出道公開人格檔），但檔案含「Blue（CEO）」「HKDiscord #檢查哨」「2026-08-27 相遇」等私人對話座標 + 9/22 記憶令「立繪/agent人格檔不公開」。**兩個令衝突，需重新拍板**。
 3. **`docs/handoff/`（橋樑計畫_對話補遺與未寫入文件概念.md 等 4 檔）+ `docs/FIVE_MODES_SESSION_LOG.md` + `docs/HANDOFF_2026-08-08.md`**——A 區清單漏列！內容是開發對話紀錄/交接文件。**建議全數移入 A 區（絕不進 public）**。
    - 另 root `HANDOFF_*.md` 10 檔在 A 區 ✓ 但 `docs/` 底下同名性質檔案漏了。
-4. 24 處 `<HOME>` hardcode（17 檔）＋12 處 `/Volumes/DATA`——範圍表已列 🟡 改寫，fresh-start 前要完成。
+4. 24 處 `<HOME>` hardcode（17 檔）＋12 處 `/data`——範圍表已列 🟡 改寫，fresh-start 前要完成。
 5. test 檔內 `semiwasabi`/`Blue`＝公開帳號名+工程出處標註，低風險 ✓。
 
 ## 域 2：數位資產安全（✅ 基本就緒，1 項待點頭）

@@ -57,7 +57,7 @@ class NativeAgentLoop {
 
 ## 專案路徑
 - 原始碼：<HOME>/Developer/bridge_app
-- 設計文件：/Volumes/DATA/橋樑計劃/02-架構設計/
+- 設計文件：/data/bridge-project/02-架構設計/
 - App container：~/Library/Containers/farm.semiwasabi.bridgeApp/''';
 
   final AgentLoop _agentLoop;

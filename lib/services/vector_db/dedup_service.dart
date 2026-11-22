@@ -29,7 +29,7 @@ class DedupService {
   /// 只掃圖片與影片（大檔才值得去重）。
   Future<List<DedupCandidate>> scan() async {
     final dbRoots = [
-      '/Volumes/DATA',
+      '/data',
     ]; // TODO: 從授權根清單動態讀
     // 先從 brain_container 讀實際根——掃描 asset_index 的 folder_root
     final roots = <String>{};

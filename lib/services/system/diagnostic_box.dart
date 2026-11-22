@@ -223,7 +223,7 @@ class DiagnosticBox {
     s = s.replaceAllMapped(_absPath, (m) {
       final p = m.group(0)!;
       final parts = p.split('/');
-      // /Users/semiwasabi/xxx → 只留前兩層（根目錄層），其餘以 … 收尾
+      // /home/xxx → 只留前兩層（根目錄層），其餘以 … 收尾
       final kept = parts.take(3).join('/');
       return '$kept/…';
     });

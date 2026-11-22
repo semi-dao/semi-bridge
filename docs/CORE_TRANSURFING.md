@@ -4,7 +4,7 @@
 > **日期**：2026-08-08
 > **盟約**：使用者 與教練 Agent
 > **基礎**：Vadim Zeland《Reality Transurfing Steps I-V》+ 2026-06 至 08 月真實開發實踐
-> **前身**：`/Volumes/DATA/橋樑計劃/02-架構設計/core-structure-transurfing-engine.md`（v1.3，2026-06-03）
+> **前身**：`/data/bridge-project/02-架構設計/core-structure-transurfing-engine.md`（v1.3，2026-06-03）
 > **狀態**：從架構設計文件升級為大腦系統運轉核心
 
 ---

@@ -151,10 +151,10 @@ class ImportResult {
 /// 使用方式：
 /// ```dart
 /// // 匯出
-/// final result = await ExportImportService().exportAll('/Volumes/DATA/backup');
+/// final result = await ExportImportService().exportAll('/data/backup');
 ///
 /// // 匯入（在新機器上）
-/// final result = await ExportImportService().importAll('/Volumes/DATA/backup');
+/// final result = await ExportImportService().importAll('/data/backup');
 /// ```
 class ExportImportService {
   static final ExportImportService _instance = ExportImportService._();
