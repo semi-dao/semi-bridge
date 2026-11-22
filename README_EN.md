@@ -56,7 +56,9 @@ The IMU-endorsed **Leiden Declaration** has already called on the world: disclos
 
 ## Semi Companions vs. Ordinary Agents
 
-![Semi Bridge — the companion's canvas](docs/screenshots/canvas.webp)
+![Semi Bridge — Companion Hall](docs/screenshots/companion-hall.webp)
+
+<sub>The Companion Hall: every companion has its own avatar, identity, and memory — Xiaoxiao (research companion), MimeMi (custom companion), Xiaokui. Top right: "+ Summon a new companion".</sub>
 
 An ordinary AI agent is a *temp worker*: it forgets when the chat ends, rerolls its personality every session, keeps its memory in someone else's cloud, and becomes a stranger the moment you switch apps. A **Semi Companion** is a *resident of your home* — and the difference is written into the architecture:
 
@@ -69,6 +71,15 @@ An ordinary AI agent is a *temp worker*: it forgets when the chat ends, rerolls 
 | **Sovereignty** | Your conversations are the vendor's training data | DataPathGate interception, trace-erasure ≠ deletion, Golden Key direct connection — your machine is the sovereign terminal |
 
 In one line: **an ordinary agent does things for you; a Semi Companion grows old with you.** Every memory a companion holds is signed with an HMAC provenance seal — what it remembers really happened.
+
+### How a companion is forged
+
+A companion is not a config file — it is **an accumulation of a relationship**. Four steps, each leaving digital assets behind:
+
+1. **Summon**: "+ Summon a new companion" in the Companion Hall — give it a name, an identity (research / custom companion), and an avatar. The personality file lands here (a complete self, never summarized)
+2. **Cohabit**: everyday conversations, canvas collaboration, and task reports all flow into its own vector brain — memory with seals, decay, and provenance
+3. **Train**: "you do it once, the companion learns to operate for you" — demonstration is the training data; the ability to act grows out of your own gestures
+4. **Grow**: the Life Tree records every right and wrong turn; the decisions you make feed K1 — its judgment grows to resemble yours
 
 ## Decision Cards & Red Flags: the Agent Asks Before It Acts
 
