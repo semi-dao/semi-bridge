@@ -2,6 +2,7 @@ import 'dart:async' show unawaited;
 import 'dart:io' show Platform, File, FileMode;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'services/mobile/auto_reconnect_bootstrap.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -21,6 +22,11 @@ import 'services/storage_service.dart'; // [小葵 2026-10-05 自檢後門] 閒�
 import 'services/trust/trust_loop.dart'; // [刀 6 K6.4]
 import 'services/quick_assistant/floating_window_service.dart'; // [無限插槽 C1]
 import 'services/chat_modes.dart'; // [聊天模式 B 線 2026-10-20 Blue 拍板]
+import 'services/system/crash_guard.dart'; // [小葵 2026-10-31 Safe Mode] 崩潰迴圈守門員
+import 'services/system/diagnostic_box.dart'; // [小葵 2026-10-31 黑盒子合流] 啟動早期 init＋事件橋
+
+/// [2026-11-13] 手機版 build 標記——配對頁 footer 顯示（辨識新舊 App）
+const String kMobileBuildStamp = '1121.1955';
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -159,6 +165,8 @@ void main(List<String> args) async {
         keyDownHandler: (_) {
           // 簡化：toggle——未展開就展開、已展開就收合
           // (狀態查詢在 UI 端的 State，hotkey 只能觸發動作)
+          // 用一個簡單的 static bool 切換（在 SlotUiActions 內部記上次狀態）
+          debugPrint('[SlotsMgmt] expand-all hotkey trigger (no-op in open-source build)');
         },
       );
       debugPrint('[SlotsMgmt] hotkey Cmd+Shift+A registered (toggle expand)');
@@ -190,14 +198,51 @@ void main(List<String> args) async {
     final dir = await getApplicationSupportDirectory();
     await SlotRegistry.init(dir);
     debugPrint('[SlotRegistry] 根路徑已接線: ${dir.path}/slots');
+
+    // [小葵 2026-10-31 Safe Mode 刀一 + 黑盒子 刀二] CrashGuard 接線＋啟動判定——
+    // 用同一個 App Support 目錄放 crash_guard.json。markLaunched() 會
+    // 讀 heartbeat、記本次啟動、判定是否進 Safe Mode（3 次/10 分鐘）。
+    // 必須在 runApp 之前完成：main() 尾端與 brain_container_service
+    // 都要靠 CrashGuard.instance.safeMode 決定要不要跳過背景服務。
+    // [小葵 2026-10-31 黑盒子合流] DiagnosticBox 先 init（黑盒子就緒），
+    // 再接事件橋、最後才 markLaunched——Safe Mode 判定事件才來得及進黑盒子。
+    try {
+      CrashGuard.instance.init(dir);
+      await DiagnosticBox.instance.init();
+      DiagnosticBoxBridge.onCrashGuardEvent = (kind, detail) =>
+          DiagnosticBox.instance.log('safe_mode', '[$kind] $detail');
+      await CrashGuard.instance.markLaunched();
+    } catch (e) {
+      // fail-open：守門員掛了不能反過來擋 App 啟動
+      debugPrint('[SafeMode] CrashGuard 初始化失敗（照常啟動）: $e');
+    }
   } catch (e) {
     debugPrint('[SlotRegistry] init 接線失敗（registry 將退相對路徑）: $e');
   }
 
   runApp(const BridgeApp());
+
+  // [SPEC §6.3 2026-11-13] 手機版：啟動即憑 token 自動回家——
+  // 提早在 main() 跑（不等畫面 initState），殺掉重開 100% 會執行。
+  if (Platform.isIOS || Platform.isAndroid) {
+    bootstrapAutoReconnect();
+  }
+
+  // [小葵 2026-10-31 Safe Mode 刀一] 崩潰迴圈守門員——在啟動序列早期記錄
+  // heartbeat＋判定崩潰迴圈（10 分鐘內第 3 次啟動 → Safe Mode）。
+  // init 併入上方 SlotRegistry 目錄接線塊（同一個 App Support 目錄）。
+  // 觀察器：正常關閉（detached）清 heartbeat，被 jetsam 殺掉則留下證據。
+  WidgetsBinding.instance.addObserver(const CrashGuardLifecycleObserver());
+
   // [小葵 2026-10-01 離合器] App 啟動掛 Scheduler——
   // 載入角色設定＋定時評估（閒置+有待辨識 → 自動切辨識模式）
-  LocalModelScheduler.instance.start();
+  // [小葵 2026-10-31 Safe Mode 刀一] Safe Mode 下不自動掛——本地模型
+  // 自動排程降為手動（使用者可從系統頁手動開），先活著再談修。
+  if (!CrashGuard.instance.safeMode) {
+    LocalModelScheduler.instance.start();
+  } else {
+    debugPrint('[SafeMode] 🟡 跳過 LocalModelScheduler.start()——本地模型自動排程已暫停（手動模式）');
+  }
 }
 
 /// [無限插槽 C1 2026-10-06 移植] App 退出時解除全域熱鍵。

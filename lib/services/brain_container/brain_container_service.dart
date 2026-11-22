@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:bridge_app/services/vector_db/incremental_ingest_service.dart';
+import 'package:bridge_app/services/system/crash_guard.dart'; // [小葵 2026-10-31 Safe Mode 刀一]
 import 'package:flutter/foundation.dart';
 
 import '../activity/background_task_registry.dart';
@@ -31,6 +32,7 @@ import 'package:bridge_app/services/brain_container/pdf_content_backfill_service
 import 'package:bridge_app/services/brain_container/ingest_backfill_service.dart';
 import 'package:bridge_app/services/brain_container/memory_asset_link_backfill_service.dart';
 import 'package:bridge_app/services/vector_db/agent_memory_backfill_service.dart';
+import 'package:bridge_app/services/brain_container/memory_provenance_service.dart'; // [小葵 2026-11-11] 出處簽章
 import 'package:bridge_app/services/vector_db/folder_origin_service.dart'; // [小葵 2026-09-09] 資料夾身份
 import 'package:bridge_app/services/vector_db/identity_reembed_service.dart'; // [小葵 2026-09-09] 身份重嵌
 import 'package:bridge_app/services/vector_db/asset_chunk_backfill_service.dart';
@@ -211,13 +213,25 @@ class BrainContainerService {
       });
       // [教練 Agent 2026-08-21] 二期 #10——agent_memories 補嵌入（15 筆級
       // 別，一次 batch）。守門員：模型版本不符中止。
-      Future.delayed(const Duration(seconds: 95), () {
+      // [小葵 2026-11-11 出處簽章] 補嵌前先跑爺爺條款補簽＋稽核隔離
+      //（順序重要：爺爺條款先簽既有條目 → 稽核隔離剩餘無章者 →
+      // 補嵌只嵌有章的——外部植入的記憶三關全擋）。
+      Future.delayed(const Duration(seconds: 95), () async {
+        await MemoryProvenanceService.instance.backfillGrandfathered();
+        await MemoryProvenanceService.instance.auditAndQuarantine();
         AgentMemoryBackfillService.instance.start();
       });
       // [教練 Agent 2026-08-21] 鐵三角 #7+#9——事件驅動髒標記（Directory.watch）
       // + 30 分鐘週期兜底重掃。延遲 120 秒：排在所有回填 worker 之後，
       // 啟動補掃才不會跟 chunk/reembed 搶 DB 寫鎖。
       Future.delayed(const Duration(seconds: 120), () {
+        // [小葵 2026-10-31 Safe Mode 刀一] Safe Mode 下不自動啟動——
+        // 素材索引是 10-30 案暴衝源。使用者按黃色橫幅〔重試背景服務〕
+        // 時由 CrashGuard.exitSafeMode() 重新拉 start()。
+        if (CrashGuard.instance.safeMode) {
+          debugPrint('[SafeMode] 🟡 跳過 IncrementalIngestService.start()——背景索引已暫停（Safe Mode）');
+          return;
+        }
         IncrementalIngestService.instance.start();
       });
       // [教練 Agent 2026-08-21] 記憶落檔存量回填——DB 既有 memories 一次性

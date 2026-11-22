@@ -8,15 +8,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'provider_registry.dart'; // [教練 Agent 2026-07-30] detectAvailableProvider 委派 ProviderRegistry
 
 class StorageService {
+  /// [2026-11-12 Blue 令：授權整合] 全 App 唯一 secure storage 實例——
+  /// 兩把 Keychain 鑰匙＝兩次密碼彈窗；統一成一個 accountName 只問一次。
+  /// （MemoryProvenance 等其他服務一律委派這裡，禁止自立鑰匙）
+  static const FlutterSecureStorage secureStorage = _secure;
+
   static const _secure = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
     mOptions: MacOsOptions(
       accountName: 'Bridge Golden Keys',
-      // [教練 Agent 2026-07-25] macOS Keychain 策略：
-      // - useDataProtectionKeyChain=false：不需要 team ID / code signing
-      //   Debug 模式 (ad-hoc signing) 也能用，不會 -34018
-      // - accessibility=first_unlock：解鎖一次後不再彈密碼提示
-      useDataProtectionKeyChain: false,
+      // [2026-11-13 Blue 報案「一直問密碼」] 改用 dataProtection keychain——
+      // 以 app container 識別身分，**免 login-keychain 密碼授權**，debug
+      // ad-hoc 簽名每次 rebuild 也不會再問（舊法=false 存 login keychain，
+      // ad-hoc 簽名身分漂移 → 每次彈「輸入鑰匙圈密碼」）。舊 items 由
+      // _migrateLegacyKeychain 遷移後清除。
+      useDataProtectionKeyChain: true,
       accessibility: KeychainAccessibility.first_unlock,
     ),
   );
@@ -67,6 +73,9 @@ class StorageService {
     _testTokenDirOverride = dir;
     _tokenStoreFile = null;
     _tokenStoreCache = null;
+    // [小葵 2026-10-22] 測試隔離：memory cache 一併清——static cache 跨測試
+    // 殘留會讓「只有 1 把鑰匙」的測試看到上一測試的鑰匙（picker 條件誤判）。
+    _tokenMemoryCache.clear();
   }
 
   static Future<Map<String, dynamic>> _loadTokenStore() async {
@@ -133,13 +142,11 @@ class StorageService {
     try {
       await _secure.write(key: tokenKey, value: token);
     } catch (e) {
-      debugPrint('[StorageService] secure storage 寫入失敗: $e');
+      // [Security 2026-10-31] 移除明文 fallback 雙寫（原「收斂任務 3」）：
+      // fallback_ 前綴把 token 明文寫進 SharedPreferences，會隨 Google Drive 備份離開裝置。
+      // UI 誠實鐵則：secure storage 失敗必須被看見，不再以明文靜默兜底。
+      debugPrint('[StorageService] secure storage 寫入失敗（不降級明文）: $e');
     }
-    // [收斂任務 3] iOS/Android：同時寫入 SharedPreferences 作為 fallback
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('fallback_$tokenKey', token);
-    } catch (_) {}
   }
 
   static Future<String?> getToken({String? provider}) async {
@@ -184,11 +191,20 @@ class StorageService {
       _tokenMemoryCache[tokenKey] = token;
       return token;
     }
-    // iOS/Android：fallback 到 SharedPreferences（由 saveToken 的 fallback_ 前綴寫入）
+    // [Security 2026-10-31] 舊明文 fallback 一次性遷移清洗：
+    // 舊版（收斂任務 3）曾把 token 明文寫進 SharedPreferences（fallback_ 前綴）。
+    // 讀到就遷移進 secure storage 並刪除明文——之後此路徑永遠空手而歸。
     try {
       final prefs = await SharedPreferences.getInstance();
       final fallback = prefs.getString('fallback_$tokenKey');
       if (fallback != null && fallback.isNotEmpty) {
+        try {
+          await _secure.write(key: tokenKey, value: fallback);
+          await prefs.remove('fallback_$tokenKey');
+          debugPrint('[StorageService] 舊明文 fallback 已遷移至 secure storage 並清除: $tokenKey');
+        } catch (_) {
+          // secure storage 不可用時暫不清除明文（避免 token 遺失），下次讀取再試
+        }
         _tokenMemoryCache[tokenKey] = fallback;
         return fallback;
       }
@@ -209,7 +225,7 @@ class StorageService {
 
   /// [教練 Agent 2026-08-08] 金鑰清點——列出所有已存的 token provider 和狀態
   ///
-  /// 回傳 Map<providerId, hasToken>——只有 hasToken=true 的 provider 有可用的金鑰。
+  /// 回傳 `Map<providerId, hasToken>`——只有 hasToken=true 的 provider 有可用的金鑰。
   /// 用於 CapabilityHealthService 的 verifiedAlternatives 和 UI 金鑰管理頁面。
   static Future<Map<String, bool>> auditAllTokens() async {
     final knownProviders = [

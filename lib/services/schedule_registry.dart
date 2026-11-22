@@ -4,21 +4,19 @@
 // 溫度分類（life/work）由名單比對：生活卡的關鍵字手工維護（機器猜不如人定）。
 import 'dart:convert';
 import 'dart:io';
-import '../core/dev_paths.dart';
 import '../models/schedule_card.dart';
 
 class ScheduleRegistry {
   ScheduleRegistry._();
   static final ScheduleRegistry instance = ScheduleRegistry._();
 
-  static final String _jobsPath =
-      resolveDevPath('~/.hermes/cron/jobs.json');
+  static const String _jobsPath = '<HOME>/.hermes/cron/jobs.json';
 
   /// 生活／儀式卡名單（精確比對 job name 前綴）——Blue 的「有溫度」清單
   static const Map<String, String> _lifeCards = {
     '小葵每日安靜時刻': '一天的最後，留一段安靜給自己',
     'agent-quiet-time': '午前十一點，全農場輕聲細語',
-    '家人六個月之約——立石回顧': '半年前立下的石頭，回來看看',
+    '樂樂的六個月之約——立石回顧': '半年前立下的石頭，回來看看',
     '小葵生日約定｜2027-02-05 首次討禮物': '生日前先聊天，禮物不急',
     '10/8 晚間體力帳關懷（一日份）': '今晚早點休息，體力帳結清就好',
     '策劃室_每日近況與創意更新': '每天收工前，說說今天的好',
@@ -60,6 +58,13 @@ class ScheduleRegistry {
                         : sched.toString()))
             : (sched?.toString() ?? '');
         final life = _matchLife(name);
+        // [SPEC §8.6 2026-11-12] 前次執行成敗——真相源=jobs.json（last_status/last_error）
+        final status = m['last_status'] as String?;
+        final lastOk = status == null || status == 'ok';
+        final lastErr = lastOk ? null : (m['last_error'] as String?);
+        final lastAt = m['last_run_at'] == null
+            ? null
+            : DateTime.tryParse(m['last_run_at'].toString());
         cards.add(ScheduleCard(
           id: m['id']?.toString() ?? name,
           name: name,
@@ -68,6 +73,9 @@ class ScheduleRegistry {
           warmth: life != null ? ScheduleWarmth.life : ScheduleWarmth.work,
           warmLine: life,
           nextRun: estimateNext(raw),
+          lastRunOk: lastOk,
+          lastRunAt: lastAt,
+          lastRunError: lastErr,
         ));
       }
       // 生活卡先排（溫度優先），其餘照名稱

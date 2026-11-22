@@ -72,6 +72,11 @@ class DecisionHead {
   final int trainedAtMs; // 訓練時間
   final int sampleCount; // 訓練樣本數
   final double holdoutAcc; // 保留集準確率（單調升級用）
+  /// [T12-② 2026-10-17] 訓練表徵血型——頭吃的向量是哪顆 embedding 模型
+  /// 產的（'eg2-300m-v1' / 'gemma-300m-v1'）。載入端比對 runtime 血型，
+  /// 不符即拒用（300M 頭吃 EG2 向量＝跨血型 softmax，輸出無意義——
+  /// Fable V3 高風險項）。舊檔無此欄＝null（未知血型，保守拒用）。
+  final String? embedModelVersion;
 
   const DecisionHead({
     required this.labels,
@@ -80,6 +85,7 @@ class DecisionHead {
     required this.trainedAtMs,
     required this.sampleCount,
     required this.holdoutAcc,
+    this.embedModelVersion,
   });
 
   int get dim => w.length;
@@ -111,6 +117,8 @@ class DecisionHead {
         'trained_at_ms': trainedAtMs,
         'sample_count': sampleCount,
         'holdout_acc': holdoutAcc,
+        if (embedModelVersion != null)
+          'embed_model_version': embedModelVersion, // [T12-②] 血型烙印
       };
 
   static DecisionHead fromJson(Map<String, dynamic> j) => DecisionHead(
@@ -122,6 +130,8 @@ class DecisionHead {
         trainedAtMs: j['trained_at_ms'] as int? ?? 0,
         sampleCount: j['sample_count'] as int? ?? 0,
         holdoutAcc: (j['holdout_acc'] as num?)?.toDouble() ?? 0.0,
+        // [T12-②] 舊檔無此欄＝null（未知血型）——restore 端保守拒用
+        embedModelVersion: j['embed_model_version'] as String?,
       );
 }
 
@@ -137,6 +147,7 @@ class DecisionHeadTrainer {
     int trainedAtMs = 0,
     double holdoutAcc = 0.0,
     List<String>? labelSet, // [小葵 2026-10-13 路線1] 二元頭用 K1Labels.binaryAll
+    String? embedModelVersion, // [T12-②] 訓練表徵血型烙印（載入端比對用）
   }) {
     final labels = labelSet ?? K1Labels.all;
     final dim = samples.first.$1.length;
@@ -192,6 +203,7 @@ class DecisionHeadTrainer {
       trainedAtMs: trainedAtMs,
       sampleCount: n,
       holdoutAcc: holdoutAcc,
+      embedModelVersion: embedModelVersion, // [T12-②] 血型烙印
     );
   }
 }

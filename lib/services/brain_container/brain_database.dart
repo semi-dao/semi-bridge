@@ -187,6 +187,7 @@ class BrainDatabase {
       _ensureEmbedModelVersionColumn(); // [小葵 2026-10-15 T0] v20 前手動 ALTER 過的 live DB
       _ensureCorrectionEventsTable(); // [T3] 已標 v20 的 live DB 補建表
       _ensureAgentMemoriesEmbedVersion(); // [T6] live DB 補血型欄
+      _ensureAgentMemoriesProvenanceSig(); // [小葵 2026-11-11] 出處簽章欄
       return;
     }
 
@@ -210,6 +211,7 @@ class BrainDatabase {
     _ensureEmbedModelVersionColumn(); // [小葵 2026-10-15 T0] 冪等確保（見 schema v20 註解）
     _ensureCorrectionEventsTable(); // [T3] 冪等確保
     _ensureAgentMemoriesEmbedVersion(); // [T6] 冪等確保
+    _ensureAgentMemoriesProvenanceSig(); // [小葵 2026-11-11] 出處簽章欄
   }
 
   /// [小葵 2026-10-15 T0／Fable V3 斷鏈④] asset_index.embed_model_version
@@ -231,6 +233,16 @@ class BrainDatabase {
     if (!cols.any((c) => c['name'] == 'embed_model_version')) {
       _db!.execute(
           'ALTER TABLE agent_memories ADD COLUMN embed_model_version TEXT');
+    }
+  }
+
+  /// [小葵 2026-11-11 記憶出處簽章] 冪等確保 agent_memories.provenance_sig
+  /// 欄（HMAC-SHA256 出處章；驗章在 MemoryProvenanceService）。
+  void _ensureAgentMemoriesProvenanceSig() {
+    final cols = _db!.select('PRAGMA table_info(agent_memories)');
+    if (!cols.any((c) => c['name'] == 'provenance_sig')) {
+      _db!.execute(
+          'ALTER TABLE agent_memories ADD COLUMN provenance_sig TEXT');
     }
   }
 

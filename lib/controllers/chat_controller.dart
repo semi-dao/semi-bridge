@@ -26,6 +26,7 @@ import '../models/conversation.dart';
 import '../models/task_evidence.dart'; // P0.5 對話任務證據
 import '../services/tasks/task_dispatcher.dart'; // [隊友訊息流 C2]
 import '../services/chat_modes.dart'; // [聊天模式 B 線 2026-10-20 Blue 拍板]
+import '../services/compass/decision_card_store.dart'; // [小葵 2026-11-03] 待決策卡
 import '../services/memory_layer_service.dart'; // [H2/M3 2026-10-07] 記憶2域10層分層注入
 import '../services/collab/meeting_layer.dart'; // [TRIO M3.5 2026-09-22] 會議接線
 import '../services/collab/intel_pool.dart'; // [TRIO M3.5] 情報池（會議紀錄入池）
@@ -135,6 +136,8 @@ import '../services/life_tree/life_tree_store.dart'; // [2026-10-05] 對話自�
 import '../services/agent_loop/agent_loop_tools/tool_seek_tool.dart'
     show CompassToolSeekTool; // [小葵 2026-10-01] 本地士兵配備
 import '../services/correction_catcher.dart'; // [小葵 2026-10-14 M3] 修正捕手
+import '../services/squad_orchestrator.dart'; // [小葵 2026-11-17 §9.2 步驟3] 開小隊
+import '../services/squad_push_hook.dart'; // [pushSquadChanged 觸發線 2026-11-17] 小隊動態推播（fail-open 旁路）
 import '../services/calibration_breaker.dart'; // [小葵 2026-10-14 M3] 校準熔斷
 import '../services/brain_container/event_ledger.dart'; // [小葵 2026-10-14 M3] reaction 落盤
 
@@ -487,6 +490,10 @@ class ChatController extends ChangeNotifier {
     String llmSnippet,
   )?
   onAgentLoopProgress;
+
+  /// [Blue 抓包 2026-11-05] 中間觀察防重複欄位——controller 層注入
+  /// loop_observation 泡泡用（原在 desktop_chat_panel，頁面切走即丟）。
+  String? _lastBubbleSnippet;
 
   /// [教練 Agent 2026-08-07] 即時階段回饋——Agent Loop 的 thinking/tool_start/timeout 等
   void Function(
@@ -872,6 +879,39 @@ class ChatController extends ChangeNotifier {
     } else {
       await createProjectCanvasConversation(canvasId);
     }
+  }
+
+  /// [SPEC §8.3 2026-11-12] 開任務綁定討論串——找到就切過去；沒有就出生自綁。
+  /// 點任務卡→進討論串的唯一入口（桌面端）。任務變更後 taskBinding 隨 copyWith 更新。
+  Future<Conversation> openTaskBoundConversation(TaskCardData task) async {
+    final all = await ConversationStore.getAll();
+    // 找既有綁定串（同任務 id、最新一筆）
+    final existing = all
+        .where((c) => c.isTaskBound && c.taskBinding!['id'] == task.id)
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    Conversation conv;
+    if (existing.isNotEmpty) {
+      conv = existing.first;
+      // taskBinding 同步到最新（成敗/產出可能變了）
+      if (conv.taskBinding!['lastRunOk'] != task.lastRunOk ||
+          conv.taskBinding!['schedule'] != task.schedule) {
+        conv = conv.copyWith(taskBinding: task.toJson());
+        await ConversationStore.save(conv);
+      }
+    } else {
+      conv = Conversation.createTaskBound(task);
+      await ConversationStore.save(conv);
+    }
+    await ConversationStore.setCurrentId(conv.id);
+    _currentConversation = conv;
+    if (!_conversations.any((c) => c.id == conv.id)) {
+      _conversations = [conv, ..._conversations];
+    }
+    _agentLoop?.resetSessionStore();
+    notifyListeners();
+    onScrollToBottom?.call();
+    return conv;
   }
 
   // [教練 Agent 2026-07-23] 畫布對話系統 — 只載入一般對話（排除畫布對話）
@@ -2002,6 +2042,27 @@ class ChatController extends ChangeNotifier {
       maxTurns: AgentLoop.hardMaxTurns, // [2026-09-18] Hermes 模式——無輪數限制（Blue 拍板對齊小葵）
       prohibitPaidTools: prohibitPaidTools, // [教練 Agent 2026-08-20] 機器輪次禁用付費工具
       onProgress: (turnIndex, maxTurns, toolCall, toolResult, llmOutput) {
+        // [Blue 抓包 2026-11-05 頁面切走泡泡斷流] 中間觀察改在
+        // controller 層注入——UI 面件卸載（切 tab/切頁）不再丟訊息。
+        // 病例：ledger 到 13:36 還在跑（loop 活著），對話檔停在
+        // 13:31:21——旁白由 desktop_chat_panel 的 !mounted return
+        // 吃掉，切走期間的觀察永久丟失、回來不補。
+        // 落點：controller 永遠活著，inject 直接落檔；UI 訂閱
+        // onAgentLoopProgress 只做渲染（loop log、回合數）。
+        final snippet = AgentToolCallParser.extractText(llmOutput).trim();
+        if (snippet.length > 24 && snippet != _lastBubbleSnippet) {
+          _lastBubbleSnippet = snippet;
+          // 每輪第一次有旁白就落——fire-and-forget 不擋 loop
+          Future.microtask(() {
+            injectAssistantMessage(
+              snippet,
+              metadata: {
+                'kind': 'loop_observation',
+                'turn': turnIndex + 1,
+              },
+            );
+          });
+        }
         onAgentLoopProgress?.call(
           turnIndex,
           maxTurns,
@@ -2009,9 +2070,7 @@ class ChatController extends ChangeNotifier {
           toolResult?.success == true
               ? 'success'
               : (toolResult?.success == false ? 'failed' : null),
-          // [小葵 2026-09-18] 透明化——用 extractText 清掉 tool_call 區塊後傳出
-          // 自然語言思路（可能為空字串，UI 端空則不顯示）。原始 output 不外流。
-          AgentToolCallParser.extractText(llmOutput).trim(),
+          snippet,
         );
       },
       onStage: (stage, {toolName, detail}) {
@@ -2113,6 +2172,9 @@ class ChatController extends ChangeNotifier {
       updatedAt: DateTime.now(),
     );
     await ConversationStore.save(_currentConversation!);
+    // [觸發線 2026-11-17] 注入式回覆（觀察/任務交付等）落檔後同樣檢查回報卡；
+    // 卡 id 綁訊息 id 天然冪等，與 sendMessage 雙鉤不重複插卡
+    await _maybeEmitSquadReportCard();
     notifyListeners();
     onScrollToBottom?.call();
   }
@@ -6772,6 +6834,24 @@ class ChatController extends ChangeNotifier {
   /// 不會喚醒另一輪 Loop（$33 防迴路鐵則）。
   ///
   /// 回傳 dispatch 後立即（不等任務完成）。
+  /// [Blue 令 2026-10-24] 動作軌跡參數摘要——取值截 80 字＋去掉本機絕對
+  /// 路徑前綴（只留檔名），不暴露 raw args 細節。
+  static String _summarizeTrailArgs(Map<String, dynamic> args) {
+    try {
+      final vals = args.values.take(2).map((v) {
+        var s = v.toString();
+        s = s.replaceAll(
+            RegExp(r'/Users/[^/\s]+/Developer/bridge_app/'), '');
+        s = s.replaceAll(RegExp(r'/Users/[^/\s]+/'), '~/');
+        s = s.replaceAll('\n', ' ');
+        return s.length > 80 ? '${s.substring(0, 80)}…' : s;
+      }).join(', ');
+      return vals;
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> dispatchTask(String instruction, {String? title}) async {
     if (_currentConversation == null) {
       await createNewConversation();
@@ -7160,6 +7240,136 @@ $base
     await sendDirectMessage(text, imagePath: finalImagePath);
   }
 
+  /// [SPEC §9.2 步驟3] 開小隊：建 N 個子對話（挂母）＋母對話插出動卡。
+  /// 失敗誠實回報（寧紅字不假成功）——不留半套狀態。
+  Future<void> _handleSquadDirective(String text, SquadDirective d) async {
+    try {
+      if (!SquadOrchestrator.isExecutable(d)) {
+        _appendSystemError('開小隊指令聽到了，但隊名是空的。範例：「開小隊：菜單、採買、預算」');
+        return;
+      }
+      // 沒有母對話就先開一個（指令本身成為母對話開場）
+      if (_currentConversation == null) {
+        await ConversationStore.createNew(companionId: _activeCompanion?.id);
+      }
+      final parent = _currentConversation!;
+      final userMsg = Message(
+        id: '${DateTime.now().millisecondsSinceEpoch}_user',
+        role: 'user',
+        content: text,
+        timestamp: DateTime.now(),
+      );
+      final squads = SquadOrchestrator.buildSquadConversations(
+        parent: parent,
+        squadNames: d.squadNames,
+      );
+      final spawnCard = SquadOrchestrator.buildSpawnCard(
+        squads: squads,
+        at: DateTime.now(),
+      );
+      // 存檔：子對話們＋母對話（帶使用者訊息+出動卡）
+      for (final sq in squads) {
+        await ConversationStore.save(sq);
+      }
+      final updated = parent.copyWith(
+        messages: [...parent.messages, userMsg, spawnCard],
+        updatedAt: DateTime.now(),
+      );
+      await ConversationStore.save(updated);
+      // 內存同步：不加 setCurrentId（留在母對話看出動卡）
+      _currentConversation = updated;
+      final all = await ConversationStore.getAll();
+      final cid = _activeCompanion?.id;
+      _conversations = cid == null
+          ? all
+          : all.where((c) => c.companionId == cid).toList();
+      onClearMessageInput?.call();
+      notifyListeners();
+      onScrollToBottom?.call();
+      // [Blue 2026-11-17 試玩抓包] 通知外層側欄刷新（開小隊=新對話誕生）
+      onConversationAutoCreated?.call();
+      // [pushSquadChanged 觸發線 2026-11-17] 建檔全部落地→每隊一推 spawned
+      // （手機側 squadChanged→重抓清單）。fail-open 旁路，不拖垮開小隊。
+      for (final sq in squads) {
+        pushSquadSpawned(parentId: parent.id, squadId: sq.id);
+      }
+      if (d.countMismatch) {
+        _appendSystemError(
+            '注意：指令宣稱 ${d.claimedCount} 隊但列出 ${d.squadNames.length} 個名字——已按名字建 ${d.squadNames.length} 隊。');
+      }
+    } catch (e) {
+      _appendSystemError('開小隊失敗：$e');
+    }
+  }
+
+  void _appendSystemError(String msg) {
+    final conv = _currentConversation;
+    if (conv == null) return;
+    final now = DateTime.now();
+    _currentConversation = conv.copyWith(
+      messages: [
+        ...conv.messages,
+        Message(
+          id: 'sys-err-${now.millisecondsSinceEpoch}',
+          role: 'assistant',
+          content: '⚠️ $msg',
+          timestamp: now,
+          metadata: const {'kind': 'squad_error'},
+        ),
+      ],
+      updatedAt: now,
+    );
+    notifyListeners();
+    onScrollToBottom?.call();
+  }
+
+  /// [SPEC §9.2 觸發線 2026-11-17] 小隊回覆落檔後→把回報卡插回母對話。
+  /// 冪等：卡 id = reportCardId()（綁最後一則 assistant 訊息 id），母對話
+  /// 已有同 id 卡→跳過。任何異常 fail-open（debugPrint，不拋、不影響聊天）。
+  Future<void> _maybeEmitSquadReportCard() async {
+    final squad = _currentConversation;
+    if (squad == null || !SquadOrchestrator.shouldReport(squad)) return;
+    try {
+      final all = await ConversationStore.getAll();
+      Conversation? parent;
+      for (final c in all) {
+        if (c.id == squad.parentConversationId) {
+          parent = c;
+          break;
+        }
+      }
+      if (parent == null) return; // 母對話不在（被刪/找不到）→跳過
+      final cardId = SquadOrchestrator.reportCardId(squad);
+      if (parent.messages.any((m) => m.id == cardId)) return; // 已回報過
+      final lastReply = squad.messages.last; // shouldReport 已保證 assistant
+      final summary = lastReply.content.length > 120
+          ? lastReply.content.substring(0, 120)
+          : lastReply.content;
+      final card = SquadOrchestrator.buildReportCard(
+        squad: squad,
+        summary: summary,
+        at: DateTime.now(),
+        id: cardId,
+      );
+      await ConversationStore.save(
+        parent.copyWith(
+          messages: [...parent.messages, card],
+          updatedAt: DateTime.now(),
+        ),
+      );
+      debugPrint('[ChatController] 小隊回報卡已插回母對話 '
+          '${squad.parentConversationId}（$cardId）');
+      // [pushSquadChanged 觸發線 2026-11-17] 插卡成功→推 reported（手機側
+      // squadChanged→重抓清單）。只在 save 成功後推（冪等跳過路徑不重複推）。
+      pushSquadReported(
+        parentId: squad.parentConversationId!,
+        squadId: squad.id,
+      );
+    } catch (e) {
+      debugPrint('[ChatController] 小隊回報卡失敗（fail-open 不影響聊天）: $e');
+    }
+  }
+
   Future<void> sendMessage({String? imagePath}) async {
     final text = (onGetMessageText?.call() ?? '').trim();
     if (text.isEmpty && imagePath == null) {
@@ -7169,11 +7379,53 @@ $base
       );
       return;
     }
+
+    // [SPEC §9.2 對話頁v2 步驟3] 「開小隊」指令攔截——明示制（開小隊：A、B、C）
+    if (imagePath == null) {
+      final d = SquadOrchestrator.parseDirective(text);
+      if (d != null) {
+        await _handleSquadDirective(text, d);
+        return;
+      }
+    }
     // [教練 Agent 2026-08-20] 使用者親自發言 → 解除付費工具禁令
     // （sendDirectMessage 走這裡時 _lastMessageWasSystemEvent 已先設定好）
     if (!_systemEventMessage) {
       _lastMessageWasSystemEvent = false;
     }
+
+    // [小葵 2026-11-03 待決策卡閉環] 使用者在綁卡對話裡回應 →
+    // 卡 open→discussing（使用者回應了，線就活著；紅旗不會因
+    // 無人應答而重複）。fail-quiet 不擋訊息主流程。
+    // [晚場 刀2 綁卡兜底] 病例：K1 卡 conversation_id=None——卡是舊版
+    // 開的、onSpeak 綁卡回呼不再觸發，卡永遠孤兒。修法：使用者發言時，
+    // 本對話沒綁卡但存在「未綁卡的未結案卡」→ 現在補綁（主動回應
+    // session 是專屬對話，使用者在此發言就是要談那張卡）。
+    try {
+      final convId = _currentConversation?.id;
+      if (convId != null) {
+        final isProactive = _currentConversation?.type ==
+            ConversationType.proactive;
+        var card = DecisionCardStore.instance.cardForConversation(convId);
+        if (card == null && isProactive) {
+          final orphans = DecisionCardStore.instance
+              .unresolvedCards()
+              .where((c) => c.conversationId == null)
+              .toList();
+          if (orphans.isNotEmpty) {
+            DecisionCardStore.instance
+                .bindConversation(orphans.first.id, convId);
+            card = orphans.first;
+            debugPrint(
+                '[DecisionCard] 兜底補綁：卡 ${card.id} → 對話 $convId');
+          }
+        }
+        if (card != null && card.status == 'open') {
+          DecisionCardStore.instance.markDiscussing(card.id);
+          debugPrint('[DecisionCard] 使用者回應，卡 ${card.id} → discussing');
+        }
+      }
+    } catch (_) {}
 
     // [教練 Agent 2026-07-22] Phase H — 插嘴功能
     // [教練 Agent 2026-08-03] 升級 Hermes 風格：插嘴時立即插入「收到～我整合思考一下」placeholder
@@ -8247,8 +8499,21 @@ $base
         imageProvenance?.removeWhere((_, value) => value == null);
 
         // P0.5: 從 Agent Loop turns 萃取安全版的任務證據，寫進 assistant message metadata。
-        // 不暴露 raw tool args、不寫絕對路徑、不寫 token／cookie。
+        // 不暴露 raw tool args、不暴露本機絕對路徑、不寫 token／cookie。
         final tasks = TaskEvidenceBuilder.build(agentLoopReply.turns);
+        // [Blue 令 2026-10-24 Day1 抓包] 動作軌跡——工具過程會摺疊且換對話
+        // 即洗掉；泡泡必須自包含：全部工具步驟（名稱＋參數摘要＋成敗）寫進
+        // metadata，泡泡內折疊卡永久顯示。研究/決策模式的使用者靠這個對帳。
+        final actionTrail = <Map<String, dynamic>>[
+          for (final t in agentLoopReply.turns)
+            if (t.toolCall != null)
+              {
+                'tool': t.toolCall!.name,
+                'ok': t.toolResult?.success == true,
+                if (t.toolCall!.args.isNotEmpty)
+                  'args': _summarizeTrailArgs(t.toolCall!.args),
+              },
+        ];
         // [因果引擎 L2 2026-09-11] 證據等級——確定性計算：
         // 本輪有成功改變型工具=2 干預驗證；只有觀察型=1 觀測；純文字=0 推測。
         // 不是 LLM 自評——「知道自己正在推測還是已驗證」由結構判定。
@@ -8262,6 +8527,8 @@ $base
             if (imageProvenance != null) 'imageExecution': imageProvenance,
             'evidenceGrade': evidenceGrade.level,
             'evidenceGradeLabel': evidenceGrade.label,
+            // [Blue 令 2026-10-24] 動作軌跡入 metadata——泡泡永久自包含
+            if (actionTrail.isNotEmpty) 'actionTrail': actionTrail,
           },
           tasks: tasks,
         );
@@ -8303,6 +8570,9 @@ $base
         _retryCount = 0;
         notifyListeners();
         await ConversationStore.save(updatedConv);
+        // [觸發線 2026-11-17] 小隊回覆落檔→回報卡插母對話（在重抓列表前，
+        // 讓 _conversations 直接含更新後的母對話，側欄即時見卡）
+        await _maybeEmitSquadReportCard();
         final allConvsAgent = await ConversationStore.getAll();
         _conversations = allConvsAgent;
         notifyListeners();
@@ -8382,6 +8652,8 @@ $base
       notifyListeners();
       // 如果命名後 _currentConversation 已經更新（標題被改），用最新的寫入
       await ConversationStore.save(_currentConversation ?? updatedConv);
+      // [觸發線 2026-11-17] 小隊回覆落檔→回報卡插母對話（同上，先插卡再重抓列表）
+      await _maybeEmitSquadReportCard();
       final allConvs = await ConversationStore.getAll();
       _conversations = allConvs;
       notifyListeners();

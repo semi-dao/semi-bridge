@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 
 import '../brain_container/brain_database.dart';
 import '../brain_container/embedding/embedding_service.dart';
+import '../brain_container/memory_provenance_service.dart'; // [小葵 2026-11-11] 出處簽章守門
 
 class AgentMemoryBackfillService {
   AgentMemoryBackfillService._();
@@ -28,10 +29,11 @@ class AgentMemoryBackfillService {
     if (_running) return;
     final db = BrainDatabase.instance.db;
 
-    final pending = db.select(
-      "SELECT id, title, content FROM agent_memories "
+    final pendingResultSet = db.select(
+      "SELECT id, title, content, owner_companion_id, provenance_sig FROM agent_memories "
       "WHERE (embedding IS NULL OR length(embedding) = 0) AND is_archived = 0",
     );
+    var pending = List.of(pendingResultSet);
     if (pending.isEmpty) {
       debugPrint('[AgentMemBackfill] 無待辦');
       return;
@@ -46,6 +48,32 @@ class AgentMemoryBackfillService {
 
     _running = true;
     debugPrint('[AgentMemBackfill] 開始：${pending.length} 筆 agent 記憶待嵌入');
+
+    // [小葵 2026-11-11 出處簽章守門] 無章條目不嵌入——斷「App 幫外部植入
+    // 記憶洗白成可語意召回」的路。爺爺條款（backfillGrandfathered）在
+    // 啟動鏈跑過後，正常記憶都有章。
+    await MemoryProvenanceService.instance.ensureReady();
+    if (MemoryProvenanceService.instance.isVerifyReady) {
+      final before = pending.length;
+      pending = pending.where((r) {
+        return MemoryProvenanceService.instance.verify(
+          r['id'] as String,
+          (r['title'] as String?) ?? '',
+          (r['owner_companion_id'] as String?) ?? 'shared',
+          r['provenance_sig'] as String?,
+        );
+      }).toList();
+      final blocked = before - pending.length;
+      if (blocked > 0) {
+        debugPrint('[AgentMemBackfill] ⚠️ 擋下 $blocked 筆無章記憶（不嵌入）');
+      }
+      if (pending.isEmpty) {
+        debugPrint('[AgentMemBackfill] 全部被出處簽章擋下——中止');
+        progress.value = '';
+        _running = false;
+        return;
+      }
+    }
 
     // [教練 Agent 2026-08-21] #11 model_version 守門員：brain_meta 記錄上次
     // 嵌入用的模型版本，版本不符 → 中止（防新舊混用污染語義空間）。

@@ -90,7 +90,12 @@
 | 主題設定 | `screens/desktop/settings/theme_settings_page.dart` | 主題包切換 |
 | 記憶系統 | `services/memory_store.dart` + `services/memory_recall_service.dart` | 長期記憶 |
 | Bridge Action 執行 | `services/bridge_action_executor.dart` | 動作卡片執行 |
-| 預審/Vision 審查 | `services/semi_dao_visual_review_service.dart` + `openai_visual_review_adapter.dart` | 圖片安全審查 prompt 在 adapter 的 `_systemPrompt()` |
+| 預審/Vision 審查 | `services/semi_dao_visual_review_service.dart` + `openai_vision_review_adapter.dart` | 圖片安全審查 prompt 在 adapter 的 `_systemPrompt()` |
+| 手機版：22 格骨牌輪播 | `services/mobile/carousel/domino_engine.dart` | 純函數。SPEC §7。22 格＝1440÷(720/11)；k=11 正午完美對齊（**1-indexed**）；配比 13:8 由 sha256(YYYYMMDD‖k) 排序取前 13；空池降級 |
+| 手機版：配對 QR payload 解析 | `services/mobile/pairing/qr_payload_parser.dart` | 純函數。SPEC §6.1 **埠真相源＝QR payload，禁 hardcode 8790**。缺 port／非法 port／scheme 錯 → 一律 `QrPayloadException`（寧紅字不猜預設） |
+| 手機版：出門連線三層樓梯 | `services/mobile/connection/connection_ladder.dart` | 純函數。SPEC §6.2。`LadderTier{direct,relay,offline}`＋`ConnectionLadder.evaluate()`；第 1 層同網直連**永遠優先** |
+| 手機版：APNs 輸出濾網 | `services/mobile/push/apns_output_filter.dart` | 純函數。SPEC §7 推播拍板 A＋紅隊 #17。`pushNotificationText(text, confidentialTerms)` 比對機密層實體清單，命中即降級為固定文案「有新報告，請開 App 查看」；正規化含全形→半形、繁→簡、剝分隔符、千分位/頓號/連字號、大小寫、中文數字別名 |
+| 手機版：APNs 推播發送器 | `services/mobile/push/apns_push_sender.dart` | **送出前必過濾網的唯一入口**（紅隊 #1）。`ApnsPushSender.send()` 內部先濾網再交 `ApnsTransport`；繞過濾網的路徑不存在。傳輸層抽象——真機接 APNs 憑證簽章（S4） |
 
 ---
 
@@ -583,6 +588,9 @@ grep -rn "方法名(" lib/
 | 全量重嵌成果被蓋掉（identity 2680→愈跑愈少） | 7 個背景 backfill 服務把 `embed_source` 蓋回 `'content'`——多寫入者對同一欄位所有權沒定 | embed_source 單調升級鏈：NULL/filename→metadata→content→identity；backfill 守門 `NOT IN ('content','identity')`。新增任何會寫 embed_source 的服務必須遵守（2026-09-09, 42c3b995） |
 | 語意搜尋 SQL 參數順序錯→掃描 0 筆 | `vector_full_scan(vec, k)` 的 k 吃到 bool 旗標變 0；SQL `?` 順序≠參數列順序 | 參數序＝SQL 文字中 ? 出現順序：vector→k→旗標→LIMIT（hybrid_search_service.dart，2026-09-09） |
 | 搬家記憶語意搜尋永遠 0 筆（embedding 在但查不到） | 三斷點疊加：① `vector_init` 沒 init `agent_memories`（per-connection，與鐵三角 #3 同死法）② HybridSearchService 只掃 memories 表 ③ agent_memories.id 是 TEXT 不能 `ON m.id = v.rowid` | ① kAgentVectorInitSql 每連線必跑 ② `_searchAgentMemoriesSemantic` 接進 semantic+hybrid 兩路 ③ `ON m.rowid = v.rowid`。**新表要被 vector_full_scan 掃，三件事都要做**（hybrid_search_service.dart + brain_schema_sql.dart，2026-09-21, 1a59387a） |
+| 手機版骨牌 k 值 0-indexed vs 1-indexed 差一格 | 草稿 `docs/drill2/T1_骨牌hash_test.dart` 用 0-indexed（k=11 hero、k=21 跨日），正式實作 `domino_engine.dart` 是 1-indexed（k=11 正午完美對齊、k=22 跨日） | 一律以正式實作為準（**1-indexed**）；寫測試前先讀實作確認索引基準，別照抄草稿的 k 值（2026-11-09 工蜂E） |
+| `DateTime(y,m,d,h,m,s,x)` 第 7 個參數是**毫秒**不是微秒 | Dart 的 `DateTime` 建構子第 7 位是 `millisecond`，第 8 位才是 `microsecond`；寫 7 位會把 727273 當毫秒 → 差 11 分 47 秒 | 寫微秒要用 8 位 `DateTime(2026,11,8,22,54,32,727,273)`；或直接比對實作回傳值別手刻（2026-11-09 工蜂E） |
+| 手機版埠真相源：缺 port 別回填 8790 | SPEC §6.1 禁 hardcode；回填預設埠＝把猜測當真相（會連到錯的主機） | 一律用 `QrPayloadParser.parseQrPayload()`，缺 port／非數字／越界／scheme 錯 → `QrPayloadException`（2026-11-09 工蜂E） |
 
 ---
 
@@ -593,6 +601,7 @@ grep -rn "方法名(" lib/
 | 2026-09-08 | **搜尋引擎統一（S4 Blue 統一令）**：新增 `VaultSearchFacade` 單一真相，全域搜尋與 vault 全模式改打它；羅盤新增規則 `search.singleEngine`（禁另建搜尋路徑）。全域搜尋 S1-S3：常駐面板＋狀態保留＋四動作（vault/galaxy/畫布/對話） | 小葵 |
 | 2026-08-14 | 初版建立 | 教練 Agent |
 | 2026-08-14 | 補完夥伴設定頁面 + 全部 screens/ 頁面到快速導航 | 教練 Agent |
+| 2026-11-09 | **手機版純函數三模組入地圖**（蜂群演習二 Wave 2）：`services/mobile/carousel/domino_engine.dart`（22 格骨牌）、`services/mobile/pairing/qr_payload_parser.dart`（埠真相源＝QR）、`services/mobile/connection/connection_ladder.dart`（出門三層樓梯）。三者皆純函數、可直接 unit test；對應測試在 `test/mobile/` | 工蜂E |
 | 2026-08-14 | 新增陷阱：編輯夥伴改文字→形象圖消失 | 教練 Agent |
 
 
@@ -645,7 +654,7 @@ grep -rn "方法名(" lib/
 
 ## 開光 v0.4.x 完全體（2026-10-01 下午）
 - app_tap confirm=true 真點：**handlePointerEvent** 完整 lifecycle（hitTest→pointer router→gesture arena）。
-- app_tap button=secondary 右鍵（2026-10-31 收編）：PointerDown/UpEvent kind=mouse + buttons=kSecondaryButton → GestureDetector.onSecondaryTapUp。驗證彈出選單全走官方通道，Swift CGEvent 只留作 App 卡死時的 OS 級救生艇。
+- app_tap button=secondary 右鍵（2026-10-31 收編）：PointerDown/UpEvent kind=mouse + buttons=kSecondaryButton → GestureDetector.onSecondaryTapUp。驗證彈出選單全走官方通道，Swift CGEvent 只留作 App 卡死時的 OS 級救生艇（cliclick 無輔助權限；app_view 截圖會干擾暫態彈窗——驗選單用系統 screencapture）。
   ⚠️ 陷阱：直接 handleEvent 給 hit path 繞過 arena——42 層收到事件但 GestureDetector.onTap 不響
 - app_look target=screen：Swift captureScreen（CGWindowListCreateImage CGRect.null 全螢幕）
   → 暫存 → Dart base64 → 即刪。⚠️ sandbox 內 screencapture 子進程被 TCC 擋（app_permissions 可查）
@@ -671,3 +680,20 @@ grep -rn "方法名(" lib/
   finish 就永生（UI 進度條永凍）。修：progressAt 戳+30min 殭屍清理
 - 診斷三板斧：import_progress（後台真相）+ DB 直查（index_status 分佈）
   + app_look（UI 現場）——三邊對照即知「UI 謊報 vs 工作真掛」
+
+## 診斷黑盒子（2026-10-31 自救三刀·刀二）
+- 想改「flight recorder／診斷報告」→ `lib/services/system/diagnostic_box.dart`
+  （DiagnosticBox 單例；ring buffer 200 條；App Support/diagnostic_box.jsonl
+  append-only，>1MB 輪替 .1 僅一份）
+- 寫入唯一入口＝`DiagnosticBox.instance.log(kind, detail)`——寫入前自動消毒
+  （路徑只到根目錄層、token 遮蔽；資料主權紅線）
+- kind 慣例：lifecycle / safe_mode（刀一待接線）/ crash_log_tail（啟動時自動收
+  /tmp/bridge_ui_crash.log 尾端）/ auto_ingest（待主線接線）/ circuit_breaker
+  （刀三待接線）/ memory
+- 匯出鏈：系統頁 DiagnosticCard（watchdog_toggle_card 下方）→ exportToFile
+  （file_picker 選位置，fallback ~/Desktop/bridge-diagnostic-<時間>.md）
+- MCP：`diagnostic_report` 工具（schema＋dispatch case 成對，回白話 summary
+  ＋技術 events）——小橋在 Safe Mode 下讀自己的黑盒子跟使用者白話解釋
+- ⚠️ 陷阱：黑盒子所有 I/O 都包 try-catch——黑盒子故障不得拖垮 App、不得變成
+  新的崩潰源；測試一律用 `DiagnosticBox.forTest(tmp)` 注入目錄，絕不碰真 App Support
+

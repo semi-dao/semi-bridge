@@ -1,0 +1,35 @@
+# 橋樑第 3 層中繼——一鍵自架（SPEC §6.3）
+#
+# 用法：
+#   1. VPS 上裝 Docker
+#   2. `docker compose up -d`
+#   3. 記下 VPS 位址（例如 relay.example.com）——配對時填入
+#
+# 外側 TLS：Caddy 自動 Let's Encrypt（把 RELAY_DOMAIN 換成你的網域；
+# 沒有網域就用純 TCP 模式——註解掉 caddy 段，直接 expose 8791）
+
+services:
+  relay:
+    build: .
+    restart: unless-stopped
+    networks: [inner]
+    # 純 TCP 模式（無 TLS，適合內網測試或已有前端 TLS）：
+    # ports: ["8791:8791"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [relay]
+    ports: ["443:443"]
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?請設定 RELAY_DOMAIN=你的網域}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks: [inner]
+
+networks:
+  inner:
+
+volumes:
+  caddy_data:

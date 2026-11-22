@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 import 'controllers/chat_controller.dart';
 import 'services/system/daemon_client.dart';
 import 'services/system/tray_service.dart'; // [隊友訊息流 C7]
+import 'widgets/safe_mode_banner.dart'; // [小葵 2026-10-31 Safe Mode 刀一] 黃色橫幅
 import 'services/bridge_mcp_server.dart';
 import 'state/theme_provider.dart';
 import 'state/typography_scale_provider.dart';
@@ -25,6 +26,7 @@ import 'screens/desktop_summon_screen.dart';
 import 'screens/slot_management_screen.dart'; // [無限插槽 C2 2026-10-06 移植]
 import 'screens/lock_screen.dart';
 import 'screens/mobile_bridge_pairing_screen.dart';
+import 'screens/mobile_home_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/first_summon_screen.dart';
 import 'screens/capability_center_screen.dart'; // [教練 Agent 2026-08-01] 能力中心
@@ -47,6 +49,7 @@ import 'services/compass/compass_heartbeat.dart';
 import 'services/life_tree/dream_scheduler.dart';
 import 'services/compass/compass_models.dart' show CompassHealth, OrganHealthEvidence;
 import 'services/compass/compass_store.dart';
+import 'services/compass/decision_card_store.dart'; // [小葵 2026-11-03] 待決策卡
 import 'services/brain_container/brain_database.dart'; // [教練 Agent 2026-07-22] Phase 1 ③ DB 路徑
 import 'services/brain_container/embedding/embedding_model_manager.dart';
 import 'services/onboarding/onboarding_flow.dart'; // [教練 Agent 2026-07-22] Phase 1 ③ 安裝精靈
@@ -66,7 +69,10 @@ import '../theme/bridge_design_system.dart';
 
 /// 平台感知：桌面平台（macOS/Windows/Linux）用桌面入口
 /// [教練 Agent 2026-08-10] 手機版正式宣告刪除——所有平台一律走桌面流程
+/// [S4 2026-11-09 手機版復活] 恢復平台分流：iOS/Android 走手機流程
+/// （Link 真機側載後發現 iOS 被迫進桌面 UI——排版錯亂＋鍵盤亂跳的根源）
 bool get _isDesktopPlatform {
+  if (Platform.isIOS || Platform.isAndroid) return false;
   return true;
 }
 
@@ -203,7 +209,9 @@ Future<bool> showD002ConfirmationDialog({
 
 // [Phase 0 2026-07-17] 桌面版初始路徑改為偵測流程
 final _router = GoRouter(
-  initialLocation: '/desktop-welcome', // [2026-08-10] 手機版刪除，一律桌面入口
+  // [S4 2026-11-09 手機版復活] iOS/Android 起始頁＝手機首頁（配對動線起點）
+  initialLocation:
+      _isDesktopPlatform ? '/desktop-welcome' : '/mobile-home',
   redirect: (context, state) async {
     // 桌面平台：偵測流程（Key → Companion → Desktop）
     final path = state.uri.path;
@@ -277,6 +285,16 @@ final _router = GoRouter(
     GoRoute(
       path: '/bridge-desktop',
       builder: (context, state) => const BridgeDesktopScreen(),
+    ),
+    // [S1 2026-11-09 復活] 手機版配對頁掛回路由（殘檔復用，SPEC v0.5 §6.1）
+    GoRoute(
+      path: '/mobile-pairing',
+      builder: (context, state) => const MobileBridgePairingScreen(),
+    ),
+    // [S3/S1 UI 接線] 手機首頁——骨牌輪播＋離線誠實視圖
+    GoRoute(
+      path: '/mobile-home',
+      builder: (context, state) => const MobileHomeScreen(),
     ),
     GoRoute(
       path: '/settings',
@@ -458,8 +476,13 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
     // [教練 Agent S21f 2026-07-09] 大腦容器初始化：先 bootstrap EmbeddingModelManager，
     // 再 initialize BrainContainerService。bootstrap 會檢查已安裝的模型並載入。
     _bootstrapBrainContainer();
+    // [小葵 2026-10-31 黑盒子合流] CrashGuard→DiagnosticBox 事件橋已上移
+    // main()（啟動最早時機，Safe Mode 判定事件才來得及入盒）——此處不重複接。
+    // [小葵 2026-10-31 Safe Mode 刀一] 正常關閉（detached）清 heartbeat——
+    // 觀察器本體在 main() 掛（最早時機），這裡不重複掛。
     // [教練 Agent S20] Skills 系統初始化（非同步，不阻擋 UI）
     _initializeSkills();
+    // 觸發 stateStream 更新（讓設定頁 UI 即時刷新）
     // [教練 Agent 2026-07-25] 向量資料庫 — 載入持久化的資料夾清單 + manifest
     AssetSandbox().loadFromPrefs().then((_) {
       AssetIndexService().loadManifests();
@@ -516,6 +539,19 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
         if (controller == null) return;
         await controller.openOrCreateProactiveSession();
         await controller.injectAssistantMessage(content, metadata: metadata);
+        // [小葵 2026-11-03 待決策卡閉環] 開話綁卡——卡與 session 一對一，
+        // agent 查卡可循 conversation_id 找回線；fail-quiet 不擋注入。
+        try {
+          final convId = controller.currentConversation?.id;
+          if (convId != null) {
+            final cards = DecisionCardStore.instance.unresolvedCards();
+            for (final c in cards) {
+              if (c.conversationId == null) {
+                DecisionCardStore.instance.bindConversation(c.id, convId);
+              }
+            }
+          }
+        } catch (_) {}
       };
       unawaited(CompassSpeaker.instance.flushQueue());
     });
@@ -729,7 +765,14 @@ class _BridgeAppState extends State<BridgeApp> with WindowListener {
                         // TrayService 退出確認框（全域 Overlay，不依賴頁面）
                         builder: (context, child) {
                           _tray.setRootContext(context);
-                          return child ?? const SizedBox.shrink();
+                          // [小葵 2026-10-31 Safe Mode 刀一] 黃色橫幅掛在
+                          // 最頂層——所有頁面（含歡迎頁）都看得到，明顯但不擋操作
+                          return Column(
+                            children: [
+                              const SafeModeBanner(),
+                              Expanded(child: child ?? const SizedBox.shrink()),
+                            ],
+                          );
                         },
                         locale: const Locale('zh', 'TW'),
                         supportedLocales: const [

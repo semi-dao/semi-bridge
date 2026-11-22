@@ -289,6 +289,7 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
   }
 
   /// 工作卡——一行一個：名稱＋時間，冷靜有效率
+  /// [SPEC §8.6 2026-11-12] 前次成敗標記（寧紅字不假成功）
   Widget _buildWorkRow(ScheduleCard c) {
     final ds = BridgeDSColors.of(context);
     return Padding(
@@ -299,7 +300,9 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
             width: 5,
             height: 5,
             decoration: BoxDecoration(
-                shape: BoxShape.circle, color: ds.textQuaternary),
+                shape: BoxShape.circle,
+                // 失敗=紅燈；成功/無紀錄=中性灰
+                color: c.lastRunOk ? ds.textQuaternary : ds.accentRed),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -308,6 +311,18 @@ class _ProjectKanbanBoardState extends State<ProjectKanbanBoard> {
                 overflow: TextOverflow.ellipsis,
                 style: TierStyle.of(context, Tier.listItemMeta).toTextStyle()),
           ),
+          if (!c.lastRunOk)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Tooltip(
+                message: c.lastRunError ?? '前次執行失敗',
+                waitDuration: const Duration(milliseconds: 400),
+                child: Text('✗ 前次失敗',
+                    style: TierStyle.of(context, Tier.cardCaption)
+                        .toTextStyle()
+                        .copyWith(color: ds.accentRed)),
+              ),
+            ),
           Text(c.humanSchedule,
               style: TierStyle.of(context, Tier.cardCaption)
                   .toTextStyle()
@@ -639,6 +654,7 @@ class _HoverCard extends StatefulWidget {
   final VoidCallback? onTap;
   final Widget child;
 
+  // [2026-11-12] lint 修：private widget 無 key 呼叫端——還原原狀（info 是既有）
   _HoverCard({
     required this.accentColor,
     required this.onTap,

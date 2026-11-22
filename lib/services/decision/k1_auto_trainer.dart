@@ -81,10 +81,15 @@ class K1AutoTrainer {
   static Map<String, dynamic> _scan(Database causal, Database brain) {
     {
       // 1. 有反應的 turn（校準訊號）
+      // [K1卡選項C·管線刀 2026-11-03] 排除 compass_ 假 turn——羅盤開口
+      // 事件的 turn（compass.speak 落帳）不是對話輪，掛在上面的 accepted
+      // 反應是主動回應 session 的全域 fallback 誤配對，永遠配不上 K1
+      // 真判斷，只是灌水配對池（屍檢：136 反應中大量掛 compass_ 前綴）。
       final reacted = <String, String>{};
       for (final row in brain.select(
           "SELECT ref_turn_id, user_reaction FROM event_ledger "
-          "WHERE kind='reaction' AND ref_turn_id IS NOT NULL")) {
+          "WHERE kind='reaction' AND ref_turn_id IS NOT NULL "
+          "AND ref_turn_id NOT LIKE 'compass_%'")) {
         reacted[row['ref_turn_id'] as String] = (row['user_reaction'] ?? '') as String;
       }
       // 2. K1 記帳配對
@@ -102,6 +107,8 @@ class K1AutoTrainer {
         if (entry.value != 'accepted') continue;
         final intervention = byTurn[entry.key];
         if (intervention == null) continue;
+        // [K1卡選項C·管線刀] failopen 不是判斷是保險——不進樣本。
+        if (intervention.contains('escalate_failopen')) continue;
         final isNeed = intervention.contains('need_memory_lookup');
         byLabel[isNeed ? 'need' : 'no'] =
             (byLabel[isNeed ? 'need' : 'no'] ?? 0) + 1;
@@ -175,10 +182,13 @@ class K1AutoTrainer {
   @visibleForTesting
   static String? buildLabelsJsonlForTest(Database causal, Database brain) {
     {
+      // [K1卡選項C·管線刀] 與 _scan 同款過濾——compass_ 假 turn 反應
+      // 不進訓練集；escalate_failopen 保險樣本不進訓練集。
       final reacted = <String, String>{};
       for (final row in brain.select(
           "SELECT ref_turn_id, user_reaction FROM event_ledger "
-          "WHERE kind='reaction' AND ref_turn_id IS NOT NULL")) {
+          "WHERE kind='reaction' AND ref_turn_id IS NOT NULL "
+          "AND ref_turn_id NOT LIKE 'compass_%'")) {
         reacted[row['ref_turn_id'] as String] = (row['user_reaction'] ?? '') as String;
       }
       final buf = StringBuffer();
@@ -191,9 +201,10 @@ class K1AutoTrainer {
         final reaction = reacted[tid];
         if (reaction != 'accepted') continue; // 只收 accepted
         final intervention = (row['intervention'] ?? '') as String;
+        if (intervention.contains('escalate_failopen')) continue; // 保險非判斷
         final digest = (row['context_digest'] ?? '') as String;
         // 抽「使用者最新訊息：」之後的文本當訓練 text
-        final m = RegExp('使用者最新訊息：(.*)', multiLine: false)
+        final m = RegExp(r'使用者最新訊息：\s*(.+)', dotAll: true)
             .firstMatch(digest);
         if (m == null) continue;
         final text = m.group(1)!.trim();

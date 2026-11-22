@@ -17,6 +17,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:bridge_app/services/brain_container/brain_database.dart';
 import 'package:bridge_app/services/brain_container/embedding/embedding_service.dart';
+import 'package:bridge_app/services/brain_container/memory_provenance_service.dart'; // [小葵 2026-11-11] 出處簽章
 
 class HermesLosslessImporter {
   HermesLosslessImporter({
@@ -264,11 +265,14 @@ class HermesLosslessImporter {
         for (var j = 0; j < v.length; j++) {
           embView.setFloat32(j * 4, v[j], Endian.little);
         }
+        // [小葵 2026-11-11 出處簽章] 匯入即簽（ importer 是合法寫入點）
+        final provSig = await MemoryProvenanceService.instance
+            .sign(id, title, companionId);
         database.db.execute(
           'INSERT INTO agent_memories '
           '(id, title, content, tags, memory_type, embedding, '
-          'created_at, is_archived, owner_companion_id) '
-          'VALUES (?, ?, ?, ?, ?, ?, datetime(?, \'unixepoch\'), 0, ?)',
+          'created_at, is_archived, owner_companion_id, provenance_sig) '
+          'VALUES (?, ?, ?, ?, ?, ?, datetime(?, \'unixepoch\'), 0, ?, ?)',
           [
             id,
             title,
@@ -278,6 +282,7 @@ class HermesLosslessImporter {
             embBytes,
             (double.parse(d.timestamp)).round(),
             companionId,
+            provSig,
           ],
         );
         written++;

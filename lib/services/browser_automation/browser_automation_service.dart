@@ -11,6 +11,7 @@ import 'package:puppeteer/puppeteer.dart';
 
 import '../../models/browser_automation/browser_task.dart';
 import '../desktop_bridge_gateway_protocol.dart';
+import '../desktop_bridge_local_gateway.dart' show ConfirmationRegistry;
 
 /// 登入/付款頁面偵測結果。
 enum _PageType {
@@ -39,6 +40,12 @@ class BrowserAutomationService implements GatewayTaskHandler {
 
   /// 進行中的任務（taskId → cancel flag）
   final Map<String, bool> _cancelledTasks = {};
+
+  /// [S1 2026-10-31 補鏈] 拍板喚醒登記簿——可選注入。
+  /// null 時沿用 v1 行為（awaiting 即結束）；注入後暫停等拍板。
+  final ConfirmationRegistry? confirmationRegistry;
+
+  BrowserAutomationService({this.confirmationRegistry});
 
   // ─────────────────────────────────────────────────────────
   // GatewayTaskHandler 實作
@@ -186,13 +193,31 @@ class BrowserAutomationService implements GatewayTaskHandler {
         'url': url,
         'pageType': pageType.name,
       });
-      // 暫停 — 等待使用者確認（v1: 任務在此結束，使用者重新發送確認後繼續）
-      onComplete(true, {
-        'url': url,
-        'pageType': pageType.name,
-        'status': 'awaiting_confirmation',
-      }, null);
-      return;
+      // [S1 2026-10-31 補鏈] 不再「任務在此結束」——登記暫停等拍板：
+      // approve → 繼續往下跑；reject/逾時（5 分鐘）→ 以 awaiting-rejected 收場。
+      // registry 由 TaskQueue 建構時注入（S1 接線見 task_queue.dart）。
+      if (confirmationRegistry != null) {
+        final suspender = confirmationRegistry!.suspend(taskId);
+        suspender.setTimeout(const Duration(minutes: 5));
+        final approved = await suspender.future;
+        if (!approved) {
+          onComplete(true, {
+            'url': url,
+            'pageType': pageType.name,
+            'status': 'awaiting_rejected',
+          }, null);
+          return;
+        }
+        onProgress(0.5, '已批准，繼續執行...');
+      } else {
+        // 無 registry（獨立使用/測試）——沿用 v1 行為：到此結束
+        onComplete(true, {
+          'url': url,
+          'pageType': pageType.name,
+          'status': 'awaiting_confirmation',
+        }, null);
+        return;
+      }
     }
 
     onProgress(0.9, '頁面載入完成');

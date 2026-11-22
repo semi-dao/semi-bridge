@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Bridge App</string>
+	<string>Link</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -37,7 +37,10 @@
 	<string>橋樑需要語音辨識權限，將你的自然語言輸入轉成文字。</string>
 	<!-- [小葵 Sprint 15a] QR 掃描需要相機權限 -->
 	<key>NSCameraUsageDescription</key>
-	<string>橋樑需要使用相機掃描 QR 碼，連接桌面配對。</string>
+	<string>Link 需要使用相機掃描 QR 碼，連接桌面配對。</string>
+	<!-- [S4 2026-11-09] 本地網路權限——手機連桌面 gateway（8790）必需，缺了 iOS 14+ 靜默擋 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Link 需要存取本地網路，與你電腦上的橋樑桌面版連線配對。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

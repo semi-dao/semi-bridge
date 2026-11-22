@@ -37,6 +37,7 @@ import '../../services/onboarding_detector.dart';
 import '../../services/agent_loop/mcp_canvas_tools.dart'; // [Phase 0 Track A 2026-07-17]
 import '../../services/local_model_runtime_service.dart'; // [教練 Agent 2026-08-14] resolveShortModelName
 import '../../theme/bridge_design_system.dart';
+import '../../theme/bridge_motion.dart'; // [2026-11-21 章魚光呼吸樹] BridgeBreathLine
 import '../../widgets/chat/agent_model_selector.dart';
 // ── Voice AI 引擎 + handler ──
 import '../chat/handlers/chat_tts_handler.dart';
@@ -58,6 +59,7 @@ import '../../widgets/voice/voice_button.dart';
 import '../../widgets/voice/voice_status_indicator.dart';
 import '../../widgets/chat/message_context_menu.dart';
 import '../../theme/tier.dart';
+import '../../utils/conversation_tree.dart';
 import '../../theme/tier_style.dart';
 
 class DesktopChatPanel extends StatefulWidget {
@@ -324,17 +326,10 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
               // [小葵 2026-10-05 Blue 令] 中間觀察直進對話泡泡——
               // 「使用者看到這樣的文字會很高興，而且會想要繼續看下去」。
               // 過程即內容：不用等全部結論，分析邊跑邊讀。
-              // 防重複：內容夠長（>24 字）才值得進泡泡；同一輪只推一次。
-              if (snippet.length > 24 && snippet != _lastBubbleSnippet) {
-                _lastBubbleSnippet = snippet;
-                _controller.injectAssistantMessage(
-                  snippet,
-                  metadata: {
-                    'kind': 'loop_observation',
-                    'turn': turnIndex + 1,
-                  },
-                );
-              }
+              // [2026-11-05 搬家] 注入改在 chat_controller 層（頁面切走
+              // 不丟訊息——Blue 抓包泡泡斷流）。UI 端只渲染 loop log；
+              // 泡泡由 controller 的 injectAssistantMessage 落檔後
+              // notifyListeners 自然長出來（mounted 時）。
             }
             if (toolName != null) {
               _pushLoopLog(
@@ -2631,15 +2626,19 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
                     ),
                   )
                 : ListView.builder(
-                    itemCount: conversations.length + 1, // +1 = 回收桶列
+                    // [SPEC §9.2 對話頁v2 步驟2] 樹狀展開：頂層對話在前，
+                    // 子對話（parentConversationId 非空）緊跟其母之後縮排。
+                    // 孤兒（母不在清單）視為頂層，不丟失。
+                    itemCount: _treeOrderedConversations.length + 1, // +1 = 回收桶列
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     itemBuilder: (context, index) {
-                      if (index == conversations.length) {
+                      if (index == _treeOrderedConversations.length) {
                         return _buildTrashEntry(); // [小葵 2026-09-21] 回收桶（Blue 選 A）
                       }
-                      final conv = conversations[index];
+                      final conv = _treeOrderedConversations[index];
                       final isActive = conv.id == currentId;
-                      return _buildConversationItem(conv, isActive);
+                      final depth = _conversationDepth(conv);
+                      return _buildConversationItem(conv, isActive, depth: depth);
                     },
                   ),
           ),
@@ -2648,57 +2647,115 @@ class _DesktopChatPanelState extends State<DesktopChatPanel> {
     );
   }
 
-  Widget _buildConversationItem(Conversation conv, bool isActive) {
+  /// [SPEC §9.2] 樹狀展開（共用 util：lib/utils/conversation_tree.dart，
+  /// 測試鎖定於 test/desktop_conversation_tree_test.dart）
+  List<Conversation> get _treeOrderedConversations =>
+      ConversationTree.order(_controller.conversations);
+
+  int _conversationDepth(Conversation conv) =>
+      ConversationTree.depthOf(conv, _controller.conversations);
+
+  Widget _buildConversationItem(Conversation conv, bool isActive, {int depth = 0}) {
+    final ds = BridgeDSColors.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _controller.switchConversation(conv),
+        // [2026-11-21 章魚光呼吸樹] 子對話左緣呼吸脊線（2px accentBlue，
+        // 與手機端同款 BridgeBreathLine：2800ms 章魚光呼吸、12fps ticker、
+        // reduced-motion 常亮降級。sidebar 每列各掛一顆——元件級 ticker 極輕
+        // （GPU 預算 ≤5% 內），不需 list 級共用 controller）。
+        // 縮排（每層 +14px，上限 3 層）＋ ↳ 前綴語意不變。
+        child: depth > 0
+            ? IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.only(
+                          left: (depth.clamp(0, 3) * 14).toDouble()),
+                      child: const BridgeBreathLine(width: 2),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                        child: _conversationItemBody(conv, isActive, ds, depth)),
+                  ],
+                ),
+              )
+            : _conversationItemBody(conv, isActive, ds, depth),
+      ),
+    );
+  }
+
+  /// sidebar 列內容本體（呼吸脊線以外部分）：標題（↳ 前綴）＋小隊狀態＋預覽。
+  Widget _conversationItemBody(
+      Conversation conv, bool isActive, BridgeDSColors ds, int depth) {
     final lastMsg = conv.messages.isNotEmpty
         ? conv.messages.last.content
         : '（空對話）';
     final lastMsgPreview = lastMsg.length > 40
         ? '${lastMsg.substring(0, 40)}…'
         : lastMsg;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
+    // [SPEC §9 小隊狀態燈] squad 子對話：預覽行前綴「[狀態] 」，
+    // 狀態判定走純函式 ConversationTree.squadStatus（非 squad 回空字串→不顯示）
+    final squadStatusText = ConversationTree.squadStatus(conv);
+    final Color statusColor = switch (squadStatusText) {
+      '待命' => ds.textMuted,
+      '待回覆' => ds.accentBlue,
+      '已回報' => ds.accentGreen, // 成功語意色（tagSuccess 系，無獨立 success token）
+      '已回覆' => ds.textSecondary,
+      _ => ds.textMuted,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isActive ? ds.surfaceElevated : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
-        onTap: () => _controller.switchConversation(conv),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: isActive
-                ? BridgeDSColors.of(context).surfaceElevated
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            depth > 0
+                ? '↳ ${conv.title.isNotEmpty ? conv.title : '未命名對話'}'
+                : (conv.title.isNotEmpty ? conv.title : '未命名對話'),
+            style: TierStyle.of(context, Tier.cardBody)
+                .toTextStyle()
+                .copyWith(
+                  color: isActive ? ds.textPrimary : ds.textSecondary,
+                  fontWeight:
+                      isActive ? FontWeight.w600 : FontWeight.normal,
+                ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                conv.title.isNotEmpty ? conv.title : '未命名對話',
-                style: TierStyle.of(context, Tier.cardBody)
-                    .toTextStyle()
-                    .copyWith(
-                      color: isActive
-                          ? BridgeDSColors.of(context).textPrimary
-                          : BridgeDSColors.of(context).textSecondary,
-                      fontWeight: isActive
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              SizedBox(height: 2),
-              Text(
-                lastMsgPreview,
-                style: TierStyle.of(context, Tier.cardBody)
-                    .toTextStyle()
-                    .copyWith(color: BridgeDSColors.of(context).textMuted),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
+          const SizedBox(height: 2),
+          Text.rich(
+            TextSpan(
+              children: [
+                if (squadStatusText.isNotEmpty)
+                  TextSpan(
+                    text: '[$squadStatusText] ',
+                    style: TierStyle.of(context, Tier.cardBody)
+                        .toTextStyle()
+                        .copyWith(
+                          color: statusColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                TextSpan(
+                  text: lastMsgPreview,
+                  style: TierStyle.of(context, Tier.cardBody)
+                      .toTextStyle()
+                      .copyWith(color: ds.textMuted),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-        ),
+        ],
       ),
     );
   }

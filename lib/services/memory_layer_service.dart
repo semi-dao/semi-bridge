@@ -17,6 +17,8 @@ import 'package:flutter/foundation.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import 'brain_container/brain_database.dart';
+import 'brain_container/memory_provenance_service.dart'; // [小葵 2026-11-11] 出處簽章
+import 'belief_gate.dart'; // [小葵 2026-10-14 M3] L4 信念證據門檻
 
 /// 層的定義——單一真相源
 enum MemoryLayer {
@@ -87,22 +89,42 @@ class MemoryLayerService {
   }
 
   /// 寫入（帶層）——append-only，回傳 id
-  String write({
+  /// [小葵 2026-10-14 M3] L4 信念證據門檻：寫 L4 前先過 BeliefGate
+  /// （≥3 次一致證據；manualOverride 直通）。其他層不設限。
+  /// 拒絕時 throw BeliefGateRejectedError（呼叫端可捕獲降級寫 L7 專案冷存）。
+  Future<String> write({
     required MemoryLayer layer,
     required String title,
     required String content,
     String? tags,
     String? memoryType,
     String owner = 'shared',
-  }) {
+    bool manualOverride = false,
+  }) async {
     final db = _db;
     if (db == null) throw StateError('brain db not open');
+    if (layer == MemoryLayer.l4Environment && !manualOverride) {
+      final verdict = await BeliefGate.instance
+          .checkL4(assertion: '$title $content', manualOverride: false);
+      if (!verdict.allowed) {
+        debugPrint('[MemoryLayer] L4 寫入被 BeliefGate 拒：'
+            '證據 ${verdict.evidenceCount}/3（$title）');
+        throw BeliefGateRejectedError(verdict);
+      }
+    }
     final id = 'mem_${DateTime.now().microsecondsSinceEpoch}';
     db.execute('''
       INSERT INTO agent_memories
         (id, title, content, tags, memory_type, layer, owner_companion_id, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ''', [id, title, content, tags, memoryType ?? layer.code.toLowerCase(), layer.code, owner]);
+    // [小葵 2026-11-11 出處簽章] 寫入即簽（async 函式內直接 await）
+    final sig = await MemoryProvenanceService.instance
+        .sign(id, title, owner);
+    if (sig != null) {
+      db.execute('UPDATE agent_memories SET provenance_sig = ? WHERE id = ?',
+          [sig, id]);
+    }
     return id;
   }
 
@@ -226,6 +248,7 @@ class MemoryLayerService {
       JOIN agent_memories_fts f ON f.rowid = m.rowid
       WHERE agent_memories_fts MATCH ? AND m.is_archived = 0
         AND m.layer IN ('L4','L5','L6','L7','L8','L9','L10')
+        AND m.provenance_sig IS NOT NULL -- [小葵 2026-11-11] 出處簽章過濾
       LIMIT ?
     ''', [query, limit]);
     return [

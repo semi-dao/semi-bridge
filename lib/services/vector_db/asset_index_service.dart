@@ -14,7 +14,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'asset_sandbox.dart';
@@ -28,6 +27,7 @@ import '../brain_container/embedding/embedding_service.dart';
 import '../brain_container/asset_content_reembed_service.dart'; // [小葵 2026-08-28] 新檔導入後內容補嵌
 import 'vision_embedding_pipeline.dart';
 import 'vector_sketch_service.dart'; // [小葵 2026-10-14] fastScan junk 跳過（isJunkFolder 共用）
+import 'ingest_circuit_breaker.dart'; // [小葵 2026-10-31 熔斷器] 刀三兩道閘
 
 /// 檔案類型
 enum AssetKind {
@@ -117,46 +117,6 @@ class AssetRecord {
   };
 }
 
-/// 結構化蒸餾結果
-/// Cerebras Knowledge 證明：結構化蒸餾比純文字摘要更有用
-class DistilledContent {
-  final String summary;        // 一行摘要
-  final List<String> keywords; // 關鍵詞
-  final String? resolution;    // 解決方案（如有）
-  final List<String> systems;  // 相關系統/工具
-
-  const DistilledContent({
-    required this.summary,
-    this.keywords = const [],
-    this.resolution,
-    this.systems = const [],
-  });
-
-  /// 合併成一個文字（用於 embedding）
-  String toEmbeddingText() {
-    final parts = <String>[summary];
-    if (keywords.isNotEmpty) parts.addAll(keywords);
-    if (resolution != null) parts.add(resolution!);
-    if (systems.isNotEmpty) parts.addAll(systems);
-    return parts.join(' ');
-  }
-
-  /// 用於存入 summary 欄位的文字
-  String toSummaryText() {
-    final parts = <String>[summary];
-    if (keywords.isNotEmpty) {
-      parts.add('關鍵詞: ${keywords.join(', ')}');
-    }
-    if (systems.isNotEmpty) {
-      parts.add('系統: ${systems.join(', ')}');
-    }
-    if (resolution != null) {
-      parts.add('解決: $resolution');
-    }
-    return parts.join(' | ');
-  }
-}
-
 /// 掃描結果
 class ScanResult {
   final int totalFiles;
@@ -164,6 +124,9 @@ class ScanResult {
   final int updatedFiles;
   final int skippedFiles;
   final int excludedFiles;
+  /// [小葵 2026-11-18 Blue 報案死縮圖] fastScan 掃到已不存在於磁碟的檔案數
+  /// （已從 manifest 移除＋DB 標 missing）——呼叫端據此推播手機刷新。
+  final int removedFiles;
   final List<AssetRecord> records;
   final Duration elapsed;
 
@@ -173,6 +136,7 @@ class ScanResult {
     required this.updatedFiles,
     required this.skippedFiles,
     required this.excludedFiles,
+    this.removedFiles = 0,
     required this.records,
     required this.elapsed,
   });
@@ -350,6 +314,21 @@ class FastScanHints {
 /// - 基本索引（檔名、類型、大小，不含 embedding）
 class AssetIndexService {
   static final AssetIndexService _instance = AssetIndexService._();
+
+  // [SPEC §8.5c 2026-11-13] vault 變動通知流——watcher/fastScan 發現新檔
+  // 即廣播（gateway 訂閱後推播手機；手機自動重抓——免重啟免下拉）
+  final StreamController<Map<String, dynamic>> _vaultChangedController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get vaultChanged => _vaultChangedController.stream;
+  void _notifyVaultChanged(int newFiles, int updatedFiles) {
+    if (_vaultChangedController.hasListener) {
+      _vaultChangedController.add({
+        'newFiles': newFiles,
+        'updatedFiles': updatedFiles,
+        'at': DateTime.now().toIso8601String(),
+      });
+    }
+  }
   factory AssetIndexService() => _instance;
   AssetIndexService._();
 
@@ -541,13 +520,31 @@ class AssetIndexService {
     await _sandbox.ensureBridgeDir(root);
 
     // 掃描目錄
-    await _scanDirectory(
-      Directory(root),
-      root,
-      records,
-      manifestFiles,
-      depth: 0,
-    );
+    // [小葵 2026-10-31 熔斷器] 閘 A——單輪量異常時 _scanDirectory 拋
+    // ScanAbortedException。熔斷 = 「這輪沒掃完」：必須把本輪剛 persist
+    // 的樹指紋從記憶體 map 與 DB 移除，否則下輪指紋一致直接跳過、
+    // 檔案永遠掃不進去（熔斷的隱形後遺症）。清完指紋後 rethrow，
+    // 由 IncrementalIngestService 攔截進 circuit-open。
+    try {
+      await _scanDirectory(
+        Directory(root),
+        root,
+        records,
+        manifestFiles,
+        depth: 0,
+      );
+    } on ScanAbortedException {
+      _lastTreeFingerprints.remove(root);
+      try {
+        final db = BrainDatabase.instance.db;
+        db.execute(
+          'DELETE FROM brain_meta WHERE key = ?',
+          ['$_fpKeyPrefix$_stablePathHash(root)'],
+        );
+      } catch (_) {/* DB 未初始化（如手動匯入路徑）——記憶體清了就夠 */}
+      debugPrint('[AssetIndex] ⚡ 熔斷 ($root)：已清除本輪指紋，待明確重試');
+      rethrow;
+    }
 
     // 更新 manifest
     final now = DateTime.now().toIso8601String();
@@ -560,14 +557,17 @@ class AssetIndexService {
 
     // [教練 Agent 2026-07-28] 保留已嵌入檔案的 embedding 標記
     // 建立舊檔案的 path → embedding 查找表
+    // [小葵 2026-10-30 刀4-H2] 殺 O(n²)——舊寫法迴圈內 indexOf(mf) 在
+    // 62k 檔規模 = 3.8B 次比較（掃描卡的暗樁）。改索引迴圈，語意不變。
     final oldEmbeddingMap = <String, bool>{};
     for (final f in _manifest.files.where((f) => f.folder == root)) {
       oldEmbeddingMap[f.path] = f.embedding;
     }
     // 如果新掃描的檔案在舊 manifest 裡已有 embedding=true，保留它
-    for (final mf in manifestFiles) {
+    for (var i = 0; i < manifestFiles.length; i++) {
+      final mf = manifestFiles[i];
       if (oldEmbeddingMap[mf.path] == true) {
-        manifestFiles[manifestFiles.indexOf(mf)] = ManifestFile(
+        manifestFiles[i] = ManifestFile(
           path: mf.path,
           folder: mf.folder,
           hash: mf.hash,
@@ -642,6 +642,13 @@ class AssetIndexService {
     debugPrint('[AssetIndex] 完整掃描完成 ($root): '
         '${records.length} 檔案, ${stopwatch.elapsedMilliseconds}ms');
 
+    // [小葵 2026-10-30 刀4-H2] 掃描緩衝釋放——records/manifestFiles 全樹拷貝
+    // 在 _writeRecordsToDb（已入 DB）與死鏈對帳（已完成）後即無內部用途。
+    // manifest 建構已消費完 manifestFiles；records 保留給 ScanResult 回傳
+    //（tree_fingerprint_test 鎖定此行為；唯一呼叫端，量大時呼叫端自行丟棄）。
+    // 內部不再於回傳後引用（無欄位持有）→ 函式返回即 GC 可回收。
+    manifestFiles.clear();
+
     return ScanResult(
       totalFiles: records.length,
       newFiles: records.length,
@@ -662,7 +669,11 @@ class AssetIndexService {
     var newCount = 0;
     var updatedCount = 0;
     var skippedCount = 0;
+    var removedCount = 0;
     final records = <AssetRecord>[];
+    // [小葵 2026-11-18 Blue 報案死縮圖] 死檔清場——本輪要從 manifest 拔掉的路徑
+    final deadPaths = <String>{}; // key: 'root/relPath'
+    final deadRoots = <String>{}; // 有死檔的 root（事後 _saveManifest 用）
 
     for (final root in _sandbox.rootPaths) {
       // 檢查 manifest 裡的檔案
@@ -682,7 +693,15 @@ class AssetIndexService {
         final file = File(fullPath);
 
         if (!await file.exists()) {
-          // 檔案被刪除了，標記為離線（不刪記錄）
+          // [小葵 2026-11-18 Blue 報案死縮圖] 檔案已被刪除——原版只 continue，
+          // 註解宣稱「標記為離線」實際什麼都沒做 → 死檔永躺 manifest →
+          // vaultList 照列 → 手機縮圖陰魂不散（點了才發現檔案不存在）。
+          // 修：①從 manifest 拔掉（列表/輪播池即刻乾淨）②DB 標 index_status=
+          // 'missing'（與 fullScan L610 死鏈標記同一語意——向量身份保留，
+          // 搬家對帳可救回，行為等價刪除）。
+          deadPaths.add(fullPath);
+          deadRoots.add(root);
+          removedCount++;
           continue;
         }
 
@@ -719,6 +738,43 @@ class AssetIndexService {
       }
     }
 
+    // [小葵 2026-11-18 Blue 報案死縮圖] 死檔落刀——manifest 拔除＋DB 標 missing。
+    if (deadPaths.isNotEmpty) {
+      _manifest = VectorDbManifest(
+        folders: _manifest.folders,
+        files: _manifest.files
+            .where((f) => !deadPaths.contains('${f.folder}/${f.path}'))
+            .toList(),
+        fastScanHints: _manifest.fastScanHints,
+      );
+      try {
+        for (final root in deadRoots) {
+          await _saveManifest(root);
+        }
+      } catch (e) {
+        debugPrint('[AssetIndex] 死檔 manifest 落盤失敗: $e');
+      }
+      try {
+        final db = BrainDatabase.instance.db;
+        for (final fullPath in deadPaths) {
+          final root = deadRoots.firstWhere(
+            (r) => fullPath.startsWith('$r/'),
+            orElse: () => deadRoots.first,
+          );
+          final relPath = fullPath.substring(root.length + 1);
+          db.execute(
+            "UPDATE asset_index SET index_status = 'missing' "
+            "WHERE file_path = ? AND folder_root = ?",
+            [relPath, root],
+          );
+        }
+        debugPrint('[AssetIndex] fastScan 死檔清場: $removedCount 筆 → '
+            'manifest 移除＋DB missing（搬家對帳可救回，向量不埋葬）');
+      } catch (e) {
+        debugPrint('[AssetIndex] 死檔 DB 標記失敗: $e');
+      }
+    }
+
     stopwatch.stop();
     debugPrint('[AssetIndex] 快速掃描完成: '
         '$newCount 新, $updatedCount 更新, $skippedCount 跳過, '
@@ -730,6 +786,7 @@ class AssetIndexService {
       updatedFiles: updatedCount,
       skippedFiles: skippedCount,
       excludedFiles: 0,
+      removedFiles: removedCount,
       records: records,
       elapsed: stopwatch.elapsed,
     );
@@ -825,6 +882,15 @@ class AssetIndexService {
   }) async {
     if (depth > 20) return; // 安全限制
 
+    // [小葵 2026-10-31 熔斷器] 刀三閘 A——遞迴進場先檢查：本輪已累積的
+    // records 超過單輪上限，立刻停手。10-30 暴衝案教訓：遞迴全掃
+    // 62,726 筆 → heap 83GB → jetsam。寧可暫停，不可暴衝。
+    IngestCircuitBreaker.instance.loadLimits();
+    final scanLimit = IngestCircuitBreaker.instance.limits.scanMaxRecords;
+    if (records.length >= scanLimit) {
+      throw ScanAbortedException(root, records.length, scanLimit);
+    }
+
     try {
       await for (final entity in dir.list(followLinks: false)) {
         final name = p.basename(entity.path);
@@ -851,6 +917,13 @@ class AssetIndexService {
           final record = _buildRecord(entity, root, stat);
           records.add(record);
 
+          // [小葵 2026-10-31 熔斷器] 閘 A 觸發點——每收一筆檢查天花板。
+          // 例外必須穿遞迴、穿下方的 catch-all：呼叫端（fullScan）
+          // 用 `on ScanAbortedException` 單獨攔截 rethrow。
+          if (records.length >= scanLimit) {
+            throw ScanAbortedException(root, records.length, scanLimit);
+          }
+
           final manifestFile = ManifestFile(
             path: p.relative(entity.path, from: root),
             folder: root,
@@ -863,6 +936,9 @@ class AssetIndexService {
           manifestFiles.add(manifestFile);
         }
       }
+    } on ScanAbortedException {
+      // [小葵 2026-10-31 熔斷器] 熔斷訊號絕不吞——穿透所有遞迴層
+      rethrow;
     } catch (e) {
       debugPrint('[AssetIndex] 掃描目錄失敗 (${dir.path}): $e');
     }
@@ -1119,182 +1195,10 @@ class AssetIndexService {
   // Phase 3：Embedding 生成
   // ═══════════════════════════════════════════════════
 
-  /// 用本地 Gemma 模型蒸餾文字內容
-  /// Cerebras Knowledge 證明：embed 蒸餾後的摘要比 embed 原文準確度高
-  /// 蒸餾結果：一行摘要 + 關鍵詞（用於 embedding）
-  Future<String> _distillText(String rawText, String fileName) async {
-    const endpoint = 'http://127.0.0.1:18789/v1/chat/completions';
-
-    // 截斷原始文字（避免超出模型 context）
-    final truncated = rawText.length > 4000
-        ? rawText.substring(0, 4000)
-        : rawText;
-
-    final prompt = '請閱讀以下檔案內容，生成一行摘要（50字以內）和3-5個關鍵詞，用空格分隔。'
-        '只輸出摘要和關鍵詞，不要其他文字。\n\n'
-        '檔名: $fileName\n'
-        '內容:\n$truncated';
-
-    try {
-      final response = await Dio().post(
-        endpoint,
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          sendTimeout: const Duration(seconds: 30),
-          receiveTimeout: const Duration(seconds: 30),
-        ),
-        data: {
-          'model': 'gemma-4-e4b',
-          'messages': [
-            {'role': 'user', 'content': prompt},
-          ],
-          'stream': false,
-          'max_tokens': 200,
-          'temperature': 0.2,
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = response.data as Map<String, dynamic>;
-        final distilled = data['choices']?[0]?['message']?['content'] as String? ?? '';
-        if (distilled.trim().isNotEmpty) {
-          return distilled.trim();
-        }
-      }
-    } catch (e) {
-      debugPrint('[AssetIndex] 蒸餾失敗，fallback 到原文: $e');
-    }
-
-    // fallback: 用截斷的原文
-    return rawText.length > 8000 ? rawText.substring(0, 8000) : rawText;
-  }
-
-  /// 結構化蒸餾 — 用本地 Gemma 提取結構化資訊
-  /// Cerebras Knowledge 證明：結構化蒸餾比純文字摘要更有用
-  /// 返回：摘要 + 關鍵詞 + 解決方案 + 相關系統
-  Future<DistilledContent> _distillStructured(String rawText, String fileName) async {
-    const endpoint = 'http://127.0.0.1:18789/v1/chat/completions';
-
-    final truncated = rawText.length > 4000
-        ? rawText.substring(0, 4000)
-        : rawText;
-
-    final prompt = '請分析以下檔案內容，提取結構化資訊。'
-        '用 JSON 格式回答，格式如下：\n'
-        '{"summary": "一行摘要(50字內)", "keywords": ["關鍵詞1", "關鍵詞2"], '
-        '"resolution": "解決方案(如有)", "systems": ["相關系統1"]}\n'
-        '只輸出 JSON，不要其他文字。\n\n'
-        '檔名: $fileName\n'
-        '內容:\n$truncated';
-
-    try {
-      final response = await Dio().post(
-        endpoint,
-        options: Options(
-          headers: {'Content-Type': 'application/json'},
-          sendTimeout: const Duration(seconds: 30),
-          receiveTimeout: const Duration(seconds: 30),
-        ),
-        data: {
-          'model': 'gemma-4-e4b',
-          'messages': [
-            {'role': 'user', 'content': prompt},
-          ],
-          'stream': false,
-          'max_tokens': 300,
-          'temperature': 0.2,
-        },
-      );
-
-      if (response.statusCode == 200) {
-        final data = response.data as Map<String, dynamic>;
-        final text = data['choices']?[0]?['message']?['content'] as String? ?? '';
-
-        // 嘗試解析 JSON
-        final json = _parseJsonFromLLM(text);
-        if (json != null) {
-          return DistilledContent(
-            summary: json['summary'] as String? ?? rawText.substring(0, rawText.length > 50 ? 50 : rawText.length),
-            keywords: (json['keywords'] as List?)?.map((e) => e.toString()).toList() ?? [],
-            resolution: json['resolution'] as String?,
-            systems: (json['systems'] as List?)?.map((e) => e.toString()).toList() ?? [],
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('[AssetIndex] 結構化蒸餾失敗，fallback 到純文字: $e');
-    }
-
-    // fallback: 用純文字蒸餾
-    final fallbackText = await _distillText(rawText, fileName);
-    return DistilledContent(summary: fallbackText);
-  }
-
-  /// 從 LLM 回應中解析 JSON（容忍 markdown code block 包裹）
-  Map<String, dynamic>? _parseJsonFromLLM(String text) {
-    var cleaned = text.trim();
-
-    // 移除 markdown code block
-    if (cleaned.startsWith('```')) {
-      cleaned = cleaned.replaceAll(RegExp(r'^```\w*\n?'), '').replaceAll(RegExp(r'\n?```$'), '');
-    }
-
-    try {
-      return jsonDecode(cleaned) as Map<String, dynamic>;
-    } catch (_) {
-      // 嘗試找到第一個 { 和最後一個 }
-      final start = cleaned.indexOf('{');
-      final end = cleaned.lastIndexOf('}');
-      if (start >= 0 && end > start) {
-        try {
-          return jsonDecode(cleaned.substring(start, end + 1)) as Map<String, dynamic>;
-        } catch (_) {}
-      }
-      return null;
-    }
-  }
-
-  /// 按標題切分 Markdown 文字
-  /// Cerebras Knowledge 警告：固定字數截斷會破壞語意完整性
-  /// 按 ## / ### 標題切分，每個 section 獨立處理
-  List<String> _chunkByHeadings(String text) {
-    // 如果文字不長（<3000字），不需要切分
-    if (text.length < 3000) return [text];
-
-    final lines = text.split('\n');
-    final chunks = <String>[];
-    final currentChunk = <String>[];
-
-    for (final line in lines) {
-      // 偵測標題行：# / ## / ### / ####
-      final isHeading = RegExp(r'^#{1,4}\s').hasMatch(line);
-
-      if (isHeading && currentChunk.isNotEmpty) {
-        // 遇到新標題 → 把之前的 chunk 存起來
-        final chunk = currentChunk.join('\n').trim();
-        if (chunk.isNotEmpty) {
-          chunks.add(chunk);
-        }
-        currentChunk.clear();
-      }
-
-      currentChunk.add(line);
-    }
-
-    // 最後一個 chunk
-    final lastChunk = currentChunk.join('\n').trim();
-    if (lastChunk.isNotEmpty) {
-      chunks.add(lastChunk);
-    }
-
-    // 如果切分後只有 1 個 chunk（沒有標題），且文字太長 → 回退到固定截斷
-    if (chunks.length <= 1) {
-      return [text.length > 8000 ? text.substring(0, 8000) : text];
-    }
-
-    // 每個 chunk 如果超過 8000 字還是要截斷
-    return chunks.map((c) => c.length > 8000 ? c.substring(0, 8000) : c).toList();
-  }
+  // [小葵 2026-10-30 死代碼清理] _distillText/_distillStructured/
+  // _parseJsonFromLLM/_chunkByHeadings/DistilledContent 已刪——
+  // 6272e506「架構收斂」拔掉呼叫端後殘留（Cerebras Knowledge 時代
+  // e841c1ec 產物）。_computeFileHash 仍活躍，保留。
 
   /// 計算檔案 SHA256 hash（用於增量更新比對）
   Future<String?> _computeFileHash(File file) async {
@@ -1347,79 +1251,96 @@ class AssetIndexService {
     // （DB 有 50,836 筆但 manifest 只有 ~21,855），且 manifest.embedding 標記不可靠
     // 改為：DB index_status='pending' 的直接納入嵌入佇列
     final db = BrainDatabase.instance.db;
-    
-    // 從 DB 取 pending 檔案的路徑集合
-    final pendingDbPaths = <String>{};
+
+    // [小葵 2026-10-30 刀4-H1] SQL 下推——單一候選集查詢取代 5 個全表
+    // Set + manifest 全量過濾。舊結構（pendingDbPaths/embeddedPaths/
+    // identityPaths/failedPaths/manifestPaths 五個全表 Set，各數萬筆字串）
+    // 在 62k 檔規模下全程釘在 heap 數小時；新查詢結果有界於「真正待嵌
+    // 的列數」，無人重試時 = 0 行。語意等價：
+    //   - index_status='pending' → 納入（無論 manifest 標記）
+    //   - identity 終態 → 排除（2026-09-30 根修）
+    //   - error/skipped/missing 失敗終態 → 排除（刀4-H4）
+    //   - indexed/embedded → 排除（已嵌）
+    //   - 兩者皆非（無列）→ manifest.embedding=false 且非終態 → 納入（舊邏輯相容）
+    final sql = '''
+      SELECT a.file_path, a.folder_root
+      FROM asset_index a
+      WHERE (a.index_status = 'pending'
+             OR a.index_status IS NULL
+             OR a.index_status = '')
+        AND COALESCE(a.embed_source, '') != 'identity'
+        AND COALESCE(a.index_status, '') NOT IN ('error', 'skipped', 'missing')
+        AND NOT EXISTS (
+          SELECT 1 FROM asset_index b
+          WHERE b.file_path = a.file_path
+            AND b.index_status IN ('indexed', 'embedded')
+        )
+    ''';
+    List<Map<String, dynamic>> candidates;
+    var candidateCount = 0;
     try {
-      final rows = db.select(
-        "SELECT file_path FROM asset_index WHERE index_status = 'pending'",
-      );
-      for (final row in rows) {
-        pendingDbPaths.add(row['file_path'] as String);
-      }
-      debugPrint('[AssetIndex] DB pending: ${pendingDbPaths.length} 筆');
+      final rows = db.select(sql);
+      candidateCount = rows.length;
+      candidates = rows.map((r) => {
+            'path': r['file_path'] as String,
+            'folder': r['folder_root'] as String? ?? '',
+          }).toList();
+      debugPrint('[AssetIndex] DB 候選集（SQL 下推）: $candidateCount 筆');
     } catch (e) {
-      debugPrint('[AssetIndex] 查詢 pending 失敗: $e');
+      debugPrint('[AssetIndex] 候選集查詢失敗（回退 manifest 過濾）: $e');
+      candidates = const [];
     }
 
-    // 同時保留 manifest 裡 embedding=false 的（相容舊邏輯）
-    final embeddedPaths = <String>{};
-    try {
-      final rows = db.select(
-        "SELECT file_path FROM asset_index WHERE index_status IN ('indexed', 'embedded')",
+    // manifest 補集：manifest.embedding=false 但 DB 無列（掃描後尚未寫入）的
+    // 新檔。走 manifest 迭代但不建全表 Set——逐筆查 DB（掃尾路徑，量小）。
+    var pendingFiles = <ManifestFile>[];
+    for (final mf in _manifest.files) {
+      if (rootPath != null && mf.folder != rootPath) continue;
+      if (mf.embedding) continue;
+      // DB 已有列且非 pending → 已由 SQL 候選集處理或屬終態 → 跳過
+      final inCandidates = candidates.any((c) => c['path'] == mf.path);
+      if (inCandidates) continue;
+      final status = db.select(
+        'SELECT index_status FROM asset_index WHERE file_path = ?',
+        [mf.path],
       );
-      for (final row in rows) {
-        embeddedPaths.add(row['file_path'] as String);
-      }
-    } catch (_) {}
-
-    // [小葵 2026-09-30 根修] identity = 終態：已是身份嵌入的檔案一律跳過。
-    // 慘案：generateEmbeddings 把 manifest.embedding=false 的舊檔重嵌成
-    // embed_source='content'，把 IdentityReembed 做好的身份嵌入整批覆蓋
-    //（2026-09-30 實證：identity 6802→4148、content 281→2946，兩個任務互相踩）。
-    final identityPaths = <String>{};
-    try {
-      final rows = db.select(
-        "SELECT file_path FROM asset_index WHERE embed_source = 'identity'",
-      );
-      for (final row in rows) {
-        identityPaths.add(row['file_path'] as String);
-      }
-    } catch (_) {}
-
-    var pendingFiles = _manifest.files.where((mf) {
-      if (rootPath != null && mf.folder != rootPath) return false;
-      // [小葵 2026-09-30] identity 終態保護——絕不重嵌（身份嵌入是檢索升級 v2 的成果）
-      if (identityPaths.contains(mf.path)) return false;
-      // [教練 Agent 2026-08-02] DB pending 的檔案直接納入，不管 manifest.embedding
-      if (pendingDbPaths.contains(mf.path)) return true;
-      // manifest 裡 embedding=false 且 DB 也不是 indexed 的也納入
-      if (mf.embedding) return false;
-      if (embeddedPaths.contains(mf.path)) return false;
-      return true;
-    }).toList();
-
-    // [教練 Agent 2026-08-02] 補充：DB 裡 pending 但 manifest 不認識的檔案
-    // 這些檔案可能是之前匯入但 manifest 已重建
-    final manifestPaths = _manifest.files.map((mf) => mf.path).toSet();
-    for (final dbPath in pendingDbPaths) {
-      if (!manifestPaths.contains(dbPath)) {
-        // 從 DB 補一個 ManifestFile（需要 folder + path 拆分）
-        final lastSlash = dbPath.lastIndexOf('/');
-        final folder = lastSlash > 0 ? dbPath.substring(0, lastSlash) : '/';
-        pendingFiles.add(ManifestFile(
-          folder: folder,
-          path: dbPath,
-          size: 0,
-          modified: 0,
-          hash: '',
-          embedding: false,
-        ));
-      }
+      if (status.isNotEmpty) continue; // 有列非 pending → 非本輪對象
+      pendingFiles.add(mf);
     }
+    // SQL 候選集 → ManifestFile（folder 從 folder_root 取）
+    for (final c in candidates) {
+      final folder = c['folder'] as String;
+      pendingFiles.add(ManifestFile(
+        folder: folder,
+        path: c['path'] as String,
+        size: 0,
+        modified: 0,
+        hash: '',
+        embedding: false,
+      ));
+    }
+    // 去重（manifest 補集與 SQL 候選集理論上不重疊，防禦性）
+    pendingFiles = pendingFiles.toSet().toList();
 
     debugPrint('[AssetIndex] pendingFiles total: ${pendingFiles.length} '
-        '(manifest: ${_manifest.files.length}, DB pending: ${pendingDbPaths.length})');
+        '(manifest: ${_manifest.files.length}, DB 候選: $candidateCount)');
+
+    // [小葵 2026-10-31 熔斷器] 閘 B——嵌入佇列熔斷。pending 數超過上限 →
+    // 拒跑本輪（return 0）、開嵌入熔斷旗標。防的是 10-30 案第二階段暴衝：
+    // 索引已吃進去的垃圾讓嵌入循環慢慢燒（embed_audit 爆 4,976 筆/日）。
+    // 復位只能靠 resetCircuits()（明確重試）——週期兜底不自動重試。
+    IngestCircuitBreaker.instance.loadLimits();
+    if (IngestCircuitBreaker.instance.embedCircuitOpen) {
+      debugPrint('[AssetIndex] ⚡ 嵌入熔斷中——本輪跳過（待明確重試 resetCircuits）');
+      return 0;
+    }
+    final embedLimit = IngestCircuitBreaker.instance.limits.embedMaxPending;
+    if (pendingFiles.length > embedLimit) {
+      IngestCircuitBreaker.instance.tripEmbed(pendingFiles.length);
+      debugPrint('[AssetIndex] ⚡ 閘 B 熔斷：pending ${pendingFiles.length} > 上限 $embedLimit');
+      return 0;
+    }
+
 
     // [教練 Agent 2026-07-31] 排序：文字類優先（秒完），圖片/影片排後面
     pendingFiles.sort((a, b) {
@@ -1498,9 +1419,17 @@ class AssetIndexService {
     var done = 0;
     var success = 0;
 
+    // [小葵 2026-10-30 刀4-H5] 逐檔 debugPrint 降頻——Flutter debugPrintThrottled
+    // 排空固定 ~12KB/100ms，嵌入循環每秒數十行時產速>排速，佇列字串在
+    // Dart heap 無限累積（Debug build 純只進不出）。改每 50 筆一行彙總＋
+    // 尾筆收尾。tracker.updateFile 照舊（UI 進度不受影響）。
+    const logEvery = 50;
+
     for (final mf in filesToEmbed) {
       // ── 進度可見：每個檔案開始時更新 tracker ──
-      debugPrint('[AssetIndex] 📄 處理中 $done/${filesToEmbed.length}: ${mf.path}');
+      if (done % logEvery == 0) {
+        debugPrint('[AssetIndex] 📄 處理中 $done/${filesToEmbed.length}');
+      }
       tracker.updateFile(
         done: done,
         total: filesToEmbed.length,
@@ -1568,7 +1497,9 @@ class AssetIndexService {
                DateTime.now().millisecondsSinceEpoch, mf.path],
             );
           }
-          debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length}: ${mf.path} (PDF)');
+          if (done % logEvery == 0) {
+            debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length} (PDF)');
+          }
 
         } else if (isTextFile) {
           // ── 文字類：讀取 → 直接 embed → 存 DB ──
@@ -1646,7 +1577,9 @@ class AssetIndexService {
           );
 
           success++;
-          debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length}: ${mf.path} (文字)');
+          if (done % logEvery == 0) {
+            debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length} (文字)');
+          }
 
         } else if (isImage || isVideo) {
           // ── 圖片/影片：VisionPipeline 解析 → embed 描述 ──
@@ -1657,7 +1590,9 @@ class AssetIndexService {
             fileExt: '.$ext',
           );
           if (result) success++;
-          debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length}: ${mf.path} (${isImage ? "圖片" : "影片"})');
+          if (done % logEvery == 0) {
+            debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length} (${isImage ? "圖片" : "影片"})');
+          }
           // [F2] 視覺資產進度（VisionPipeline 逐張）
           BackgroundTaskRegistry.instance.update(BackgroundTask(
             id: 'gen_embeddings', name: '檔案嵌入',
@@ -1694,11 +1629,15 @@ class AssetIndexService {
           );
 
           success++;
-          debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length}: ${mf.path} (其他)');
+          if (done % logEvery == 0) {
+            debugPrint('[AssetIndex] ✅ $done/${filesToEmbed.length} (其他)');
+          }
         }
       } catch (e) {
         // [教練 Agent 2026-08-02] 嵌入失敗 → 標記 'skipped'（不是 error）
         // 這類檔案格式不支援或檔案損壞，不是系統錯誤，是正常的例外處理
+        // [小葵 2026-10-30 刀4-H5] 失敗 log 同步降頻（H4 修復後壞檔不重試，
+        // 此訊息僅首輪出現，保留計數即可）
         debugPrint('[AssetIndex] 檔案跳過 (${mf.path}): $e');
         try {
           db.execute(
@@ -1883,8 +1822,15 @@ class AssetIndexService {
       final result = await fastScan();
       if (result.newFiles > 0 || result.updatedFiles > 0) {
         debugPrint('[AssetIndex] 偵測到變動: ${result.newFiles} 新, ${result.updatedFiles} 更新');
+        // [§8.5c] 廣播給 gateway → 推播手機自動刷新
+        _notifyVaultChanged(result.newFiles, result.updatedFiles);
         // 有新檔案 → 自動觸發嵌入鏈（快速 → 深度）
         await autoResumeEmbedding();
+      } else if (result.removedFiles > 0) {
+        // [小葵 2026-11-18 Blue 報案死縮圖] 純刪除情境（無新增/更新）也要
+        // 推播手機——否則手機牆上縮圖陰魂不散，使用者只能手動重刷還刷不掉。
+        debugPrint('[AssetIndex] 偵測到刪除: ${result.removedFiles} 筆 → 推播手機刷新');
+        _notifyVaultChanged(0, 0);
       }
     } catch (e) {
       debugPrint('[AssetIndex] 檔案變動處理失敗: $e');

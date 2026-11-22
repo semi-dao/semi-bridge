@@ -21,6 +21,37 @@ class ConversationStore {
   /// 守門員：_writeAll 縮減列表時，磁碟上多出來的對話（不在刪除清單）
   /// 一律保留——「讀不到」永遠不等於「沒有」。
   static final Set<String> _explicitlyDeleted = {};
+
+  /// [Blue 令 2026-11-03 晚場] 跨 session 刪除墓碑——刪除是「明確意圖」，
+  /// 不能 App 一重啟就失憶（懸浮窗/其他 controller 記憶體殘影會復活被刪
+  /// 對話）。墓碑落 SharedPreferences，寫入守門員同款放行邏輯：
+  /// 墓碑裡的 id 允許從寫入結果消失，且主動擋下「復活寫入」。
+  /// 上限 200 筆（FIFO 超刪），避免無限膨脹。
+  static const String _keyDeletedTombstones = 'bridge_deleted_tombstones';
+  static int _tombstoneLoaded = 0; // 0=未載 1=已載（本 session）
+
+  static Future<Set<String>> _loadTombstones() async {
+    if (_tombstoneLoaded == 1) return _explicitlyDeleted;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_keyDeletedTombstones) ?? [];
+      _explicitlyDeleted.addAll(saved);
+    } catch (_) {}
+    _tombstoneLoaded = 1;
+    return _explicitlyDeleted;
+  }
+
+  static Future<void> _persistTombstone(String id) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _explicitlyDeleted.toList();
+      if (list.length > 200) {
+        list.removeRange(0, list.length - 200); // FIFO 保留最近 200
+      }
+      await prefs.setStringList(_keyDeletedTombstones, list);
+    } catch (_) {}
+  }
+
   static const String _keyCurrentId = 'bridge_current_conversation_id';
   static const String _storageFolderName = 'bridge_state';
   static const String _storageFileName = 'conversations.json';
@@ -100,6 +131,16 @@ class ConversationStore {
   }
 
   static Future<void> save(Conversation conversation) async {
+    // [2026-11-03 墓碑復活擋截] 已刪對話不許寫回——懸浮窗/其他 controller
+    // 記憶體殘影的 save() 會把被刪對話復活。刪除意圖（墓碑）優先於
+    // 一切殘影寫入。例外：purge 清單（restore 路徑）。
+    await _loadTombstones();
+    if (_explicitlyDeleted.contains(conversation.id)) {
+      debugPrint(
+          '[ConversationStore] ⚰️ 墓碑攔截：對話 ${conversation.id} 已被'
+          '使用者刪除，殘影寫入被擋（復活失敗）');
+      return;
+    }
     final all = await getAll();
     final index = all.indexWhere((c) => c.id == conversation.id);
 
@@ -117,6 +158,8 @@ class ConversationStore {
     // 「絕不刪對話記憶」：使用者後悔了要救得回來。
     // 落地：完整對話備份到 bridge_state/trash/（永不清理），再從現行檔移除。
     _explicitlyDeleted.add(id); // [P0] 記進本 session 刪除清單——寫入守門員放行
+    await _persistTombstone(id); // [2026-11-03] 跨 session 墓碑——重啟不失憶
+    await _loadTombstones(); // 確保載入舊墓碑（冪等）
     try {
       final conv = await getById(id);
       if (conv != null) {
@@ -182,9 +225,12 @@ class ConversationStore {
     if (!await trashFile.exists()) return false;
     final conv = Conversation.fromJson(
         jsonDecode(await trashFile.readAsString()) as Map<String, dynamic>);
+    // [2026-11-03] 救回＝撤銷墓碑（先移除再 save，否則被墓碑攔截）
+    _explicitlyDeleted.remove(id);
+    await _persistTombstone(id); // id 已移除，persist 寫入剩餘墓碑
     await save(conv);
     await trashFile.delete();
-    debugPrint('[ConversationStore] 對話 $id 已從回收桶還原');
+    debugPrint('[ConversationStore] 對話 $id 已從回收桶還原（墓碑已撤）');
     return true;
   }
 

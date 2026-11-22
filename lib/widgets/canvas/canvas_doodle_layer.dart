@@ -5,7 +5,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../theme/tier.dart';
 import '../../theme/tier_style.dart';
 import '../../theme/bridge_design_system.dart';
@@ -360,7 +359,8 @@ class _CanvasDoodleLayerState extends State<CanvasDoodleLayer> {
                 cursor: SystemMouseCursors.move,
                 child: Text(
                   t.text,
-                  style: GoogleFonts.caveat(
+                  style: TextStyle(
+                    fontFamily: 'Caveat',
                     color: t.color.withValues(alpha: 0.85),
                     fontSize: fontSize,
                     fontWeight: FontWeight.w500,
@@ -574,7 +574,8 @@ class _CanvasDoodleLayerState extends State<CanvasDoodleLayer> {
         child: TextField(
           controller: _textController,
           focusNode: _textFocus,
-          style: GoogleFonts.caveat(
+          style: TextStyle(
+                    fontFamily: 'Caveat',
             color: widget.strokeColor,
             fontSize: 18,
             fontWeight: FontWeight.w500,
@@ -798,7 +799,8 @@ class _DoodlePainter extends CustomPainter {
     final tp = TextPainter(
       text: TextSpan(
         text: t.text,
-        style: GoogleFonts.caveat(
+        style: TextStyle(
+                    fontFamily: 'Caveat',
           color: t.color.withValues(alpha: 0.85),
           fontSize: fontSize,
           fontWeight: FontWeight.w500,

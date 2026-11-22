@@ -11,9 +11,8 @@
 import 'dart:async';
 import 'dart:io';
 import '../agent_tool.dart';
-import '../../../core/dev_paths.dart';
 
-const _projectRoot = '<HOME>/Developer/bridge_app';
+const _projectRoot = '<BRIDGE_APP_ROOT>';
 
 /// 允許的指令前綴白名單
 const _allowedCommands = [
@@ -25,6 +24,10 @@ const _allowedCommands = [
   'cat',
   'ls',
   'wc',
+  // [小葵 2026-11-03 待決策卡閉環] 補 timeout——病例：agent 查 DB 用
+  // `timeout 10 sqlite3 …` 被開頭白名單連坐擋下 5 次（它其實只是想
+  // 限時防呆）。timeout 本身無害，包的指令仍要過白名單的「下一關」。
+  'timeout',
   'git status',
   'git diff',
   'git log',
@@ -69,10 +72,34 @@ class RunTerminalTool extends AgentTool {
       }
 
       // 驗證指令在白名單內
-      final isAllowed = _allowedCommands.any((c) => command.trim().startsWith(c));
+      // [小葵 2026-11-03 晚場補洞] timeout 前綴剝殼檢查——病例：小橋現場
+      // 發現 `timeout 10 sqlite3 …` 開頭是 timeout → 過白名單 → 任何指令
+      // 包一層 timeout 就能繞。修法：timeout 只是計時器外殼，剝掉外殼
+      // 與時長參數後，內層指令必須自己過白名單。
+      var checkCmd = command.trim();
+      final timeoutShell = RegExp(r'^timeout\s+([0-9]+(\.[0-9]+)?[smh]?)?\s+');
+      while (timeoutShell.hasMatch(checkCmd)) {
+        checkCmd = checkCmd.replaceFirst(timeoutShell, '');
+      }
+      final isAllowed = _allowedCommands.any((c) => checkCmd.startsWith(c));
       if (!isAllowed) {
+        // [小葵 2026-11-03 待決策卡閉環] 教材式錯誤——工具報錯要當教材
+        // 不只擋（compass_propose 案驗證有效）：告訴 agent 能用什麼代替。
+        final first = command.trim().split(RegExp(r'\s+')).first;
+        String hint = '';
+        if (first == 'sqlite3') {
+          hint = '\n提示：sqlite3 不開放（直開 DB 有寫入風險）。'
+              '替代路線：grep -o 檔案抓欄位值、find 找檔案、head/tail 看內容'
+              '（2026-11-03 病例實證這條路查得到資料）。';
+        } else if (first == 'python3' || first == 'python') {
+          hint = '\n提示：python 不在白名單。資料查證走 grep/find/head/tail，'
+              '程式修改走 patch_source_file。';
+        } else if (first == 'rm' || first == 'mv' || first == 'cp') {
+          hint = '\n提示：檔案系統寫操作不開放。程式修改走 patch_source_file。';
+        }
         return AgentToolResult.failure(
-          '指令不在白名單內。允許的指令：${_allowedCommands.join(", ")}',
+          '指令不在白名單內（$first）。允許的指令：'
+          '${_allowedCommands.join(", ")}.$hint',
         );
       }
 

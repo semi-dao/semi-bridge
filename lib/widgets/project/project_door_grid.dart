@@ -141,7 +141,8 @@ class _ProjectDoorGridState extends State<ProjectDoorGrid> {
         Row(children: [
           Icon(Icons.dashboard_outlined, size: 18, color: ds.accentYellow),
           const SizedBox(width: 8),
-          Text('🎨 畫布專案',
+          // [2026-11-12 Blue 令] 「畫布專案」→「專案任務」
+          Text('專案任務',
               style: TierStyle.of(context, Tier.cardHeroTitle).toTextStyle()),
           const SizedBox(width: 10),
           Text('我做的東西 — 被動容器 · 點擊開啟專案門',

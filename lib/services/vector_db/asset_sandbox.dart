@@ -31,6 +31,12 @@ class AssetSandbox {
   List<String> get rootPaths => List.unmodifiable(_rootPaths);
 
   /// 預設排除的目錄名稱（系統目錄、開發快取等）
+  ///
+  /// [小葵 2026-10-30 暴衝案] 加入 '04-備份'——10-29 主碟清查把 12G 模型＋
+  /// App 備份搬進 <DATA_VOLUME>/backup/，素材索引器遞迴全掃把
+  /// Chrome 快取/模型檔等 62,726 筆垃圾吃進 asset_index（brain_container.db
+  /// 膨脹到 2.4GB），embedding 循環累積 → Dart heap 暴衝 83GB → jetsam 連環
+  /// 殺 App。備份區對素材索引零價值，一體排除（指紋計算與掃描同源此清單）。
   static const defaultExcludedDirs = [
     '.bridge',
     '.git',
@@ -42,6 +48,7 @@ class AssetSandbox {
     'cache',
     '.cache',
     'Thumbs.db',
+    '04-備份',
   ];
 
   /// [教練 Agent 2026-08-21] Google Drive/雲端同步暫存目錄模式——
@@ -54,8 +61,14 @@ class AssetSandbox {
 
   /// [小葵 2026-09-09 Blue 分層令] 純垃圾檔——不索引、不入 manifest、
   /// 既有記錄清除。對使用者與 agent 都零價值。
-  /// - `Icon\r`：macOS 資料夾自訂圖示的隱形詮釋資料（實測 811 個 0B 幽靈）
   /// - `._*`：AppleDouble 檔（macOS 在非 HFS+ 碟上的資源 fork 殘骸）
+  /// - `Icon\r`：macOS 資料夾自訂圖示的資源檔（**2026-10-30 修正**——舊註解
+  ///   寫「0B 幽靈」是錯的：本體 0 byte 但掛 163,057B `com.apple.ResourceFork`，
+  ///   是真圖示不是垃圾。兇手＝Google Drive for desktop 把 <DATA_VOLUME> 當
+  ///   可串流碟並掛兩個 mirror root，開機後約 1 分鐘重物化 1,171 個。
+  ///   行為維持不變（不索引是安全的），但絕不可寫「刪 DATA 上所有 junk 檔」
+  ///   的清理腳本——那會刪掉 Blue 農場資料庫 1,171 個資料夾的圖示。
+  ///   判 junk 前必查 xattr 與資源內容，不能只看檔案本體大小。
   static bool isJunkFile(String fileName) {
     return fileName == 'Icon\r' || fileName.startsWith('._');
   }
@@ -160,6 +173,10 @@ class AssetSandbox {
   // [教練 Agent 2026-07-25] 持久化 — App 重啟後保留資料夾清單
 
   /// 從 SharedPreferences 載入資料夾清單（App 啟動時呼叫）
+  ///
+  /// [2026-11-13 手機「無法開啟」根因] sandboxed App 的 SharedPreferences 寫
+  /// 進容器域，但歷史上 roots 曾寫進 host 域（~/Library/Preferences）——兩域
+  /// 都撈，先容器後 host，聯集去重。漏讀＝vault manifest 全空＝手機全滅。
   Future<void> loadFromPrefs() async {
     _rootPaths.clear();
     try {
@@ -168,6 +185,22 @@ class AssetSandbox {
       _rootPaths.addAll(paths);
     } catch (e) {
       // SharedPreferences 不可用時靜默降級
+    }
+    // fallback：host 域（NSUserDefaults 直接讀，無需特權）
+    try {
+      final proc = await Process.run('defaults', [
+        'read', 'farm.semiwasabi.bridgeApp', 'flutter.$_prefsKey',
+      ]);
+      final out = proc.stdout.toString().trim();
+      if (out.isNotEmpty) {
+        // defaults read 印出 ("a", "b",) 格式
+        final items = RegExp(r'"([^"]+)"').allMatches(out).map((m) => m.group(1)!);
+        for (final p in items) {
+          if (!_rootPaths.contains(p)) _rootPaths.add(p);
+        }
+      }
+    } catch (_) {
+      // host 域沒有也算了
     }
   }
 

@@ -22,6 +22,51 @@ enum DesktopBridgeGatewayMessageType {
   taskComplete,
   /// 桌面 → 手機（push）：任務暫停，等待使用者確認（如偵測到登入頁）
   taskAwaitingConfirmation,
+  /// 手機 → 桌面：回覆拍板請求（approve / reject）。
+  /// [S1 2026-10-31 補鏈] 任務暫停等待確認後，手機端拍板結果經此訊息回傳，
+  /// 桌面喚醒暫停中的任務繼續執行（approve）或終止（reject）。
+  /// 對 taskAwaitingConfirmation 的每個 taskId，_confirmationResponders 持有喚醒器。
+  confirmationRespond,
+
+  // --- [SPEC §8.3 2026-11-14] 手機任務面板 ---
+  /// 手機 → 桌面：列出任務卡（排程任務）
+  taskList,
+  // --- [SPEC §8.5 2026-11-12] 手機向量資料庫 tab ---
+  /// 手機 → 桌面：列出 vault 檔案（ManifestFile 摘要，含 junk 過濾）
+  vaultList,
+  /// 手機 → 桌面：讀單一檔案內容（預覽器用——文字類全文/圖片 base64）
+  vaultFile,
+  /// [SPEC §8.5b 2026-11-13] 手機 → 桌面：語意/全文/標籤搜尋（同桌面 facade）
+  vaultSearch,
+  /// [SPEC §8.5b] 手機 → 桌面：標籤清單（FileTagStore 聯集）
+  vaultTags,
+  /// [SPEC §8.5c 2026-11-13] 桌面 → 手機推播：vault 內容變動（新檔/更新）
+  /// ——手機收到即自動重抓（免重啟免下拉；Blue 令「縮小不關」情境）
+  vaultChanged,
+  /// [SPEC 開光手機版 2026-11-13] 桌面 → 手機推播：請手機拍視網膜
+  /// （AppRetina.capture 全域 RepaintBoundary）——手機回 retinaResponse
+  retinaRequest,
+  /// [SPEC 開光手機版] 手機 → 桌面 request：視網膜照片回傳
+  /// （payload: {requestId, base64|null}）
+  retinaResponse,
+  /// [SPEC §8.2 2026-11-13 對話三層] 手機 → 桌面 request：
+  /// 對話清單（左欄三類型圓標的糧道——回所有 conversation 元資料）
+  conversationList,
+  /// [SPEC §8.2] 手機 → 桌面 request：單一對話歷史
+  /// （payload: {conversationId, limit}）
+  conversationHistory,
+  /// [SPEC §8.2] 手機 → 桌面 request：發送訊息到對話
+  /// （payload: {conversationId, role, content}）
+  conversationAppend,
+  /// [SPEC §8.6 2026-11-14] 手機 → 桌面 request：軟刪除對話
+  /// （payload: {conversationId}）
+  conversationDelete,
+
+  // --- 小隊動態推播 2026-11-17 ---
+  /// 桌面 → 手機（push）：小隊動態變動（成員開工/回報）。
+  /// payload: {parentId, event('spawned'|'reported'), squadId, at}
+  /// ——手機收到即重抓對話清單（小隊節點出現在樹上）。
+  squadChanged,
 }
 
 /// 桌面端長任務處理器介面。
@@ -166,15 +211,42 @@ class DesktopBridgeGatewayProtocol {
       DesktopBridgeGatewayMessageType.taskRun ||
       DesktopBridgeGatewayMessageType.taskCancel =>
         _error(request, 'Task requests are handled by the gateway, not the protocol.'),
+      // [SPEC §8.3 2026-11-14] taskList 同樣由 gateway 直接處理
+      DesktopBridgeGatewayMessageType.taskList =>
+        _error(request, 'Task list requests are handled by the gateway, not the protocol.'),
       // Push 類型是桌面 → 手機單向，手機不應發送
       DesktopBridgeGatewayMessageType.taskProgress ||
       DesktopBridgeGatewayMessageType.taskComplete ||
-      DesktopBridgeGatewayMessageType.taskAwaitingConfirmation =>
+      DesktopBridgeGatewayMessageType.taskAwaitingConfirmation ||
+      // [SPEC §8.5c] vaultChanged 同為 push-only（桌面→手機）
+      DesktopBridgeGatewayMessageType.vaultChanged ||
+      // [小隊動態 2026-11-17] squadChanged 同為 push-only（桌面→手機）
+      DesktopBridgeGatewayMessageType.squadChanged ||
+      // [SPEC 開光] retinaRequest 同為 push-only
+      DesktopBridgeGatewayMessageType.retinaRequest =>
         _error(request, 'Push-only message type cannot be sent from mobile.'),
+      // [S1] confirmationRespond 由 Gateway 直接處理（需要喚醒暫停任務），不走同步 protocol
+      DesktopBridgeGatewayMessageType.confirmationRespond =>
+        _error(request, 'Confirmation responses are handled by the gateway, not the protocol.'),
       DesktopBridgeGatewayMessageType.error => _error(
           request,
           'Unsupported gateway request type.',
         ),
+      // [SPEC 開光] retinaResponse 由 Gateway 直接處理（存檔），不走同步 protocol
+      DesktopBridgeGatewayMessageType.retinaResponse =>
+        _error(request, 'Retina responses are handled by the gateway, not the protocol.'),
+      // [SPEC §8.2] conversationList/conversationHistory/conversationDelete/conversationAppend 由 Gateway 直接處理
+      DesktopBridgeGatewayMessageType.conversationList ||
+      DesktopBridgeGatewayMessageType.conversationHistory ||
+      DesktopBridgeGatewayMessageType.conversationDelete ||
+      DesktopBridgeGatewayMessageType.conversationAppend =>
+        _error(request, 'Conversation requests are handled by the gateway, not the protocol.'),
+      // [SPEC §8.5] vault 請求由 Gateway 直接處理（讀磁碟），不走同步 protocol
+      DesktopBridgeGatewayMessageType.vaultList ||
+      DesktopBridgeGatewayMessageType.vaultFile ||
+      DesktopBridgeGatewayMessageType.vaultSearch ||
+      DesktopBridgeGatewayMessageType.vaultTags =>
+        _error(request, 'Vault requests are handled by the gateway, not the protocol.'),
     };
   }
 

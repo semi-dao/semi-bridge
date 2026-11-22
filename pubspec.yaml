@@ -47,6 +47,7 @@ dependencies:
   speech_to_text: ^7.4.0
   flutter_tts: ^4.2.0
   url_launcher: ^6.3.1
+  share_plus: ^11.0.0
   archive: ^4.0.9
   wakelock_plus: ^1.2.0
   image: ^4.0.0
@@ -94,7 +95,6 @@ dependency_overrides:
   # sqlite_vector 1.0.0 鎖 hooks ^1.0.0，flutter_gemma_embeddings 要 ^2.0.0。
   # hooks 2.0.0 向後相容 1.x（同為 Dart native assets build hooks 協議）。
   hooks: ^2.0.0
-  google_fonts: ^6.2.1
 
 flutter:
   uses-material-design: true
@@ -105,9 +105,16 @@ flutter:
     - assets/icons/
     - assets/theme_packs/
     - assets/companions/xiaoqiao/
-# [開源版] assets/persona/ 為私有語氣層資產，開源版不附（M2PersonaService fail-open 跳過注入）
+    - assets/persona/  # [T4① 2026-10-16 編織線] M2 語氣層——App 資產不是訓練產物（D6）
     - assets/companions/mimemi/
   fonts:
+    # [Security 2026-11-20] Caveat 打包取代 google_fonts 執行時外連（塗鴉手寫體，OFL 授權）
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Caveat-Bold.ttf
+          weight: 700
     - family: BridgeCJK
       fonts:
         # [開源整備 2026-09-21] BridgeCJK 家族改用 Noto Sans TC（SIL OFL）。

@@ -809,6 +809,9 @@ class HybridSearchService {
         "WHERE m.is_archived = 0 AND m.embedding IS NOT NULL "
         // [小葵 2026-10-15 T6/D1] 血型過濾（agent_memories 同款）
         "AND m.embed_model_version = '${EmbeddingService.eg2ModelVersion}' $ownerFilter "
+        // [小葵 2026-11-11 出處簽章] 檢索層過濾無章條目（縱深防禦——
+        // 語意召回不吐外部植入的記憶）
+        "AND m.provenance_sig IS NOT NULL "
         "ORDER BY v.distance ASC "
         "LIMIT ?",
         args,

@@ -1,7 +1,7 @@
 // H4 2026-10-08 — 排程任務卡 model
 // Hermes 43 cron jobs（28 啟用）重現為專案頁任務卡（Phase H spec §4）
 // 「生活類排程要有溫度有反饋——不是冷冰冰數據與完成燈號」
-import '../services/schedule_registry.dart';
+import 'conversation.dart';
 
 class ScheduleCard {
   final String id;
@@ -22,6 +22,15 @@ class ScheduleCard {
   /// 下次觸發（估算；once=排定時間）
   final DateTime? nextRun;
 
+  /// [SPEC §8.6 2026-11-12] 前次執行成敗（真相源=Hermes jobs.json last_status）
+  final bool lastRunOk;
+
+  /// 前次執行時間
+  final DateTime? lastRunAt;
+
+  /// 失敗原因（成功=null）
+  final String? lastRunError;
+
   const ScheduleCard({
     required this.id,
     required this.name,
@@ -30,7 +39,21 @@ class ScheduleCard {
     required this.warmth,
     this.warmLine,
     this.nextRun,
+    this.lastRunOk = true,
+    this.lastRunAt,
+    this.lastRunError,
   });
+
+  /// [SPEC §8.3/8.6] 轉 TaskCardData——任務卡出生自綁討論串用（桌面手機同源）
+  TaskCardData toTaskCardData() => TaskCardData(
+        id: id,
+        name: name,
+        kind: 'scheduled',
+        schedule: humanSchedule,
+        nextRunAt: nextRun?.toIso8601String(),
+        lastRunOk: lastRunOk,
+        lastRunError: lastRunError,
+      );
 }
 
 /// 溫度維度——生活與工作在同一面板共存的方式

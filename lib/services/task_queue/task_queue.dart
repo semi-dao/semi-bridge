@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import '../../models/task_queue/task.dart';
 import '../browser_automation/browser_automation_service.dart';
 import '../desktop_bridge_gateway_protocol.dart';
+import '../mobile/chat_relay_handler.dart';
 
 /// 任務狀態變化回呼
 typedef TaskStatusListener = void Function(Task task);
@@ -46,6 +47,8 @@ class TaskQueue implements GatewayTaskHandler {
       : _browserService = browserService {
     // 註冊 browser.* 類型
     _handlers['browser'] = _browserService;
+    // [S4 2026-11-10] 聊天直送——chat.send（手機訊息注入桌面對話）
+    _handlers['chat'] = ChatRelayHandler();
   }
 
   // ─────────────────────────────────────────────────────────

@@ -42,6 +42,7 @@ import 'agent_safety.dart'; // [D002] 工具確認
 import 'agent_tool.dart';
 import 'agent_tool_call_parser.dart';
 import 'agent_tool_registry.dart';
+import '../compass/decision_card_store.dart'; // [小葵 2026-11-03] 待決策卡三振落卡
 import 'context_store.dart' as context_store; // [Spike 002] CLM 形狀 context 管理
 import '../calibration_breaker.dart'; // [小葵 2026-10-14 M3] 校準熔斷
 import 'answer_confidence_scorer.dart'; // [T12-① D2 2026-10-17] answer_confidence 唯一寫者
@@ -203,8 +204,15 @@ class AgentLoop {
   }
 
   /// [跨輪層] 新對話/切換對話時重置 session store（舊指針作廢）。
+  /// [跨對話污染修復 2026-11-05] 一併清空插嘴 queue——queue 是 AgentLoop
+  /// 單例的成員，殘留訊息會被下一個 run（可能屬於另一個對話）drain
+  /// 進錯誤的 context。切換對話＝殘留插嘴作廢。
   void resetSessionStore() {
     _sessionStore = context_store.ContextStore();
+    if (_userMessageQueue.isNotEmpty) {
+      debugPrint('[AgentLoop] 切換對話：丟棄 ${_userMessageQueue.length} 條殘留插嘴');
+      _userMessageQueue.clear();
+    }
   }
 
   AgentLoop({required this.toolRegistry, required this.llmClient});
@@ -699,7 +707,12 @@ class AgentLoop {
 
     // [2026-07-19] 通用循環防護——連續相同工具呼叫計數器
     // 任何工具連續呼叫 >= 5 次注入 nudge，>= 10 次強制結束
+    // [Blue 令 2026-10-24 七天驗收 Day1 抓包] 10/24 修 App 超時案——
+    // 閘原本只看工具名：工程修復連跑 15 條「不同」終端指令（grep→cat→
+    // test→git）全記成同一工具連續 10 次＝誤斬。正解＝同工具＋同參數
+    // 才算真重複（死循環的定義是同動作反覆，不是同工具連用）。
     String? lastToolName;
+    String? lastToolArgsFingerprint;
     int consecutiveSameTool = 0;
 
     // [2026-07-20] 工具序列 pattern 偵測——防 A→B→A→B 交替循環
@@ -916,8 +929,13 @@ class AgentLoop {
           onStage?.call('error', detail: '連續 3 次 LLM 超時，停止重試');
           debugPrint('[AgentLoop] 連續 3 次 timeout——真結束（T10④）');
           stopwatch.stop();
+          // [小葵 2026-11-03 待決策卡閉環 3.5] 三振不斷頭——已收集的
+          // 工具證據落成一張待決策卡，使用者的等待不白費，線活著
+          // 等下輪續命（fail-quiet：開不了卡照樣誠實收場）。
+          final rescued = _rescueToDecisionCard(turns);
           return AgentLoopResult(
             reply: '我連續三次沒能收到模型的回應（超時），先停下來了。'
+                '${rescued ? '不過你問的線我已經收好證據、開成待決策卡保存——下次問我「待決策卡」就能接著談。\n\n' : ''}'
                 '這通常是模型或網路暫時有問題——稍後再試一次，'
                 '或檢查本地模型是否還在運行。',
             turns: turns,
@@ -926,7 +944,13 @@ class AgentLoop {
             elapsed: stopwatch.elapsed,
           );
         }
-        onStage?.call('timeout', detail: 'LLM 思考超時，正在調整策略...');
+        // [小葵 2026-11-03 待決策卡閉環 3.5] 聰明重試——
+        // 病例（2026-11-03）：最後一輪 context 最大（22 輪工具結果
+        // 堆疊）+ glm 強制思考 → 90s 必逾時；同 prompt 重打三次
+        // ＝註定失敗的重試。藥方：重試前先壓縮 messages——工具結果
+        // 塊截短（保留頭尾各 300 字），context 變小，重試才有可能過。
+        _compactMessagesForRetry(messages);
+        onStage?.call('timeout', detail: 'LLM 思考超時，已壓縮上下文重試…');
         // [教練 Agent 2026-07-19 使用者洞察] glm-4.6v vision model 不穩定會 hang。
         // timeout 時若 messages 有截圖，evict 掉讓下一輪回到 glm-5.2，
         // 然後注入「截圖分析超時，請用文字描述你在截圖中看到的問題」繼續 loop，
@@ -1176,11 +1200,15 @@ class AgentLoop {
       }
 
       // [2026-07-19] 通用循環防護——連續相同工具呼叫追蹤
-      if (toolCall.name == lastToolName) {
+      // [Blue 令 2026-10-24] 同工具＋同參數才算真重複（見宣告處註解）
+      final argsFingerprint = toolCall.args.toString();
+      if (toolCall.name == lastToolName &&
+          argsFingerprint == lastToolArgsFingerprint) {
         consecutiveSameTool++;
       } else {
         consecutiveSameTool = 1;
         lastToolName = toolCall.name;
+        lastToolArgsFingerprint = argsFingerprint;
       }
       if (consecutiveSameTool >= 5 && consecutiveSameTool < 10) {
         debugPrint(
@@ -1202,10 +1230,20 @@ class AgentLoop {
             '[AgentLoop] 連續呼叫 $lastToolName $consecutiveSameTool 次——真結束（T12-6）');
         onStage?.call('error', detail: '同一工具連續 10 次，強制結束');
         stopwatch.stop();
+        // [Blue 令 2026-10-24 Day1 抓包] 收場回覆自包含三要素——
+        // 不丟已完成的工作：結論（卡在哪）＋判斷線索（本次做的動作
+        // 條列）讓使用者能對帳。10/24 病例：Agent 已 commit + 改檔
+        // 三刀，收場卻只說「卡住了」＝看起來像失敗，工作全被藏掉。
+        final doneSteps = turns
+            .where((t) => t.toolCall != null)
+            .map((t) =>
+                '${t.toolCall!.name}: ${(t.toolResult?.success == true ? '✓' : '✗')}'
+                '${t.toolCall!.args.isNotEmpty ? '（${_summarizeArgs(t.toolCall!)}）' : ''}')
+            .join('\n');
         return AgentLoopResult(
-          reply: '我卡在重複使用「$lastToolName」這個動作太多次了，'
-              '先停下來。目前收集到的資訊都在——你可以直接問我特定問題，'
-              '或換個說法讓我知道你想要什麼。',
+          reply: '我在「$lastToolName」這個動作上重複太多次，先停下來。'
+              '\n\n【已完成的工作】\n$doneSteps'
+              '\n\n以上資訊都還在——你可以直接問我特定問題，或告訴我下一步。',
           turns: turns,
           hitTurnLimit: false,
           cancelled: false,
@@ -1361,6 +1399,26 @@ class AgentLoop {
       // ②失敗自動立案 pending pitfall；之後同工具成功 → 自動草擬藥方
       // 全部 fail-open，絕不影響 loop。
       if (tool != null) {
+        // [小葵 2026-11-03 晚場 刀1 卡即記憶] 工具收穫即時寫卡——
+        // 病例：17:21 小橋接手 K1 卡，卡上只有標題一行字，今早 22 次
+        // 工具挖到的證據全不在，被迫整趟重考古。修法：本對話綁有待決策
+        // 卡時，每次工具執行（成功或失敗都是過程證據）把「工具＋結果
+        // 摘要」append 進卡 body——卡從標題變工作台，任何 session 接手
+        // 都看得到。fail-quiet 絕不影響 loop。
+        try {
+          final convId = _currentConversationId;
+          if (convId != null) {
+            final card = DecisionCardStore.instance.cardForConversation(convId);
+            if (card != null) {
+              DecisionCardStore.instance.appendBody(
+                card.id,
+                '· [${DateTime.now().toIso8601String().substring(11, 19)}] '
+                    '${toolCall.name} ${toolResult.success ? '✓' : '✗'} '
+                    '${_summarizeForCard(toolCall.args, toolResult.content)}',
+              );
+            }
+          }
+        } catch (_) {}
         try {
           final toolOk = toolResult.success;
           if (!toolOk) {
@@ -1663,6 +1721,19 @@ $toolKit
   /// 只看歷史尾部——中間曾經用過同工具不算循環。
   ///
   /// 回傳 null = 沒有偵測到重複 pattern。
+  /// [Blue 令 2026-10-24] 工具參數摘要（強制結束收場的動作條列用）——
+  /// 取前兩個值的字串截 60 字，讓使用者看得出「做了什麼」不淹版面。
+  static String _summarizeArgs(dynamic toolCall) {
+    try {
+      final args = (toolCall.args as Map?)?.cast<String, dynamic>();
+      if (args == null || args.isEmpty) return '';
+      final vals = args.values.take(2).map((v) => v.toString()).join(', ');
+      return vals.length > 60 ? '${vals.substring(0, 60)}…' : vals;
+    } catch (_) {
+      return '';
+    }
+  }
+
   static _ToolPatternResult? _detectRepeatingPattern(List<String> history) {
     if (history.length < 4) return null; // 至少要 4 步才能形成 2×2 重複
 
@@ -1717,6 +1788,111 @@ $toolKit
   /// 策略：LLM 回覆加入 messages 後，把所有 image_url content 換成文字佔位符。
   /// LLM 的文字分析（assistant messages）完整保留——它記得「看到什麼」，
   /// 但後續輪次不再帶 base64 像素，回到 glm-5.2 做推理。
+  /// [小葵 2026-11-03 待決策卡閉環 3.5] 逾時前壓縮 messages——
+  /// 工具結果塊截短（保留頭尾各 300 字＋截斷標記），
+  /// context 變小，重試才有可能過（病例：22 輪工具結果堆疊 →
+  /// 同 prompt 重打三次全逾時）。冪等：已截短的不再動。
+  void _compactMessagesForRetry(List<Map<String, dynamic>> messages) {
+    const head = 300;
+    const tail = 200;
+    const marker = '〔已壓縮：逾時重試，工具結果截短〕';
+    int compacted = 0;
+    for (int i = 0; i < messages.length; i++) {
+      final m = messages[i];
+      if (m['role'] != 'user') continue; // 工具結果以 user 角色注入
+      final content = m['content'];
+      if (content is! String) continue;
+      if (content.contains(marker)) continue; // 已壓縮
+      if (content.length <= head + tail + 100) continue; // 夠短不動
+      messages[i] = {
+        'role': 'user',
+        'content': '$marker\n'
+            '${content.substring(0, head)}\n'
+            '〔…中間 ${content.length - head - tail} 字已壓縮…〕\n'
+            '${content.substring(content.length - tail)}',
+      };
+      compacted++;
+    }
+    if (compacted > 0) {
+      debugPrint('[AgentLoop] 逾時重試前壓縮：$compacted 則工具結果截短');
+    }
+  }
+
+  /// [小葵 2026-11-03 待決策卡閉環 3.5] 三振落卡——逾時斷頭前，
+  /// 把本輪累積的工具證據摘要落成一張待決策卡（source=
+  /// timeout_rescue），線不斷頭，使用者下次問「待決策卡」可續命。
+  /// 回傳 true＝開卡成功。fail-quiet：DecisionCardStore 沒開／
+  /// 同類已有卡都回 false，不影響主流程。
+  bool _rescueToDecisionCard(List<dynamic> turns) {
+    try {
+      final store = DecisionCardStore.instance;
+      final n = turns.length;
+      // [晚場 刀3] 帶證據——把本輪工具軌跡摘要寫進卡 body（病例：今早
+      // 22 次工具證據蒸發，17:21 接手者被迫整趟重考古）。
+      // 真實型別是 List<AgentLoopTurn>——這裡用 dynamic 反射式存取，
+      // 避免本檔多 import 一個型別只為了讀兩個欄位。
+      final trailLines = <String>[];
+      for (final t in turns) {
+        try {
+          final call = (t as dynamic).toolCall;
+          if (call == null) continue;
+          final res = (t as dynamic).toolResult;
+          final ok = res?.success == true ? '✓' : '✗';
+          final argsStr =
+              _summarizeForCard(call.args as Map<String, dynamic>?, '');
+          final resStr = _summarizeForCard(null, res?.content as String? ?? '');
+          final resTrimmed = resStr.length > 100
+              ? '${resStr.substring(0, 100)}…'
+              : resStr;
+          trailLines.add('· $ok ${call.name} $argsStr → $resTrimmed');
+          if (trailLines.length >= 30) {
+            trailLines.add('· （其餘 ${turns.length - 30} 筆見 actionTrail）');
+            break;
+          }
+        } catch (_) {}
+      }
+      final evidence = trailLines.isEmpty
+          ? ''
+          : '\n\n已收集的證據（接手者從這裡續命，不用重挖）：\n'
+              '${trailLines.join('\n')}';
+      final card = store.tryOpenCard(
+        title: '逾時中斷的調查線（待續命）',
+        body: '這條線跑了 $n 輪、連續三次模型逾時中斷。'
+            '已收集的工具證據摘要存在本對話的行動軌跡裡——'
+            '使用者再問一次時，從這張卡接著談，不用從頭查。$evidence',
+        categoryKey: '逾時中斷的調查線（待續命）',
+        source: 'timeout_rescue',
+      );
+      if (card != null) {
+        debugPrint('[AgentLoop] 三振落卡：${card.id}（timeout_rescue，'
+            '${trailLines.length} 筆證據隨行）');
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// [小葵 2026-11-03 晚場 刀1] 卡即記憶的摘要器——工具呼叫進卡 body
+  /// 的一行格式：args 頭 60 字＋結果頭 120 字（單行化）。
+  /// 卡 body 是給「下一個 session 的 agent」接手看的工作台筆記，
+  /// 不是完整 log——摘要夠用就好，完整內容在 actionTrail。
+  static String _summarizeForCard(Map<String, dynamic>? args, String result) {
+    String oneLine(String s) =>
+        s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final argsJoined = args == null || args.isEmpty
+        ? ''
+        : oneLine(args.entries.map((e) => '${e.key}=${e.value}').join(' '));
+    final argsStr = argsJoined.length > 60
+        ? '${argsJoined.substring(0, 60)}…'
+        : argsJoined;
+    final resStr = oneLine(result);
+    final resTrimmed =
+        resStr.length > 120 ? '${resStr.substring(0, 120)}…' : resStr;
+    return argsStr.isEmpty ? resTrimmed : '($argsStr) → $resTrimmed';
+  }
+
   void _evictOldScreenshots(List<Map<String, dynamic>> messages) {
     int evictedCount = 0;
 

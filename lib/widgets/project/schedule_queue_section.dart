@@ -73,6 +73,9 @@ class ScheduleQueueSection extends StatefulWidget {
   /// [W4.3] ⏸/續跑——暫停狀態切換（寫回節點 params.paused）
   final void Function(ScheduleQueueEntry entry, bool paused)? onTogglePause;
 
+  /// [SPEC §8.3 2026-11-12] 💬 進任務綁定討論串（點=開/建 taskBinding 對話）
+  final void Function(ScheduleQueueEntry entry)? onOpenConversation;
+
   /// [W4.3] 刷新訊號——外部改動排程狀態後 bump 觸發重載
   final ValueNotifier<int>? revNotifier;
 
@@ -82,6 +85,7 @@ class ScheduleQueueSection extends StatefulWidget {
     this.onOpenFolder,
     this.onRunNow,
     this.onTogglePause,
+    this.onOpenConversation,
     this.revNotifier,
   });
 
@@ -270,7 +274,9 @@ class _ScheduleQueueSectionState extends State<ScheduleQueueSection> {
                 onOpen: () => widget.onOpenDetail?.call(queue[i]),
                 onOpenFolder: () => widget.onOpenFolder?.call(queue[i]),
                 onRunNow: () => widget.onRunNow?.call(queue[i]),
-                onTogglePause: (p) => widget.onTogglePause?.call(queue[i], p)),
+                onTogglePause: (p) => widget.onTogglePause?.call(queue[i], p),
+                onOpenConversation: () =>
+                    widget.onOpenConversation?.call(queue[i])),
         ],
       );
     }
@@ -303,6 +309,8 @@ class _ScheduleQueueSectionState extends State<ScheduleQueueSection> {
                 onOpenFolder: () => widget.onOpenFolder?.call(queue[i]),
                 onRunNow: () => widget.onRunNow?.call(queue[i]),
                 onTogglePause: (p) => widget.onTogglePause?.call(queue[i], p),
+                onOpenConversation: () =>
+                    widget.onOpenConversation?.call(queue[i]),
               ),
             if (showTail)
               Padding(
@@ -320,7 +328,8 @@ class _ScheduleQueueSectionState extends State<ScheduleQueueSection> {
 /// [W3.5] wrap 模式用的固定尺寸卡
 Widget _buildCardFixed(BridgeDSColors ds, ScheduleQueueEntry entry, int position,
     {required bool isFirst, VoidCallback? onOpen, VoidCallback? onOpenFolder,
-    VoidCallback? onRunNow, void Function(bool paused)? onTogglePause}) {
+    VoidCallback? onRunNow, void Function(bool paused)? onTogglePause,
+    VoidCallback? onOpenConversation}) {
   return SizedBox(
     width: 208,
     height: 304,
@@ -334,6 +343,7 @@ Widget _buildCardFixed(BridgeDSColors ds, ScheduleQueueEntry entry, int position
       onOpenFolder: onOpenFolder,
       onRunNow: onRunNow,
       onTogglePause: onTogglePause,
+      onOpenConversation: onOpenConversation,
     ),
   );
 }
@@ -352,6 +362,9 @@ class _QueueCard extends StatelessWidget {
   final VoidCallback? onRunNow;
   final void Function(bool paused)? onTogglePause;
 
+  /// [SPEC §8.3 2026-11-12] 💬 進任務綁定討論串
+  final VoidCallback? onOpenConversation;
+
   const _QueueCard({
     required this.entry,
     required this.position,
@@ -362,6 +375,7 @@ class _QueueCard extends StatelessWidget {
     this.onOpenFolder,
     this.onRunNow,
     this.onTogglePause,
+    this.onOpenConversation,
   });
 
   @override
@@ -551,6 +565,10 @@ class _QueueCard extends StatelessWidget {
                     const Spacer(),
                     // 四行動鈕 2×2
                     Row(children: [
+                      // [SPEC §8.3 2026-11-12] 💬 進綁定討論串（主鈕——對話是任務的客廳）
+                      _btn(ds, '💬', onOpenConversation,
+                          accent: ds.accentGreen),
+                      const SizedBox(width: 6),
                       _btn(ds, '📂', onOpenFolder),
                       const SizedBox(width: 6),
                       _btn(ds, '⚙', onOpen),

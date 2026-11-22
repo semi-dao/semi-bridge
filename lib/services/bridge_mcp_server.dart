@@ -15,9 +15,12 @@ import 'dart:convert';
 import 'package:bridge_app/services/app_retina.dart'; // [教練 Agent 2026-08-22] 全域視網膜
 import 'package:bridge_app/services/macos_desktop_shell_channel.dart'; // [開光 P1] window_map 懸浮窗狀態
 import 'dart:io';
+import '../services/desktop_bridge_gateway_protocol.dart';
 import 'dart:math';
 import 'package:shelf/shelf.dart';
 import 'storage_service.dart'; // [T7④] localOnly 官方開關
+import 'system/diagnostic_box.dart'; // [小葵 2026-10-31 黑盒子] diagnostic_report 工具
+import 'vector_db/ingest_circuit_breaker.dart'; // [小葵 2026-10-31 熔斷器] rescan reset 入口
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'life_tree/global_notice_channel.dart';
 import 'chat_modes.dart'; // [聊天模式 B 線 2026-10-21] set_chat_mode route // [小葵 2026-09-21] 全域對話佇列
@@ -297,6 +300,9 @@ class BridgeMcpServer {
     router.get('/render_layer', _handleGetRenderLayer);
     // [教練 Agent 2026-08-22] 全域視網膜——整個 App 畫面（任何頁面）
     router.get('/app_view', _handleGetAppView);
+    // [SPEC 開光手機版 2026-11-13] 看手機畫面——retinaRequest 推播 →
+    // 手機 AppRetina 拍照回傳 → phone_retina/latest.png
+    router.get('/phone_view', _handleGetPhoneView);
     router.get('/screenshot', _handleScreenshot);
     router.post('/add_node', _handleAddNode);
     router.post('/connect', _handleConnect);
@@ -451,6 +457,44 @@ class BridgeMcpServer {
       'port': port,
       'canvasConnected': onGetState != null,
     }), headers: _jsonHeaders);
+  }
+
+  /// [SPEC 開光手機版 2026-11-13] 手機視網膜——從 Mac 看手機真實畫面。
+  /// 鏈路：push retinaRequest → 手機 AppRetina.capture → retinaResponse
+  /// → gateway 存 phone_retina/latest.png → 本端點輪詢該檔（mtime 更新）。
+  /// 回傳：PNG bytes（瀏覽器直接看）或 504（手機未連線/逾時）。
+  Future<Response> _handleGetPhoneView(Request request) async {
+    try {
+      final handle = BridgeDesktopScreen.latestGatewayHandle;
+      if (handle == null || handle.clientCount == 0) {
+        return Response(504,
+            body: jsonEncode({'error': '沒有手機連線'}),
+            headers: _jsonHeaders);
+      }
+      final f = File(
+          '\${(await getApplicationSupportDirectory()).path}/phone_retina/latest.png');
+      final before = f.existsSync() ? f.lastModifiedSync() : null;
+      handle.pushToFirst(DesktopBridgeGatewayPush(
+        type: DesktopBridgeGatewayMessageType.retinaRequest,
+        payload: {'requestId': 'mcp-\${DateTime.now().millisecondsSinceEpoch}'},
+      ));
+      // 等手機回傳（最多 8 秒——拍照+base64+傳輸）
+      for (var i = 0; i < 40; i++) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (f.existsSync() && f.lastModifiedSync() != before) {
+          return Response.ok(await f.readAsBytes(), headers: {
+            'Content-Type': 'image/png',
+            'Cache-Control': 'no-store',
+          });
+        }
+      }
+      return Response(504,
+          body: jsonEncode({'error': '手機拍照逾時（8s）'}),
+          headers: _jsonHeaders);
+    } catch (e) {
+      return Response(500,
+          body: jsonEncode({'error': e.toString()}), headers: _jsonHeaders);
+    }
   }
 
   /// [教練 Agent 2026-08-22] 全域視網膜——整個 App 畫面（base64 PNG）
@@ -1701,6 +1745,21 @@ Future<Response> _handleInjectEnrich(Request request) async {
         'additionalProperties': false,
       },
     },
+    // [小葵 2026-10-31 黑盒子] 刀二——Agent 可讀的 flight recorder
+    {
+      'name': 'diagnostic_report',
+      'description': '讀取診斷黑盒子——App 自建的 flight recorder。回傳最近系統事件（啟動/關閉、安全模式、崩潰線索、自動巡邏狀態、熔斷狀態）與白話摘要。請用白話回報給使用者，路徑已消毒（只到根目錄層、無 token、無對話內容）。',
+      'inputSchema': {
+        'type': 'object',
+        'properties': {
+          'limit': {
+            'type': 'integer',
+            'description': '回傳最近幾條事件（預設 20，上限 200）',
+          },
+        },
+        'additionalProperties': false,
+      },
+    },
     {
       'name': 'get_app_state',
       'description': '取得當前 App 狀態——回傳當前頁面、系統子頁面、畫布索引。',
@@ -2107,11 +2166,12 @@ Future<Response> _handleInjectEnrich(Request request) async {
     },
     {
       'name': 'rescan',
-      'description': '手動觸發資料夾重掃（檔案巡邏）。',
+      'description': '手動觸發資料夾重掃（檔案巡邏）。帶 reset=true 可復位索引熔斷（單輪掃描量或嵌入佇列異常時會自動熔斷暫停，需明確重試才恢復）——回應會帶 circuit_reset 欄位說明剛清除了哪些熔斷。',
       'inputSchema': {
         'type': 'object',
         'properties': {
           'root': {'type': 'string', 'description': '要掃的根目錄路徑（空=全部）'},
+          'reset': {'type': 'boolean', 'description': 'true=先復位熔斷再重掃（熔斷後的重試入口）'},
         },
       },
     },
@@ -2490,6 +2550,23 @@ Future<Response> _handleInjectEnrich(Request request) async {
         case 'global_notice':
           return _jsonRpcResult(id, await _proxyGet('/global_notice'));
         case 'rescan':
+          // [小葵 2026-10-31 熔斷器] 重試入口——rescan 帶 reset=true 時先
+          // 復位熔斷（root 冷卻＋嵌入旗標），回應帶復位前狀態（誠實：
+          // 告訴 agent 剛剛熔斷過什麼）。不帶 reset 則行為不變（向後相容）。
+          if (args['reset'] == true) {
+            final openRoots =
+                List<String>.from(IngestCircuitBreaker.instance.openRoots);
+            final embedOpen =
+                IngestCircuitBreaker.instance.embedCircuitOpen;
+            IngestCircuitBreaker.instance.resetCircuits();
+            final result = await _proxyGet('/rescan');
+            result['circuit_reset'] = {
+              'clearedRoots': openRoots,
+              'embedCircuitWasOpen': embedOpen,
+              'note': '熔斷已重置，自動巡邏恢復',
+            };
+            return _jsonRpcResult(id, result);
+          }
           return _jsonRpcResult(id, await _proxyGet('/rescan'));
         case 'annotations':
           return _jsonRpcResult(id, await _proxyGet('/annotations'));
@@ -2519,6 +2596,20 @@ Future<Response> _handleInjectEnrich(Request request) async {
         case 'get_app_state':
           if (onGetAppState == null) return error('App state not available');
           return _jsonRpcResult(id, {'resultType': 'complete', 'state': onGetAppState!()});
+
+        // [小葵 2026-10-31 黑盒子] 刀二——Agent 讀取診斷黑盒子
+        // 會講人話的免疫系統：Safe Mode 下小橋靠這個跟使用者白話解釋發生什麼
+        case 'diagnostic_report':
+          await DiagnosticBox.instance.ensureInit();
+          final limitRaw = args['limit'] is int ? args['limit'] as int : 20;
+          final limit = limitRaw.clamp(1, DiagnosticBox.maxEvents);
+          final events = DiagnosticBox.instance.recent(limit);
+          return _jsonRpcResult(id, {
+            'resultType': 'complete',
+            'summary': DiagnosticBox.instance.plainSummary(), // 白話摘要——直接唸給使用者聽
+            'events': events, // 技術時間軸（已消毒：路徑只到根目錄層、無 token）
+            'count': events.length,
+          });
 
         case 'list_canvases':
           if (onListCanvases == null) return error('List not available');
@@ -2890,6 +2981,17 @@ Future<Response> _handleInjectEnrich(Request request) async {
           try {
             switch (action) {
               case 'focus':
+                // [Blue 令 2026-10-23 demo 慘案] 防搶螢幕：已聚焦就跳過——
+                // agent 連續 focus 會把人類正在用的視窗壓下去（撞車現場）
+                if (await windowManager.isFocused()) {
+                  return _jsonRpcResult(id, {
+                    'resultType': 'complete',
+                    'success': true,
+                    'action': 'focus',
+                    'skipped': true,
+                    'note': 'already focused — no window raise (anti screen-steal)',
+                  });
+                }
                 await windowManager.focus();
               case 'minimize':
                 await windowManager.minimize();
@@ -3166,7 +3268,7 @@ requestAnimationFrame(loop);
 
 /// GET /avatar_engine.js — [小葵 2026-09-24 出道令] 懸浮小葵 WebGL 引擎
   Future<Response> _handleGetAvatarEngine(Request req) async {
-    final f = File('<HOME>/Developer/bridge_app/morning-tea/avatar_engine.js');
+    final f = File('<BRIDGE_APP_ROOT>/morning-tea/avatar_engine.js');
     if (!await f.exists()) {
       return Response(404, body: 'avatar_engine.js not found');
     }
@@ -3184,7 +3286,7 @@ requestAnimationFrame(loop);
       return Response(400, body: 'bad name');
     }
     final f = File(
-        '<HOME>/Library/Containers/farm.semiwasabi.bridgeApp/Data/Documents/bridge_media/animations/$name');
+        '<APP_CONTAINER>/Documents/bridge_media/animations/$name');
     if (!await f.exists()) {
       return Response(404, body: 'not found');
     }
@@ -3200,7 +3302,7 @@ requestAnimationFrame(loop);
         '[hit] t=${DateTime.now().toIso8601String()} ua=${req.headers['user-agent'] ?? '?'}\n',
         mode: FileMode.append);
     try {
-      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/vendor/three.module.js');
+      final f = File('<BRIDGE_APP_ROOT>/assets/galaxy/vendor/three.module.js');
       if (!f.existsSync()) return Response(404);
       return Response.ok(f.readAsStringSync(), headers: {
         'Content-Type': 'application/javascript',
@@ -3214,7 +3316,7 @@ requestAnimationFrame(loop);
   /// GET /three.core.js — [v63] three r167+ 的第二個檔案（module 內部 import）
   Future<Response> _handleGetThreeCore(Request req) async {
     try {
-      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/vendor/three.core.js');
+      final f = File('<BRIDGE_APP_ROOT>/assets/galaxy/vendor/three.core.js');
       if (!f.existsSync()) return Response(404);
       return Response.ok(f.readAsStringSync(), headers: {
         'Content-Type': 'application/javascript',
@@ -3229,7 +3331,7 @@ requestAnimationFrame(loop);
   /// 頁面 runtime 也帶同一指紋；webview 若載到舊 DOM，兩者不符 → 頁面自動 reload
   // [v232] 星系參數——記憶體+磁碟持久化
   static Map<String, dynamic>? _galaxyParams;
-  static const _galaxyParamsPath = '<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/galaxy_params.json';
+  static const _galaxyParamsPath = '<APP_SUPPORT>/galaxy_params.json';
   Map<String, dynamic> _loadGalaxyParams() {
     if (_galaxyParams != null) return _galaxyParams!;
     try {
@@ -3383,7 +3485,7 @@ requestAnimationFrame(loop);
 
   Future<Response> _handleGetGalaxyVersion(Request req) async {
     try {
-      final f = File('<HOME>/Developer/bridge_app/assets/galaxy/galaxy.html');
+      final f = File('<BRIDGE_APP_ROOT>/assets/galaxy/galaxy.html');
       if (!f.existsSync()) return Response.ok('{"fp":""}', headers: _jsonHeaders);
       final m = RegExp(r"FINGERPRINT='([^']+)'").firstMatch(f.readAsStringSync());
       return Response.ok('{"fp":"${m?.group(1) ?? ''}"}', headers: _jsonHeaders);

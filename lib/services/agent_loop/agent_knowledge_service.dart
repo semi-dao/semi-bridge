@@ -11,7 +11,9 @@
 // - 使用 INSERT INTO fts(rowid, ...) 和 DELETE FROM fts WHERE rowid=?
 
 import 'dart:math';
+import 'dart:async';
 import 'package:bridge_app/services/brain_container/brain_database.dart';
+import 'package:bridge_app/services/brain_container/memory_provenance_service.dart';
 import 'package:bridge_app/services/vault/vault_templates.dart';
 import 'package:bridge_app/services/companion_store.dart'; // 同層 services；[WS-2 2026-09-13] 知識歸屬
 import 'package:flutter/foundation.dart';
@@ -353,6 +355,7 @@ class AgentKnowledgeService {
         JOIN agent_memories m ON m.rowid = f.rowid
         WHERE agent_memories_fts MATCH ? AND m.is_archived = 0
           AND (m.owner_companion_id = 'shared' OR m.owner_companion_id = ?)
+          AND m.provenance_sig IS NOT NULL -- [小葵 2026-11-11] 出處簽章過濾
         ORDER BY rank
         LIMIT ?
         ''',
@@ -410,6 +413,10 @@ class AgentKnowledgeService {
 
     // 同步 FTS
     _syncMemoryFts(id);
+
+    // [小葵 2026-11-11 出處簽章] 寫入後補簽（fail-closed：拿不到 secret
+    // 不擋寫入——但無章條目會被啟動稽核隔離＋檢索過濾，雙保險）
+    unawaited(MemoryProvenanceService.instance.reSign(id, title, ownerId));
 
     return id;
   }

@@ -39,6 +39,11 @@ class Conversation {
   final String? summary; // 自動摘要（跨 session 用）
   final int? lastSummaryIndex; // 上次摘要到的訊息 index
 
+  /// [Blue 令 2026-11-10 SPEC §8.3] 任務綁定——每張任務卡出生自綁一個 conversation。
+  /// 非空＝此對話是某任務的綁定討論串；值=任務 JSON（id/name/schedule/lastRun…）。
+  /// 桌面手機同源：gateway push 任務變更時以此對齊。
+  final Map<String, dynamic>? taskBinding;
+
   Conversation({
     required this.id,
     required this.title,
@@ -52,6 +57,7 @@ class Conversation {
     this.parentConversationId,
     this.summary,
     this.lastSummaryIndex,
+    this.taskBinding,
   });
 
   factory Conversation.create({String? title, String? companionId}) {
@@ -87,6 +93,20 @@ class Conversation {
     );
   }
 
+  /// [SPEC §8.3 2026-11-12] 建立任務綁定討論串——任務卡出生自綁。
+  /// 首則訊息自動注入任務上下文（Semi 秒懂，不用重述）。
+  factory Conversation.createTaskBound(TaskCardData task) {
+    final now = DateTime.now();
+    return Conversation(
+      id: 'task-${task.id}-${now.millisecondsSinceEpoch}',
+      title: task.name,
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+      taskBinding: task.toJson(),
+    );
+  }
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
@@ -100,6 +120,7 @@ class Conversation {
     if (parentConversationId != null) 'parentConversationId': parentConversationId,
     if (summary != null) 'summary': summary,
     if (lastSummaryIndex != null) 'lastSummaryIndex': lastSummaryIndex,
+    if (taskBinding != null) 'taskBinding': taskBinding,
   };
 
   factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(
@@ -117,6 +138,7 @@ class Conversation {
     parentConversationId: json['parentConversationId'] as String?,
     summary: json['summary'] as String?,
     lastSummaryIndex: json['lastSummaryIndex'] as int?,
+    taskBinding: json['taskBinding'] as Map<String, dynamic>?,
   );
 
   Conversation copyWith({
@@ -130,6 +152,7 @@ class Conversation {
     String? parentConversationId,
     String? summary,
     int? lastSummaryIndex,
+    Map<String, dynamic>? taskBinding,
   }) => Conversation(
     id: id,
     title: title ?? this.title,
@@ -143,6 +166,7 @@ class Conversation {
     parentConversationId: parentConversationId ?? this.parentConversationId,
     summary: summary ?? this.summary,
     lastSummaryIndex: lastSummaryIndex ?? this.lastSummaryIndex,
+    taskBinding: taskBinding ?? this.taskBinding,
   );
 
   /// 清除 projectDoorId（Dart nullable param 無法區分不傳 vs 傳 null）
@@ -158,11 +182,64 @@ class Conversation {
     type: type,
     parentConversationId: parentConversationId,
     summary: summary,
-    lastSummaryIndex: lastSummaryIndex,
+        lastSummaryIndex: lastSummaryIndex,
+    taskBinding: taskBinding,
   );
 
   /// D11: 是否為專案畫布對話
   bool get isProjectCanvas => type == ConversationType.projectCanvas;
+
+  /// [SPEC §8.3] 是否為任務綁定討論串
+  bool get isTaskBound => taskBinding != null;
+
+  /// [SPEC §8.3] 綁定的任務名（無綁定回 null）
+  String? get boundTaskName => taskBinding?['name'] as String?;
+}
+
+/// [SPEC §8.6 2026-11-12] 任務卡 JSON（taskBinding 內容）。
+/// 桌面手機同源——前次成敗＋產出檔案＋排程。
+class TaskCardData {
+  final String id;
+  final String name;
+  final String kind; // 'scheduled' | 'project'
+  final String schedule; // 人類可讀：每天 08:00
+  final String? nextRunAt;
+  final bool lastRunOk; // 前次執行成敗
+  final String? lastRunError; // 失敗原因
+  final List<String> artifacts; // 產出檔案路徑
+
+  const TaskCardData({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.schedule,
+    this.nextRunAt,
+    required this.lastRunOk,
+    this.lastRunError,
+    this.artifacts = const [],
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'kind': kind,
+        'schedule': schedule,
+        if (nextRunAt != null) 'nextRunAt': nextRunAt,
+        'lastRunOk': lastRunOk,
+        if (lastRunError != null) 'lastRunError': lastRunError,
+        'artifacts': artifacts,
+      };
+
+  factory TaskCardData.fromJson(Map<String, dynamic> j) => TaskCardData(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        kind: j['kind'] as String? ?? 'scheduled',
+        schedule: j['schedule'] as String? ?? '',
+        nextRunAt: j['nextRunAt'] as String?,
+        lastRunOk: j['lastRunOk'] as bool? ?? true,
+        lastRunError: j['lastRunError'] as String?,
+        artifacts: (j['artifacts'] as List?)?.cast<String>() ?? const [],
+      );
 }
 
 class Message {

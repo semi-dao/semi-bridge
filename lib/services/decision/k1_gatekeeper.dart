@@ -25,6 +25,12 @@ class K1Gatekeeper {
   /// 規則層——冷啟動保底（寧多查不漏查）
   static final RegExp _needRule = RegExp(
       r'生日|出生|覺醒|哪一天|幾月|代碼|確認碼|通關碼|密碼|查記憶|從記憶|記得嗎|上次|之前說|我們討論過|再問一次|再考你|再考一次|歷史|紀錄|排程|提醒|是多少|多少|幾號|什麼時候');
+  // [小葵 2026-11-03 晚場 K1卡選項C·止血刀] 反問/建議類高頻詞——
+  // 屍檢實證（99 筆判斷）：32 筆是「建議該如何調整」類反問被送去
+  // escalate 又失敗。這些是「當前對話內推進」不需要查記憶——
+  // 直接判 generalChat 止血。零成本、可逆（規則層命中率落帳可觀測）。
+  static final RegExp _noNeedRule = RegExp(
+      r'建議|該如何|怎麼辦|怎麼做|你的看法|你覺得|你建議|怎麼調整|如何調整|要不要|幫我想|想一想|分析|優點|缺點|風險');
   // 保留：direct_action 規則——關鍵詞誤報率高（'跑'/'建立'在閒聊也出現），
   // v1 不上規則層，交給線性頭判（97% 實證能力範圍內）
   // ignore: unused_field
@@ -56,11 +62,33 @@ class K1Gatekeeper {
       onSample?.call(d, message);
       return d;
     }
+    // [K1卡選項C·止血刀] 反問/建議類 → 不需查記憶（當前對話內推進）。
+    // 放在 _needRule 之後——「上次建議」這種含歷史詞的仍走查記憶。
+    if (_noNeedRule.hasMatch(message)) {
+      final d = const K1Decision(
+        label: K1Labels.generalChat,
+        confidence: 0.9,
+        margin: 0.8,
+        escalated: false,
+        source: 'rule',
+      );
+      onSample?.call(d, message);
+      return d;
+    }
 
-    // ── 第二層：線性頭（有訓練過才走）────────────
+    // ── 第二層：線性頭（有訓練過才走）────────────────────
     final head = _head;
     final embedder = EmbeddingService.instance;
-    if (head != null && embedder.isModelAvailable) {
+    // [T12-② 2026-10-17] 血型閘——頭的訓練表徵必須與 runtime 嵌入模型
+    // 同血型，softmax 才有意義。Fable V3 高風險項證實：現役頭是 300M
+    // 表徵訓的（10-13），runtime 已換 EG2（10-15 T6）——跨血型比對輸出
+    // 無意義卻帶著「head 級」自信。不符即跳過頭（寧 escalate 不錯猜）。
+    if (head != null &&
+        head.embedModelVersion != null &&
+        head.embedModelVersion != embedder.activeModelVersion) {
+      debugPrint('[K1] 🩸血型不符——頭（${head.embedModelVersion}）與 runtime'
+          '（${embedder.activeModelVersion}）不同，跳過線性頭（escalate）');
+    } else if (head != null && embedder.isModelAvailable) {
       try {
         final emb = await embedder.embedQuery(message);
         if (emb.isNotEmpty && !emb.every((v) => v == 0.0)) {

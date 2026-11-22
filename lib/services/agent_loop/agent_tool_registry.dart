@@ -22,6 +22,7 @@ import 'agent_loop_tools/memory_write_tool.dart';
 import 'package:bridge_app/models/brain_container/memory_source.dart';
 import 'package:bridge_app/services/brain_container/brain_container_service.dart';
 import 'package:bridge_app/services/brain_container/brain_database.dart'; // [T3②] L4 直寫 agent_memories
+import 'package:bridge_app/services/brain_container/memory_provenance_service.dart'; // [小葵 2026-11-11] 出處簽章
 import 'agent_loop_tools/use_move_tool.dart'; // [Blue 拍板] 招式工具
 import 'agent_loop_tools/compass_tools_agent.dart';
 import 'agent_loop_tools/compass_seek_agent_tool.dart';
@@ -38,6 +39,7 @@ import 'agent_loop_tools/local_code_generate_tool.dart'; // [向量工作流] �
 import 'agent_loop_tools/delegate_subagent_tool.dart'; // [向量工作流維度1] 多模型協同——派子代理用外部 LLM
 import 'agent_loop_tools/delegate_batch_tool.dart'; // [向量工作流維度1] 批次平行派多個子代理
 import 'agent_loop_tools/canvas_remove_tool.dart';
+import 'agent_loop_tools/decision_card_agent_tool.dart'; // [小葵 2026-11-03] 待決策卡拍板流
 import 'agent_loop_tools/canvas_find_nodes_tool.dart';
 import 'agent_loop_tools/check_capability_status_tool.dart';
 import 'agent_loop_tools/open_setting_field_tool.dart';
@@ -137,6 +139,9 @@ class AgentToolRegistry {
               '', // 信念層不走向量檢索—— BeliefGate 證據鏈才是真相源
             ],
           );
+          // [小葵 2026-11-11 出處簽章] L4 信念寫入即簽
+          final title = content.length > 60 ? content.substring(0, 60) : content;
+          unawaited(MemoryProvenanceService.instance.reSign(id, title, 'shared'));
           return true;
         } catch (_) {
           return false;
@@ -306,6 +311,12 @@ class AgentToolRegistry {
     // [教練 Agent 2026-07-22] Phase F — 控制面板整合工具
     tools.add(AgentApplyWorkflowTool());
     tools.add(CanvasListTemplatesTool());
+
+    // [小葵 2026-11-03 待決策卡閉環 Step 3] 拍板流三件套——
+    // 主動回應對話的結構化軌道（查卡/提案/結案）。
+    tools.add(DecisionCardsTool());
+    tools.add(DecisionProposeTool());
+    tools.add(DecisionResolveTool());
 
     // [插槽輕量化 Task 4 2026-10-13] skill_search/skill_load——
     // 「需要時會想起」本體：metadata 目錄常駐、body 磁碟懶載入。

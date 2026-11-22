@@ -1,0 +1,10 @@
+{$RELAY_DOMAIN}
+
+# TLS 終結在前（Caddy/Let's Encrypt）→ 後端純 TCP 轉發到 relay 容器。
+# 注意：這是「外側 TLS」；端對端加密（手機↔家中主機直通）隨第 2 層
+# TLS 工作升級後，Caddy 只會看到加密位元組流——符合 §6.3 盲轉哲學。
+
+relay {
+	tls internal off
+	reverse_proxy relay:8791
+}

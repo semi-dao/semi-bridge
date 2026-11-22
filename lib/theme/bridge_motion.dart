@@ -1,4 +1,10 @@
-// Bridge Motion System — 動態體感層
+// Bridge Motion System — 動態體感層（Blue 命名 2026-11-20：「視覺動態元件」）
+// ═══════════════════════════════════════════════════
+// 【視覺動態元件 Visual Motion Components】——本檔的正式名稱（Blue 2026-11-20 拍板）。
+// 用「視覺動態元件」這個名詞即可喚起本元件庫。現況：部分已接線（歡迎頁/頂欄），
+// 其餘為 2026-08 六源設計語言時期完成的備料——設計完整、保留待用（手機版流程轉場是
+// 最可能的取用點，見 BRIDGE_MOBILE_SPEC.md「同一骨架」承諾）。
+// ═══════════════════════════════════════════════════
 // 把 BridgeDS motion tokens 變成可重用的 transition widgets
 // 設計來源：xAI 氛圍 × Raycast 色彩 × Stripe 粒子 × Figma 動態 × Miro 無限畫布
 //
@@ -12,6 +18,28 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'bridge_design_system.dart';
+
+/// ═══════════════════════════════════════════════════
+/// Reduced Motion 解析器（2026-11-20 0→1，方法論：motion-and-haptics skill）
+/// ═══════════════════════════════════════════════════
+///
+/// 鐵則：Motion decorates state; it is never the state.
+/// 關掉動畫後 end state 必須完全相同——動畫只是裝飾，不是狀態本身。
+///
+/// 機制：resolve() 讀 MediaQuery.disableAnimations（由系統無障礙設定驅動）
+/// → reduced motion 時所有 duration 歸零，widget 直接落在 end state。
+/// Feature code 不逐處重讀 platform flag——一律經過這裡。
+class BridgeMotion {
+  BridgeMotion._();
+
+  /// 解析動畫時長：reduced motion → Duration.zero（直接跳到 end state）
+  static Duration resolve(BuildContext context, Duration duration) {
+    if (duration == Duration.zero) return duration;
+    final mq = MediaQuery.maybeOf(context);
+    if (mq?.disableAnimations ?? false) return Duration.zero;
+    return duration;
+  }
+}
 
 /// ═══════════════════════════════════════════════════
 /// Bridge Motion — 頁面轉場
@@ -159,6 +187,13 @@ class _BridgeSlideInState extends State<BridgeSlideIn>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 系統關動畫 → duration 歸零，直接落在 end state
+    _controller.duration = BridgeMotion.resolve(context, widget.duration);
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -225,6 +260,13 @@ class _BridgeScaleInState extends State<BridgeScaleIn>
         if (mounted) _controller.forward();
       });
     }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 系統關動畫 → duration 歸零，直接落在 end state
+    _controller.duration = BridgeMotion.resolve(context, BridgeDS.durationSlow);
   }
 
   @override
@@ -345,6 +387,28 @@ class _BridgeGlowButtonState extends State<BridgeGlowButton>
     _updateAnimation();
   }
 
+  bool _reducedMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 一次性動畫歸零；脈動（repeat）直接停——狀態指示改由色彩承載
+    _reducedMotion = BridgeMotion.resolve(context, const Duration(milliseconds: 1)) == Duration.zero;
+    _glowController.duration = BridgeMotion.resolve(context, BridgeDS.durationSlow);
+    if (_reducedMotion) {
+      _pulseController.stop();
+      // 直接呈現 end state：依當前狀態落位
+      switch (widget.state) {
+        case BridgeGlowButtonState.success:
+          _glowController.value = 1.0;
+        case BridgeGlowButtonState.locked:
+        case BridgeGlowButtonState.idle:
+        case BridgeGlowButtonState.testing:
+          _glowController.value = 0.0;
+      }
+    }
+  }
+
   @override
   void didUpdateWidget(BridgeGlowButton oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -356,7 +420,7 @@ class _BridgeGlowButtonState extends State<BridgeGlowButton>
   void _updateAnimation() {
     switch (widget.state) {
       case BridgeGlowButtonState.testing:
-        _pulseController.repeat(reverse: true);
+        if (!_reducedMotion) _pulseController.repeat(reverse: true);
         _glowController.reverse();
         break;
       case BridgeGlowButtonState.success:
@@ -545,6 +609,27 @@ class _BridgePulseDotState extends State<BridgePulseDot>
 
   Timer? _lowFreqTicker;
   int _tick = 0;
+  bool _reducedMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 脈動歸零：停 ticker，光點常亮（狀態由色彩承載，非 motion-alone）
+    final was = _reducedMotion;
+    _reducedMotion =
+        BridgeMotion.resolve(context, const Duration(milliseconds: 1)) == Duration.zero;
+    if (_reducedMotion && !was) {
+      _lowFreqTicker?.cancel();
+      _controller.value = 0.0;
+    } else if (!_reducedMotion && was && widget.active) {
+      _controller.value = 0.0;
+      _lowFreqTicker = Timer.periodic(const Duration(milliseconds: 83), (_) {
+        if (!mounted || !widget.active) return;
+        _tick = (_tick + 1) % 72;
+        _controller.value = _curveValue(_tick);
+      });
+    }
+  }
 
   /// 12fps 離散取樣 easeOut 曲線——6 個關鍵幀來回
   double _curveValue(int tick) {
@@ -664,14 +749,30 @@ class _BridgeGlowProgressState extends State<BridgeGlowProgress>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
-    if (widget.active) _controller.repeat();
+    if (widget.active && !_reducedMotion) _controller.repeat();
+  }
+
+  bool _reducedMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 不定進度條的掃動是純裝飾——reduced motion 停掉，
+    // 進度條仍在（狀態由存在性承載），只是不再動。
+    _reducedMotion =
+        BridgeMotion.resolve(context, const Duration(milliseconds: 1)) == Duration.zero;
+    if (_reducedMotion) {
+      _controller.stop();
+    } else if (widget.active) {
+      _controller.repeat();
+    }
   }
 
   @override
   void didUpdateWidget(BridgeGlowProgress oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.active && !oldWidget.active) {
-      _controller.repeat();
+      if (!_reducedMotion) _controller.repeat();
     } else if (!widget.active && oldWidget.active) {
       _controller.stop();
     }
@@ -757,7 +858,28 @@ class _BridgeSuccessCheckState extends State<BridgeSuccessCheck>
     if (widget.show) _play();
   }
 
+  bool _reducedMotion = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion 2026-11-20] 慶祝有預算：reduced motion 時勾選直接出現（end state），
+    // 光環擴散省略——成功事實不因動畫消失而消失。
+    _reducedMotion =
+        BridgeMotion.resolve(context, const Duration(milliseconds: 1)) == Duration.zero;
+    _checkController.duration = BridgeMotion.resolve(context, BridgeDS.durationNormal);
+    if (_reducedMotion && widget.show) {
+      _checkController.value = 1.0; // 直接完成
+      _ringController.value = 1.0;  // 光環 opacity 已到 0 = 省略
+    }
+  }
+
   void _play() {
+    if (_reducedMotion) {
+      _checkController.value = 1.0;
+      _ringController.value = 1.0;
+      return;
+    }
     _checkController.forward();
     _ringController.forward();
   }
@@ -836,6 +958,126 @@ class _BridgeSuccessCheckState extends State<BridgeSuccessCheck>
           ),
         ],
       ),
+    );
+  }
+}
+
+/// ═══════════════════════════════════════════════════
+/// Bridge Motion — 呼吸脊線（[2026-11-21 章魚光呼吸樹] 手機/桌面共用元件）
+/// ═══════════════════════════════════════════════════
+///
+/// 章魚光呼吸：子卡左緣脊線緩慢呼吸發光（2800ms easeInOut，
+/// alpha 0.05↔0.25 ping-pong，預設色＝theme accentBlue token＝活躍路徑語意）。
+/// 節能先例照 BridgePulseDot：12fps 低頻 ticker（Timer.periodic 83ms，
+/// 直接寫 controller.value，無 60fps vsync）＋ RepaintBoundary 隔離重繪。
+/// Reduced Motion：BridgeMotion.resolve 降級＝停 ticker、轉常亮
+/// （alpha 常駐呼吸中位 0.15——脊線存在性承載「這是子對話」狀態，非 motion-alone）。
+///
+/// 用法：放在有界高度的容器內（Stack Positioned / stretch Row），
+/// 元件自帶 width（預設 2px）填滿父高；heightFactor 供 loose 場景收高。
+class BridgeBreathLine extends StatefulWidget {
+  /// 脊線顏色（預設 null → 取 theme accentBlue token，勿寫死）
+  final Color? color;
+  /// 脊線寬度（預設 2px）
+  final double width;
+  /// 高度展延（null=填滿父約束；loose 場景可給 <1 收高）
+  final double? heightFactor;
+
+  const BridgeBreathLine({
+    super.key,
+    this.color,
+    this.width = 2,
+    this.heightFactor,
+  });
+
+  @override
+  State<BridgeBreathLine> createState() => _BridgeBreathLineState();
+}
+
+class _BridgeBreathLineState extends State<BridgeBreathLine>
+    with SingleTickerProviderStateMixin {
+  // 單程 2800ms / 12fps → 34 格（2800/83≈33.7），一来一回 68 格循環
+  static const int _ticksPerLeg = 34;
+
+  late final AnimationController _controller;
+  Timer? _ticker;
+  int _tick = 0;
+  bool _reducedMotion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+    _startTicker();
+  }
+
+  /// 12fps 低頻 ticker——只寫 controller.value，不起 60fps vsync（照 PulseDot 先例）
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(milliseconds: 83), (_) {
+      if (!mounted) return;
+      _tick = (_tick + 1) % (_ticksPerLeg * 2);
+      final t = _tick <= _ticksPerLeg
+          ? _tick / _ticksPerLeg
+          : (_ticksPerLeg * 2 - _tick) / _ticksPerLeg;
+      _controller.value = Curves.easeInOut.transform(t);
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // [Reduced Motion] 呼吸是純裝飾——降級時停 ticker、轉常亮（中位 alpha）
+    final was = _reducedMotion;
+    _reducedMotion =
+        BridgeMotion.resolve(context, const Duration(milliseconds: 1)) ==
+            Duration.zero;
+    if (_reducedMotion && !was) {
+      _ticker?.cancel();
+      _controller.value = 0.5; // alpha 常駐 0.15（0.05+0.20*0.5）
+    } else if (!_reducedMotion && was) {
+      _startTicker();
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lineColor = widget.color ?? BridgeDSColors.of(context).accentBlue;
+    final line = RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final alpha = 0.05 + 0.20 * _controller.value; // 0.05↔0.25
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: lineColor.withValues(alpha: alpha),
+              borderRadius: BorderRadius.circular(widget.width / 2),
+              boxShadow: [
+                BoxShadow(
+                  color: lineColor.withValues(alpha: alpha * 0.6),
+                  blurRadius: 6,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    return SizedBox(
+      width: widget.width,
+      child: widget.heightFactor == null
+          ? line
+          : Align(heightFactor: widget.heightFactor, child: line),
     );
   }
 }

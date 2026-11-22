@@ -143,8 +143,12 @@ class EventLedger {
       if (row.isNotEmpty) return row.first['turn_id'] as String;
       // 該對話沒有標記過的輪——fallback 全域（未遷移的舊輪相容）
     }
+    // [K1卡選項C·管線刀 2026-11-03] 全域 fallback 排除 compass_ 假 turn——
+    // 羅盤開口事件的 turn 不是對話輪；使用者回應主動開話時 fallback 撈到
+    // 它，accepted 反應就掛錯枝（屍檢：6 筆誤掛，訓練池灌水）。
     final row = _db.select(
-      "SELECT turn_id FROM event_ledger WHERE kind='turn' ORDER BY rowid DESC LIMIT 1",
+      "SELECT turn_id FROM event_ledger WHERE kind='turn' "
+      "AND turn_id NOT LIKE 'compass_%' ORDER BY rowid DESC LIMIT 1",
     );
     return row.isEmpty ? null : row.first['turn_id'] as String;
   }

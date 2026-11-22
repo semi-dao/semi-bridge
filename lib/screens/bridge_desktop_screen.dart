@@ -34,6 +34,7 @@ import '../models/entity_graph/open_canvas_node.dart' show ActualSizeCache; // [
 import '../models/canvas/canvas_metadata.dart';
 import '../widgets/adaptive_scaffold.dart';
 import '../models/conversation.dart';
+import '../utils/conversation_tree.dart';
 import '../services/api_service.dart';
 import '../services/capability/service_registry.dart'; // [教練 Agent 2026-08-01] 能力中心
 import '../services/capability/capability_models.dart';
@@ -69,6 +70,14 @@ import '../models/project_door.dart';
 import '../services/project_door_store.dart';
 import '../services/project_trash_store.dart';
 import '../services/desktop_bridge_local_gateway.dart';
+import '../services/desktop_bridge_gateway_protocol.dart';
+import '../services/vector_db/asset_index_service.dart';
+// [S1] 拍板迴路接線：gateway → BrowserAutomationService（共用 ConfirmationRegistry）→ TaskQueue
+import '../services/browser_automation/browser_automation_service.dart';
+import '../services/mobile/mobile_device_token_store.dart';
+import '../services/mobile/chat_relay_handler.dart';
+import '../services/mobile/mobile_task_whitelist.dart';
+import '../services/task_queue/task_queue.dart';
 import '../services/desktop_bridge_pairing_contract.dart';
 import '../services/desktop_companion_shell_config.dart';
 import '../services/desktop_companion_shell_config_store.dart';
@@ -140,6 +149,7 @@ import '../services/agent_loop/workflow_inspector.dart';
 import '../widgets/settings/db_location_card.dart';
 import '../widgets/settings/cloud_rate_card.dart'; // [T11②]
 import '../widgets/settings/watchdog_toggle_card.dart';
+import '../widgets/settings/diagnostic_card.dart'; // [小葵 2026-10-31 黑盒子] 刀二診斷卡
 import '../widgets/settings/data_path_overview_card.dart'; // [教練 Agent 2026-08-10] DB 路徑設定（從 settings_screen 抽出）
 import '../widgets/settings/brain_api_config_card.dart'; // [教練 Agent 2026-08-11] 主腦 API 設定（搬到金鑰匙系統）
 import 'album_screen.dart'; // [時間感 L4 2026-09-13] 相簿視圖——按日子翻頁
@@ -147,6 +157,10 @@ import '../widgets/trust/agent_glyph.dart'; // [小葵 2026-09-15] 參與者指�
 // [教練 Agent 2026-08-11] FloatingCompanion 已改為 NSPanel 桌面懸浮窗
 
 class BridgeDesktopScreen extends StatefulWidget {
+  /// [SPEC 開光手機版 2026-11-13] 最新 gateway handle——8420 /phone_view
+  /// 用它推 retinaRequest 給手機（靜態：MCP server 不持有 screen 實例）
+  static DesktopBridgeLocalGatewayHandle? latestGatewayHandle;
+
   const BridgeDesktopScreen({super.key});
 
   /// [教練 Agent 2026-07-28] Phase 5: 跨頁面跳轉 — 全域 ValueNotifier
@@ -197,6 +211,8 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
 
   // --- Gateway ---
   DesktopBridgeLocalGatewayHandle? _gatewayHandle;
+  // [§8.5c] vault 變動推播訂閱
+  StreamSubscription<Map<String, dynamic>>? _vaultChangedSub;
   bool _gatewayRunning = false;
   int? _gatewayPort;
   String? _gatewayError;
@@ -204,6 +220,9 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   // --- Pairing ---
   DesktopBridgePairingContract? _pairingContract;
   String _pairingCode = '';
+
+  /// [2026-11-19 一機一筆] 桌面身分證（IOPlatformUUID hash）——進 QR did。
+  String _desktopDid = '';
   String? _lanIp;
   List<String> _allLanIps = [];
 
@@ -1035,7 +1054,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         final nodeMaps = nodes
             .map((e) => <String, dynamic>{
                   'id': e.entity.id,
-                  'type': e.entity.type,
+                  'type': e.entity.type.name, // 2026-11-05 修：enum 直接入 map 會炸 jsonEncode（Instance of 'EntityType'）
                   'label': e.entity.title,
                   'x': e.props.x,
                   'y': e.props.y,
@@ -1474,6 +1493,9 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         // [開光 v0.4.x] 真點執行——hitTest → 派發 PointerDown/Up 事件流
         try {
           final pos = target!;
+          // [小葵 2026-10-31 收編] button=secondary → 右鍵事件流
+          // （PointerDownEvent kind=secondary → GestureDetector.onSecondaryTapUp）
+          final isSecondary = button == 'secondary';
           await Future<void>.delayed(const Duration(milliseconds: 50));
           final gesture = GestureBinding.instance;
           // 2) down → up（同一 pointer id，80ms 間隔=輕點）
@@ -1481,9 +1503,6 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
           // [開光 v0.4.x] 正規入口：handlePointerEvent——完整 pointer lifecycle
           // （hitTest→pointer router→gesture arena），GestureDetector.onTap 才會觸發。
           // 直接 handleEvent 繞過 arena（42 targets 收到事件但 onTap 不響的實證）。
-          // [小葵 2026-10-31 收編] button=secondary → 右鍵事件流
-          // （buttons=kSecondaryButton → GestureDetector.onSecondaryTapUp）
-          final isSecondary = button == 'secondary';
           gesture.handlePointerEvent(PointerDownEvent(
               pointer: pid, position: pos,
               kind: PointerDeviceKind.mouse,
@@ -1542,15 +1561,31 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         final base = sel.isValid ? sel.baseOffset : controller.text.length;
         final newText = controller.text.replaceRange(
             base, sel.isValid ? sel.extentOffset : controller.text.length, text);
-        controller.value = TextEditingValue(
+        final newValue = TextEditingValue(
           text: newText,
           selection: TextSelection.collapsed(offset: base + text.length),
         );
+        // [10-23 demo 慘案修復] 直接寫 controller.value 只改值不觸發 onChanged——
+        // vault 搜尋框「字有進框、搜尋不動」的元凶。改走 EditableTextState
+        // .updateEditingValue（平台鍵盤同款入口），onChanged/listener 全鏈正常觸發。
+        final editableState = focused.context?.findAncestorStateOfType<EditableTextState>();
+        if (editableState != null) {
+          editableState.updateEditingValue(newValue);
+          return {
+            'success': true,
+            'typed': text.length,
+            'fieldLen': newText.length,
+            'via': 'updateEditingValue',
+            'note': '已注入（平台輸入通道，onChanged 全鏈觸發，零剪貼簿）',
+          };
+        }
+        controller.value = newValue; // 後備：找不到 state 退回直接寫值
         return {
           'success': true,
           'typed': text.length,
           'fieldLen': newText.length,
-          'note': '已注入（合成 TextEditingValue，零剪貼簿）',
+          'via': 'controller.value',
+          'note': '已注入（後備路徑：直接寫值，onChanged 可能不觸發）',
         };
       } catch (e) {
         return {'success': false, 'message': '注入失敗: $e'};
@@ -1838,7 +1873,11 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     _healthTimer?.cancel();
     _idleRotateTimer?.cancel();
     _stateWatchdogTimer?.cancel();
+    _vaultChangedSub?.cancel();
     _gatewayHandle?.close();
+    if (BridgeDesktopScreen.latestGatewayHandle == _gatewayHandle) {
+      BridgeDesktopScreen.latestGatewayHandle = null;
+    }
     // [教練 Agent 2026-07-22] #4: 停止記憶體監控
     MemoryGuardService.instance.stop();
     // [W1 2026-10-08] App 層排程引擎停止（引擎生命周期跟著 App 走）
@@ -1993,10 +2032,12 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   Future<void> _detectLanIp() async {
     const detector = LanIpDetector();
     final allIps = await detector.detectAllLanIps();
+    final desktopId = await LanIpDetector.detectDesktopId();
     if (mounted) {
       setState(() {
         _allLanIps = allIps;
         _lanIp = allIps.isNotEmpty ? allIps.first : null;
+        _desktopDid = desktopId;
       });
     }
   }
@@ -2037,7 +2078,29 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     }
 
     try {
-      final gateway = DesktopBridgeLocalGateway();
+      // [S1 2026-10-31 補鏈] gateway 與 browser automation 共用同一個拍板喚醒登記簿：
+      // confirmationRespond（手機拍板）→ gateway.confirmations → 喚醒暫停任務
+      // [S1 2026-11-09 token 接線] 注入 DeviceTokenService——配對成功簽發長期 token、
+      // 重連憑 token 免重掃 QR（SPEC §2 #6）。store 用 SharedPrefs（桌面端檔案等同）。
+      final gateway = DesktopBridgeLocalGateway(
+        tokenService: DeviceTokenService(
+          store: SharedPrefsTokenStore(),
+        ),
+        // [S2 2026-11-09 Blue 拍板] 手機白名單：唯讀＋導航最小開放
+        // （browser.navigate / browser.screenshot / runtime.ping）
+        mobileTaskWhitelist: MobileTaskWhitelist.defaultForMobile,
+      );
+      final browserService =
+          BrowserAutomationService(confirmationRegistry: gateway.confirmations);
+      final taskQueue = TaskQueue(browserService: browserService);
+      // [S4 2026-11-10] 聊天直送接線——chat.send 注入活躍對話 controller
+      wireChatRelay(
+        provider: () => BridgeDesktopScreen.activeChatController.value,
+      );
+      _addLog(
+        '拍板迴路已接線：confirmationRespond → ${taskQueue.runtimeType}',
+        _LogType.system,
+      );
       final handle = await gateway.start(
         pairingContract: _pairingContract!,
         runtimePayloadProvider: _runtimePayload,
@@ -2067,6 +2130,18 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         _gatewayError = null;
       });
       _addLog('Gateway 已啟動 (port ${handle.port})', _LogType.system);
+      // [SPEC §8.5c 2026-11-13] vault 檔案變動 → 推播所有手機自動刷新
+      BridgeDesktopScreen.latestGatewayHandle = handle;
+      _vaultChangedSub?.cancel();
+      _vaultChangedSub = AssetIndexService().vaultChanged.listen((info) {
+        _gatewayHandle?.pushToAll(DesktopBridgeGatewayPush(
+          type: DesktopBridgeGatewayMessageType.vaultChanged,
+          payload: info,
+        ));
+        _addLog(
+            'vaultChanged 推播：${info['newFiles']} 新/${info['updatedFiles']} 更新',
+            _LogType.system);
+      });
     } catch (e) {
       setState(() => _gatewayError = 'Gateway 啟動失敗：$e');
       _addLog('Gateway 啟動失敗：$e', _LogType.error);
@@ -2091,12 +2166,30 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   }
 
   Map<String, dynamic> _runtimePayload() {
+    // [S4 2026-11-10] 手機對話層第一步——最近對話摘要隨快照帶回
+    // （角色＋內容前 200 字；深層對話視圖之後走獨立訊息，快照先讓窗活起來）
+    final recent = <Map<String, String>>[];
+    final conv = BridgeDesktopScreen.activeChatController.value?.currentConversation;
+    if (conv != null) {
+      for (final m in conv.messages.length > 6
+          ? conv.messages.sublist(conv.messages.length - 6)
+          : conv.messages) {
+        recent.add({
+          'role': m.speakerId != null ? 'assistant' : m.role,
+          'text': m.content.length > 200 ? '${m.content.substring(0, 200)}…' : m.content,
+        });
+      }
+    }
     return {
       'platform': Platform.operatingSystem,
       'desktopName': _pairingContract?.desktopName ?? 'Bridge Desktop',
       'gatewayRunning': _gatewayRunning,
       'gatewayPort': _gatewayPort,
       'mobileConnected': _mobileConnected,
+      // [S4 2026-11-10] 手機快照加值——夥伴名＋版本（語意化顯示用）
+      'activeCompanion': CompanionStore().activeCompanion?.name ?? 'shared',
+      'appVersion': const String.fromEnvironment('APP_VERSION'),
+      'recentChat': recent,
       'timestamp': DateTime.now().toIso8601String(),
     };
   }
@@ -2264,6 +2357,37 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     }
     if (!await dir.exists()) await dir.create(recursive: true);
     await Process.run('open', [dir.path]);
+  }
+
+  /// [SPEC §8.3 2026-11-12] 💬 進任務綁定討論串——開/建 taskBinding 對話
+  /// 並切到對話 tab（對話是任務的客廳——Blue 的夢想場景入口）。
+  Future<void> _openTaskConversation(ScheduleQueueEntry entry) async {
+    final run = entry.lastRun;
+    final task = TaskCardData(
+      id: entry.nodeId,
+      name: entry.title,
+      kind: 'scheduled',
+      schedule: _scheduleLabelForTask(entry),
+      nextRunAt: entry.nextFire?.toIso8601String(),
+      lastRunOk: run?.success ?? true,
+      lastRunError: run?.error,
+      artifacts: run?.outputPaths ?? const [],
+    );
+    final controller = _desktopChatController;
+    if (controller == null) {
+      _addLog('對話控制器未就緒——無法開任務討論串', _LogType.system);
+      return;
+    }
+    await controller.openTaskBoundConversation(task);
+    // 切到對話 tab 讓使用者直接看到討論串
+    if (mounted) setState(() => _switchTab(0));
+    _addLog('已開啟任務討論串「${entry.title}」', _LogType.system);
+  }
+
+  /// 排程描述（taskBinding 用）——params 的 cron/interval 轉人類可讀
+  String _scheduleLabelForTask(ScheduleQueueEntry entry) {
+    final raw = entry.params['cron'] as String? ?? '';
+    return raw.isEmpty ? '手動排程' : raw;
   }
 
   /// ▶ 立即執行——[W4.5 Blue 令] 走引擎 fireNow（與排程觸發同一條管線）。
@@ -2989,8 +3113,16 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   }
 
   /// P4: 刪除對話
+  /// [小橋 2026-11-05] 修復幽靈 currentId：刪除的若是當前對話，
+  /// 同步清掉 prefs 指標（clearCurrentId）與 UI 欄位——否則指標
+  /// 指向已刪對話，重啟後代理掛載空殼對話。
   Future<void> _deleteConversation(String id) async {
     await ConversationStore.delete(id);
+    final currentId = await ConversationStore.getCurrentId();
+    if (currentId == id) {
+      await ConversationStore.clearCurrentId();
+      if (mounted) setState(() => _currentConversationId = null);
+    }
     await _loadConversations();
     _addLog('對話已刪除', _LogType.system);
   }
@@ -3657,7 +3789,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
     // [教練 Agent 2026-07-25] 「資料庫」正名為「向量資料庫」
     // [v262 Blue 重構令 2026-09-04] 大腦 tab 移除——星系圖譜全面改網頁版
     // （Chrome 獨立視窗），入口移右側按鈕群「大腦圖譜」
-    final navItems = ['對話', '畫布', '專案', '向量資料庫', '系統'];
+    final navItems = ['對話', '畫布', '任務面板', '向量資料庫', '系統']; // [2026-11-12 Blue 令] 專案→任務面板
     final navIcons = [
       Icons.chat_bubble_outline,
       Icons.account_tree_outlined,
@@ -4913,9 +5045,10 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         // 對話頁專心當對話列表，職責分明不再重複。
         // [Blue 令 2026-10-17] 兩層式側欄：一般對話/主動回應/回收桶三個
         // 頂層分組；proactive 從一般列表排除（有自己的分組）。
-        final generalConvs = _conversations
+        // [SPEC §9.2 對話頁v2 步驟2] 樹狀排序：子對話（開小隊）縮排跟母
+        final generalConvs = ConversationTree.order(_conversations
             .where((c) => !c.isProjectCanvas && c.type != ConversationType.proactive)
-            .toList();
+            .toList());
         final proactiveConvs = _conversations
             .where((c) => c.type == ConversationType.proactive)
             .toList()
@@ -4939,11 +5072,17 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                   .toSet()
                   .take(4)
                   .toList();
+              // [SPEC §9.2] 小隊子對話：↳ 前綴標記（縮排視覺）
+              final isSquad = c.parentConversationId != null;
               return _sidebarItem(
-                c.title.isEmpty ? '（未命名）' : c.title,
-                Icons.chat_bubble_outline,
+                isSquad
+                    ? '   ↳ ${c.title.isEmpty ? '（未命名）' : c.title}'
+                    : (c.title.isEmpty ? '（未命名）' : c.title),
+                isSquad ? Icons.groups_outlined : Icons.chat_bubble_outline,
                 isActive,
                 onTap: () => _switchConversation(c.id),
+                // [SPEC §9 小隊狀態燈] squad 標題後「·狀態」小字（非 squad 回空字串→不顯示）
+                statusSuffix: ConversationTree.squadStatus(c),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -4988,11 +5127,23 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
           _sidebarSection('主動回應', [
             ...proactiveConvs.map((c) {
               final isActive = c.id == _currentConversationId;
+              // [Blue 抓包 2026-11-04] 主動回應 tile 補刪除鈕——
+              // 一般對話有 ✕，主動回應沒有（使用者「無法手動刪掉」）。
+              // 同款 GestureDetector＋_deleteConversation（軟刪除進回收桶，
+              // 墓碑機制防復活——2026-11-03 已上）。
               return _sidebarItem(
                 c.title.isEmpty ? '（未命名）' : c.title,
                 Icons.auto_awesome_outlined,
                 isActive,
                 onTap: () => _switchConversation(c.id),
+                trailing: GestureDetector(
+                  onTap: () => _deleteConversation(c.id),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Icon(Icons.close, size: 14,
+                        color: BridgeDSColors.of(context).textTertiary),
+                  ),
+                ),
               );
             }),
           ]),
@@ -5147,7 +5298,8 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   }
 
   Widget _sidebarItem(String label, IconData icon, bool active,
-      {VoidCallback? onTap, Widget? trailing, bool isPrimary = false}) {
+      {VoidCallback? onTap, Widget? trailing, bool isPrimary = false,
+      String? statusSuffix}) {
     // 主要操作（isPrimary）用 accentMiro + w600 突出；次要項維持原樣降權
     final Color iconColor = isPrimary
         ? BridgeDSColors.of(context).accentMiro
@@ -5201,8 +5353,23 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                   const SizedBox(width: 8),
                   // 按鈕區用 Text 不用 SelectableText，避免搶走點擊
                   Expanded(
-                    child: Text(
-                      label,
+                    child: Text.rich(
+                      // [SPEC §9 小隊狀態燈] statusSuffix：標題後「·狀態」小字
+                      //（squad 子對話專用，判定走 ConversationTree.squadStatus）
+                      TextSpan(
+                        text: label,
+                        children: [
+                          if (statusSuffix != null && statusSuffix.isNotEmpty)
+                            TextSpan(
+                              text: '·$statusSuffix',
+                              style: BridgeDSColors.of(context).body.copyWith(
+                                color: BridgeDSColors.of(context).textTertiary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                        ],
+                      ),
                       style: BridgeDSColors.of(context).body.copyWith(
                         color: textColor,
                         fontWeight: weight,
@@ -5623,6 +5790,9 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                           onRunNow: (entry) => _runScheduleNow(entry),
                           onTogglePause: (entry, paused) =>
                               _toggleSchedulePause(entry, paused),
+                          // [SPEC §8.3 2026-11-12] 💬 點鈕→開任務綁定討論串
+                          onOpenConversation: (entry) =>
+                              _openTaskConversation(entry),
                           onOpenDetail: (entry) {
                             // [W4.4 Blue 令 2026-10-09] 單一資訊欄（頁內覆蓋）：
                             // 點卡＝開欄/換內容；背景卡片完全可互動；
@@ -5686,7 +5856,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   String _canvasTitle() => switch (_activeCanvasIndex) {
         0 => '對話',
         1 => '畫布',
-        2 => '專案',
+        2 => '任務面板', // [2026-11-12 Blue 令]
         3 => '向量資料庫',
         _ => '',
       };
@@ -5694,7 +5864,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   String _canvasSubtitle() => switch (_activeCanvasIndex) {
         0 => 'macOS · ${_conversations.length} 個對話',
         1 => 'macOS · 無限畫布工作區',
-        2 => 'macOS · 專案看板與水流追蹤',
+        2 => 'macOS · 任務面板與水流追蹤',
         3 => 'macOS · 向量資料庫 — 檔案索引與搜尋',
         _ => '',
       };
@@ -5707,7 +5877,7 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   Future<void> _openBrainGalaxyWindow({String? focusAssetId}) async {
     String? token;
     try {
-      final f = File('<HOME>/Library/Application Support/farm.semiwasabi.bridgeApp/mcp_token');
+      final f = File('<APP_SUPPORT>/mcp_token');
       if (f.existsSync()) token = f.readAsStringSync().trim();
     } catch (_) {}
     var url = 'http://localhost:8420/galaxy?token=$token';
@@ -5925,6 +6095,10 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
         const WatchdogToggleCard(),
         SizedBox(height: BridgeDS.spaceMD),
 
+        // [小葵 2026-10-31 黑盒子] 診斷黑盒子卡（刀二）——flight recorder＋一鍵匯出
+        const DiagnosticCard(),
+        SizedBox(height: BridgeDS.spaceMD),
+
         // [Blue 令 2026-10-17 #3] 大腦資料庫位置卡——向量 DB 設定已由 vault 頁取代，移除
         // [M6 2026-10-20] CloudRateCard 移至 _buildSettingsTab 頂部（Blue 抓包：藏太深）
         SizedBox(height: BridgeDS.spaceMD),
@@ -5944,8 +6118,20 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
   // ── 卡片標題 = L3 Heading-M (24px) ─────────────────
 
   Widget _buildPairingCard() {
-    final qrPayload = (_lanIp != null && _pairingCode.isNotEmpty)
-        ? 'bridge://pair?host=$_lanIp&port=${_gatewayPort ?? 8790}&code=$_pairingCode'
+    // [§6.3 2026-11-13] QR 帶候選位址清單（alts）——手機逐個試，
+    // 誰先通走誰（區網快、Tailscale 出門通）。主要 host 放第一個。
+    final hosts = <String>[
+      if (_lanIp != null) _lanIp!,
+      ..._allLanIps.where((ip) => ip != _lanIp),
+    ];
+    // [11-16 v6] IPv6 host 在 URI 查詢參數需 [ ] 包裹（RFC 3986），parse 端會還原。
+    String hostParam(String h) => h.contains(':') ? '[$h]' : h;
+    final qrPayload = (hosts.isNotEmpty && _pairingCode.isNotEmpty)
+        ? 'bridge://pair?host=${hostParam(hosts.first)}'
+            '&port=${_gatewayPort ?? 8790}'
+            '&code=$_pairingCode'
+            '${hosts.length > 1 ? '&alts=${hosts.skip(1).map(hostParam).join(',')}' : ''}'
+            '${_desktopDid.isNotEmpty ? '&did=$_desktopDid' : ''}'
         : '';
 
     return BridgeCard(
@@ -6021,6 +6207,16 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                     version: QrVersions.auto,
                     size: 180,
                     gapless: true,
+                    // [S4 2026-11-09 Blue 抓包] 深色模式 QR 看不清——
+                    // 強制白底黑碼（掃碼器對比度保證，不隨主題漂）
+                    backgroundColor: Colors.white,
+                    eyeStyle: const QrEyeStyle(
+                      color: Colors.black,
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      color: Colors.black,
+                    ),
+                    padding: const EdgeInsets.all(8),
                   ),
                 ),
               ),
@@ -6035,10 +6231,113 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                 textAlign: TextAlign.center,
               ),
             ],
+            // [S4 2026-11-11 Blue 報] 桌面端也要看得到「已綁定的手機」——
+            // 真相源 = DeviceTokenService 的 token 清單（每支配對過的手機一個 token）
+            SizedBox(height: BridgeDS.spaceMD),
+            _buildPairedPhonesSection(),
           ],
         ],
       ),
     );
+  }
+
+  // [S4 2026-11-11 Blue 報] 已綁定手機清單——真相源=token 清單＋即時連線燈
+  // [2026-11-11 Blue 令] 一機一證＋可逐顆指定刪除（不做一鍵全清）
+  Widget _buildPairedPhonesSection() {
+    final ds = BridgeDSColors.of(context);
+    return FutureBuilder<Map<String, String>>(
+      future: SharedPrefsTokenStore().deviceBindings(),
+      builder: (context, snap) {
+        final bindings = snap.data ?? {};
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: ds.surface,
+            borderRadius: BorderRadius.circular(BridgeDS.roundStandard),
+            border: Border.all(
+              color: _mobileConnected
+                  ? ds.accentGreen.withValues(alpha: 0.5)
+                  : ds.borderDefault,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.phone_iphone,
+                      size: 16,
+                      color: _mobileConnected ? ds.accentGreen : ds.textTertiary),
+                  const SizedBox(width: 8),
+                  SelectableText(
+                    bindings.isEmpty
+                        ? '尚無已綁定手機'
+                        : '已綁定 ${bindings.length} 支手機',
+                    style: TierStyle.of(context, Tier.cardTitle)
+                        .toTextStyle()
+                        .copyWith(color: ds.textPrimary),
+                  ),
+                  const Spacer(),
+                  if (bindings.isNotEmpty)
+                    BridgeStatusTag(
+                      // 即時燈：gateway 有活的手機連線才亮綠（不是裝飾品）
+                      label: _mobileConnected ? '手機在線' : '手機離線',
+                      type: _mobileConnected
+                          ? BridgeTagType.success
+                          : BridgeTagType.info,
+                    ),
+                ],
+              ),
+              if (bindings.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                SelectableText(
+                  _mobileConnected
+                      ? '已配對手機連線中——一機一證，重配對自動替換不累積。'
+                      : '已配對手機離線中——App 開啟時自動重連。',
+                  style: ds.caption.copyWith(color: ds.textSecondary),
+                ),
+                const SizedBox(height: 8),
+                // 逐顆指定刪除（Blue 令）：deviceId 前8碼×token 尾4碼＝可辨識摘要
+                for (final e in bindings.entries)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      children: [
+                        Icon(Icons.smartphone, size: 14, color: ds.textTertiary),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: SelectableText(
+                            '手機 ${e.key.substring(0, 8)}…（憑證 …${e.value.length > 4 ? e.value.substring(e.value.length - 4) : e.value}）',
+                            style: ds.caption.copyWith(color: ds.textSecondary),
+                          ),
+                        ),
+                        BridgePillButton(
+                          label: '刪除',
+                          icon: Icons.delete_outline,
+                          type: BridgeButtonType.ghost,
+                          onPressed: () => _revokeDeviceBinding(e.value),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// [2026-11-11 Blue 令] 指定刪除某手機憑證（撤證=該手機需重掃 QR）。
+  Future<void> _revokeDeviceBinding(String token) async {
+    final removed = await SharedPrefsTokenStore().revokeToken(token);
+    if (!mounted) return;
+    _addLog(
+      removed ? '已刪除手機憑證（…${token.substring(token.length - 4)}）——該手機需重新掃 QR 配對'
+          : '刪除失敗：找不到該憑證',
+      _LogType.system,
+    );
+    if (mounted) setState(() {}); // 重抓 FutureBuilder 清單
   }
 
   // [教練 Agent 2026-08-04] Phase E+：主題包入口卡片
@@ -6384,12 +6683,17 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
 
   /// [Blue 令 2026-10-05] 頂部「本地模型」晶片按鈕
   /// 左鍵：開/關本地模型；右鍵（secondaryTap）：設定選單——閒置 10 分鐘自動卸載開關
+  /// [小葵 2026-10-31 修] 顯示/點擊改掛生命週期真相源（BrainPhase）——
+  /// 舊版掛 userEnabled（使用者意願）：閒置自動卸載不動 userEnabled（看門狗設計），
+  /// 導致引擎已卸載但晶片顯示「運行中」+ 點擊走 powerOff（反操作）。Blue 抓包。
   Widget _buildLocalModelChip() {
-    return StreamBuilder<bool>(
-      stream: BrainRevivalService.instance.powerStream,
-      initialData: BrainRevivalService.instance.userEnabled,
+    return StreamBuilder<BrainLifecycle>(
+      stream: BrainRevivalService.instance.stream,
+      initialData: BrainRevivalService.instance.lifecycle,
       builder: (context, snap) {
-        final on = snap.data ?? true;
+        // 實際運行狀態：alive/restarting = 開；dead/off = 關（休眠）
+        final on = snap.data?.phase == BrainPhase.alive ||
+            snap.data?.phase == BrainPhase.restarting;
         final svc = BrainRevivalService.instance;
         return GestureDetector(
           onSecondaryTapUp: (details) {
@@ -6405,10 +6709,32 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
               context: context,
               position: position,
               items: [
-                CheckedPopupMenuItem<String>(
+                // [小葵 2026-10-31 Blue 報案] CheckedPopupMenuItem 用 Material
+                // 預設字級（偏大）——照 message_context_menu 模式改走
+                // BridgeDS.body 樣式，勾選狀態用圖示表達。
+                PopupMenuItem<String>(
                   value: 'toggle_idle',
-                  checked: svc.idleUnloadEnabled,
-                  child: const Text('閒置 10 分鐘自動卸載'),
+                  height: 40,
+                  child: Row(
+                    children: [
+                      Icon(
+                        svc.idleUnloadEnabled
+                            ? Icons.check_box
+                            : Icons.check_box_outline_blank,
+                        size: 16,
+                        color: svc.idleUnloadEnabled
+                            ? BridgeDSColors.of(context).accentBlue
+                            : BridgeDSColors.of(context).textMuted,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '閒置 10 分鐘自動卸載',
+                        style: BridgeDS.body.copyWith(
+                          color: BridgeDSColors.of(context).textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ).then((v) {
@@ -6423,13 +6749,19 @@ class _BridgeDesktopScreenState extends State<BridgeDesktopScreen> {
                 ? (on ? '本地模型運行中——點擊休眠（釋放 ~6GB）；右鍵設定自動卸載' : '本地模型已休眠——點擊啟動；右鍵設定自動卸載')
                 : (on ? '本地模型運行中（自動卸載已停用）——點擊休眠；右鍵可開啟自動卸載' : '本地模型已休眠——點擊啟動；右鍵可開啟自動卸載'),
             child: BridgeChip(
-              label: on ? '本地模型' : '本地模型 · 休眠',
+              // [小葵 2026-10-31 Blue 報案] 休眠不改文字長度——
+              // 「本地模型 · 休眠」會讓右群組變寬 → 視窗撐大前的空檔
+              // 頂列爆版出黑黃條。休眠狀態改由圖示（月亮）表達，
+              // label 固定「本地模型」＝右群組寬度恆定不爆版。
+              label: '本地模型',
               icon: on
                   ? (svc.idleUnloadEnabled ? Icons.psychology : Icons.psychology_alt)
                   : Icons.bedtime_outlined,
               active: on,
               onTap: () {
-                if (svc.userEnabled) {
+                // 跟顯示同一真相源：運行中→休眠；休眠中→啟動
+                //（舊版看 userEnabled——閒置卸載後意願仍是開，點擊會反向操作）
+                if (on) {
                   svc.powerOff(LocalModelRuntimeService());
                 } else {
                   svc.powerOn(LocalModelRuntimeService());
@@ -6966,7 +7298,7 @@ class _DesktopUiActionExecutor implements UiActionExecutor {
       } catch (_) {}
     } else {
       // 一般 tab 畫面 — 導航按鈕每頁都有
-      tappable = ['首頁', '對話', '畫布', '專案', '大腦', '資料庫', '系統']; // 同上
+      tappable = ['首頁', '對話', '畫布', '任務面板', '大腦', '資料庫', '系統']; // 同上
 
       switch (_screen._activeCanvasIndex) {
         case 0:
@@ -7174,7 +7506,7 @@ class _DesktopUiActionExecutor implements UiActionExecutor {
       case '畫布':
         _screen._switchTab(1);
         return true;
-      case '專案':
+      case '任務面板':
         _screen._switchTab(2);
         return true;
       case '大腦':
