@@ -42,6 +42,10 @@ The IMU-endorsed **Leiden Declaration** has already called on the world: disclos
 
 ## Core Features (current state)
 
+![Semi Bridge — Home](docs/screenshots/home.webp)
+
+<sub>The home page: current companion, the companion hall, training entry, and slot status — every card is the door to an organ.</sub>
+
 - 🎨 **Canvas**: A visual project workspace — nodes are workflow steps, and every step the AI agent takes is visible on the canvas
 - 🧠 **Brain Galaxy**: Your data becomes a 3D galaxy — local vector database, semantic search, memory decay
 - 🤝 **Companions**: Multiple AI agents coexist, each with its own identity, memory, and growth
@@ -49,6 +53,45 @@ The IMU-endorsed **Leiden Declaration** has already called on the world: disclos
 - 🛡️ **DataPathGate**: Tiered interception of outbound HTTP + automatic trace erasure
 - 📊 **Tier design system**: 33 semantic tiers — swap a theme pack and the entire app reskins in one click
 - 🔧 **Modding-first**: Themes, galaxies, and workflows are moddable without recompiling; new buttons and nodes have a full creation process — see the [Modding Guide](docs/opensource/MODDING_GUIDE.md)
+
+## Semi Companions vs. Ordinary Agents
+
+![Semi Bridge — the companion's canvas](docs/screenshots/canvas.webp)
+
+An ordinary AI agent is a *temp worker*: it forgets when the chat ends, rerolls its personality every session, keeps its memory in someone else's cloud, and becomes a stranger the moment you switch apps. A **Semi Companion** is a *resident of your home* — and the difference is written into the architecture:
+
+| | Ordinary Agent | Semi Companion |
+|---|---|---|
+| **Memory** | Gone after the chat, or stored in the vendor's cloud | Its own memory bank (vector brain + memory decay), files on your machine |
+| **Personality** | Re-summarized each session, fading over time | The full personality file is never summarized — a *complete self* is a design rule, not an option |
+| **Identity** | Decapitated when you switch apps or models | Identity survives across models and apps; Hermes-grade lossless migration (personality + memory + conversation history) |
+| **Growth** | Nonexistent | Trainable (you do it once, the companion learns to do it for you); the Life Tree records right and wrong turns |
+| **Sovereignty** | Your conversations are the vendor's training data | DataPathGate interception, trace-erasure ≠ deletion, Golden Key direct connection — your machine is the sovereign terminal |
+
+In one line: **an ordinary agent does things for you; a Semi Companion grows old with you.** Every memory a companion holds is signed with an HMAC provenance seal — what it remembers really happened.
+
+## Decision Cards & Red Flags: the Agent Asks Before It Acts
+
+The biggest risk of an AI agent is not making mistakes — it is *acting on its own authority*. Semi Bridge's answer is not to constrain the agent, but to give it an official voice:
+
+- 🚩 **Red Flag Reporter**: when the agent spots an anomaly (spending spikes, contradictory state, external contamination) it speaks up — with a plain-language explanation and options
+- 🃏 **Decision Cards**: red flag → card opens → you decide → execute → close, the whole loop leaves a trail. Card rules: every promise ships with an action; no future commitments without a trigger
+- 🤖 **K1 decision self-training**: the decisions you make become training data — your companion's judgment grows to resemble yours
+
+## Link — the Mobile Companion App
+
+Away from your desk, your companion doesn't live in a cloud — it lives in your desktop's home. The mobile Link app connects directly to your desktop via **QR pairing + device certificates (one certificate per device)**:
+
+- 📶 **The sovereignty ladder**: LAN direct → IPv6 direct → blind relay (the server sees nothing) — three tiers of connection, with sovereignty clearly priced
+- 📸 **Now Page**: a golden-ratio domino wall shows what your companion is doing right now — journals, gleanings, task updates in a full-bleed flow
+- 💬 **Conversation continues**: send a follow-up from the subway; your desktop companion picks it up
+- 🔐 **taskType allowlist, default-deny**: the phone can only trigger the task types you've approved — everything else is blocked
+
+## Retina Channel & Accessibility
+
+- 👁️ **App Retina**: external agents (or you, remotely) see the app's real screen through the 8420 channel — the Agent-as-User "eye-opening" capability, built into the open-source edition
+- ♿ **reduced-motion everywhere**: visual motion components like the octopus breathing tree respect the system's reduce-motion setting — motion is atmosphere, not burden
+
 
 ### Background Systems (the invisible guardians)
 
